@@ -371,6 +371,40 @@ async function DOC_bytes(src) {
   return new Uint8Array(await res.arrayBuffer());
 }
 
+/* ============ Loading placeholders ============
+   A table that quietly swaps its rows a second after it appears reads as a
+   glitch; a skeleton says "this is still arriving". Used for the first load
+   only — background refreshes keep the real rows on screen. */
+
+function SkeletonBar({ w = '100%', h = 12, className = '' }) {
+  return <span className={'block rounded bg-slate-100 animate-pulse ' + className} style={{ width: w, height: h }} />;
+}
+
+// `cols` is an array of widths, one per table column.
+function SkeletonRows({ rows = 5, cols }) {
+  return (
+    <>
+      {Array.from({ length: rows }).map((_, r) => (
+        <tr key={r} className="border-b border-slate-50 last:border-0">
+          {cols.map((w, c) => (
+            <td key={c} className="px-6 py-5"><SkeletonBar w={w} /></td>
+          ))}
+        </tr>
+      ))}
+    </>
+  );
+}
+
+// Small "refreshing in the background" hint for the header of a live list.
+function RefreshingBadge({ on }) {
+  if (!on) return null;
+  return (
+    <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-slate-400">
+      <Lucide.Loader2 size={12} className="animate-spin" /> frissítés…
+    </span>
+  );
+}
+
 /* ============ useApi hook ============ */
 function useApi(apiMethod) {
   const [data, setData] = useState(null);
@@ -1508,6 +1542,8 @@ const AdmissionsCore = ({ user }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [journeyProcs, setJourneyProcs] = useState([]);
+  const [procsLoading, setProcsLoading] = useState(true);      // first load — show a skeleton
+  const [procsRefreshing, setProcsRefreshing] = useState(false); // poll/realtime — keep the table
   const [detailProc, setDetailProc] = useState(null);
   const [detailFull, setDetailFull] = useState(null);
   const [thread, setThread] = useState([]);
@@ -1544,15 +1580,23 @@ const AdmissionsCore = ({ user }) => {
     setJourneyProcs(out.length ? out : (JourneyShared.seedProcesses ? JourneyShared.seedProcesses().map(p => ({ ...p, _owner: 'demo' })) : []));
     // Megosztott (Supabase) folyamatok + automatikus frissítés (realtime + lekérdezés).
     let alive = true;
-    const refetch = async () => {
+    // `first` distinguishes the initial load (show a skeleton — the local seed
+    // underneath it is not the real list yet) from a background refresh (keep
+    // the table on screen, just mark it as refreshing).
+    const refetch = async (first) => {
+      if (!alive) return;
+      if (first) setProcsLoading(true); else setProcsRefreshing(true);
       const remote = await spFetchProcs(null);
-      if (!alive || !remote || !remote.length) return;
-      setJourneyProcs(prev => {
-        const byId = {}; prev.forEach(p => { byId[p.id] = p; }); remote.forEach(p => { byId[p.id] = p; });
-        return Object.values(byId);
-      });
+      if (!alive) return;
+      if (remote && remote.length) {
+        setJourneyProcs(prev => {
+          const byId = {}; prev.forEach(p => { byId[p.id] = p; }); remote.forEach(p => { byId[p.id] = p; });
+          return Object.values(byId);
+        });
+      }
+      setProcsLoading(false); setProcsRefreshing(false);
     };
-    refetch();
+    refetch(true);
     // Realtime (migration 04) already pushes every change, so this is only a
       // safety net for a dropped websocket — 12 s meant a needless round-trip
       // five times a minute for every open tab.
@@ -1883,7 +1927,12 @@ const AdmissionsCore = ({ user }) => {
             <h3 className="font-bold text-slate-800 text-lg">Felvételi folyamat — élő állapot</h3>
             <p className="text-xs text-slate-400 mt-0.5">Hol tart minden jelentkező és milyen dokumentum hiányzik még</p>
           </div>
-          <span className="px-3 py-1 bg-primary/10 text-primary rounded-full text-xs font-bold">{journeyProcs.length} folyamat</span>
+          <div className="flex items-center gap-3">
+            <RefreshingBadge on={procsRefreshing} />
+            {procsLoading
+              ? <SkeletonBar w={82} h={26} className="rounded-full" />
+              : <span className="px-3 py-1 bg-primary/10 text-primary rounded-full text-xs font-bold">{journeyProcs.length} folyamat</span>}
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left">
@@ -1898,7 +1947,8 @@ const AdmissionsCore = ({ user }) => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
-              {journeyProcs.map((p, idx) => {
+              {procsLoading && <SkeletonRows rows={6} cols={['62%', '38%', '70%', '80%', '52%', '34%']} />}
+              {!procsLoading && journeyProcs.map((p, idx) => {
                 const nm = pName(p);
                 const progs = ((p.data && p.data.programs) || []).map(id => { const pr = PROGS.find(x => x.id === id); return pr ? pr.code : null; }).filter(Boolean);
                 const docs = (p.data && p.data.docs) || {};
@@ -2001,7 +2051,7 @@ const AdmissionsCore = ({ user }) => {
           <h3 className="font-bold text-slate-800 text-lg">Aktív Jelentkezések (Multi-Program)</h3>
           <div className="flex gap-2">
             <span className="px-3 py-1 bg-amber-50 text-amber-600 rounded-full text-xs font-bold flex items-center gap-1">
-              <ICONS.AlertCircle size={14} /> {students.filter(s => s.status === 'Missing Info').length} Hiánypótlás szükséges
+              <ICONS.AlertCircle size={14} /> {isLoading ? '…' : students.filter(s => s.status === 'Missing Info').length} Hiánypótlás szükséges
             </span>
           </div>
         </div>
@@ -2018,7 +2068,8 @@ const AdmissionsCore = ({ user }) => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
-              {students.map(student => (
+              {isLoading && <SkeletonRows rows={5} cols={['58%', '46%', '64%', '40%', '56%', '30%']} />}
+              {!isLoading && students.map(student => (
                 <tr key={student.id} className="hover:bg-slate-50 transition-colors">
                   <td className="px-6 py-4">
                     <p className="font-semibold text-slate-800">{student.name}</p>
@@ -6217,6 +6268,8 @@ const AdmissionsHub = (() => {
     const loadAll = () => { try { const v = JSON.parse(localStorage.getItem(LS)); return Array.isArray(v) ? v : null; } catch (e) { return null; } };
     const [processes, setProcesses] = useState(() => { const s = loadAll(); return Array.isArray(s) ? s.filter(p => !String(p.id || '').startsWith('PROC-demo') && !(p.data && p.data._cancelled)) : []; });
     const [openId, setOpenId] = useState(null);
+    const [procsLoading, setProcsLoading] = useState(true);
+    const [procsRefreshing, setProcsRefreshing] = useState(false);
     const firstSync = React.useRef(true);
     useEffect(() => {
       try { localStorage.setItem(LS, JSON.stringify(processes)); } catch (e) {}
@@ -6226,17 +6279,21 @@ const AdmissionsHub = (() => {
     // Megosztott (Supabase) folyamatok betöltése + automatikus frissítés (realtime + lekérdezés).
     useEffect(() => {
       let alive = true;
-      const refetch = async () => {
+      const refetch = async (first) => {
+        if (!alive) return;
+        if (first) setProcsLoading(true); else setProcsRefreshing(true);
         const remote = await spFetchProcs((user && user.email) || null);
-        if (!alive || !remote) return;
+        if (!alive) return;
+        if (!remote) { setProcsLoading(false); setProcsRefreshing(false); return; }
         const clean = remote.filter(p => !String(p.id || '').startsWith('PROC-demo') && !(p.data && p.data._cancelled));
         setProcesses(prev => {
           const byId = {}; prev.forEach(p => { byId[p.id] = p; });
           clean.forEach(r => { const l = byId[r.id]; if (!l || !l.updatedAt || (r.updatedAt && r.updatedAt >= l.updatedAt)) byId[r.id] = r; });
           return Object.values(byId);
         });
+        setProcsLoading(false); setProcsRefreshing(false);
       };
-      refetch();
+      refetch(true);
       // Realtime (migration 04) already pushes every change, so this is only a
       // safety net for a dropped websocket — 12 s meant a needless round-trip
       // five times a minute for every open tab.
@@ -6267,12 +6324,28 @@ const AdmissionsHub = (() => {
         <div className="flex items-center justify-between mb-6">
           <div>
             <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-1">Felvételi folyamatok</p>
-            <h3 className="text-2xl font-black text-slate-800">Aktív jelentkezések ({processes.length})</h3>
+            <h3 className="text-2xl font-black text-slate-800 flex items-center gap-3">
+              Aktív jelentkezések {procsLoading ? <SkeletonBar w={34} h={22} className="rounded-lg" /> : `(${processes.length})`}
+              <RefreshingBadge on={procsRefreshing} />
+            </h3>
           </div>
           <button onClick={addProcess} className="bg-primary text-white px-5 py-2.5 rounded-2xl font-bold hover:bg-primary/90 inline-flex items-center gap-2 shadow-lg shadow-primary/20"><Lucide.Plus size={18} /> Új folyamat</button>
         </div>
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {processes.map(p => {
+          {procsLoading && Array.from({ length: 3 }).map((_, i) => (
+            <div key={'sk' + i} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+              <div className="w-11 h-11 rounded-xl bg-slate-100 animate-pulse" />
+              <div className="mt-4 space-y-2">
+                <SkeletonBar w="70%" h={14} />
+                <SkeletonBar w="45%" h={11} />
+              </div>
+              <div className="mt-5 space-y-2">
+                <SkeletonBar w="100%" h={6} className="rounded-full" />
+                <SkeletonBar w="35%" h={10} />
+              </div>
+            </div>
+          ))}
+          {!procsLoading && processes.map(p => {
             const d = p.data || {};
             const nm = (d.extracted && d.extracted.name) || (d.account && d.account.fullName) || 'Új jelentkező';
             const progs = (d.programs || []).map(id => { const pr = PROGRAMS.find(x => x.id === id); return pr ? pr.code + ' ' + pr.name : null; }).filter(Boolean);
