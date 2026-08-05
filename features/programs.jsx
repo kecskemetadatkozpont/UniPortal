@@ -1,0 +1,740 @@
+/* ============================================================
+   UniPortal Pro — Program Management
+   • Students browse the real NJE English-taught programmes and apply.
+   • Each programme has its OWN configurable admission flow (steps +
+     required documents) — a preparatory course differs from a degree.
+   • Admins create/edit programmes, set fees/deadlines/capacity,
+     open/close applications, configure the flow, and review applicants.
+   ============================================================ */
+
+const PROG_TABLE = 'programs', PROG_LS = 'uni_programs';
+const APP_TABLE = 'program_applications', APP_LS = 'uni_applications';
+
+const PROG_STEP_DEFS = {
+  personal:   { label: 'Personal details',    icon: Lucide.User },
+  documents:  { label: 'Documents',           icon: Lucide.Upload },
+  language:   { label: 'English proficiency',  icon: Lucide.Languages },
+  motivation: { label: 'Motivation letter',    icon: Lucide.PenLine },
+  math:       { label: 'Math placement test',  icon: Lucide.Calculator },
+  interview:  { label: 'Online interview',     icon: Lucide.Video },
+  fee:        { label: 'Application fee',       icon: Lucide.CreditCard },
+  review:     { label: 'Submit & review',       icon: Lucide.Send },
+};
+const PROG_DOC_DEFS = {
+  passport:       'Passport (data page)',
+  hs_diploma:     'Secondary-school certificate + transcript',
+  bsc_diploma:    'Bachelor degree + transcript',
+  msc_diploma:    'Master degree + transcript',
+  english:        'Proof of English proficiency (B2+)',
+  motivation:     'Motivation letter',
+  cv:             'Curriculum vitae (CV)',
+  portfolio:      'Portfolio / work samples',
+  research:       'Research proposal',
+  recommendation: 'Recommendation letter',
+};
+const PROG_LEVELS = { preparatory: 'Preparatory', course: 'Short course', excursion: 'Educational excursion', bachelor: 'Bachelor (BSc)', master: 'Master (MA · MBA)', doctoral: 'Doctoral (PhD)' };
+const PROG_LEVEL_TONE = { preparatory: 'amber', course: 'green', excursion: 'blue', bachelor: 'blue', master: 'violet', doctoral: 'primary' };
+const PROG_DEGREE_LEVELS = ['bachelor', 'master', 'doctoral'];
+const PROG_kind = (p) => (p && p.kind) || (PROG_DEGREE_LEVELS.includes(p && p.level) ? 'degree' : 'program');
+
+const PROG_IMGS = {
+  'prep-engmath': 'https://images.unsplash.com/photo-1503676260728-1c00da094a0b?auto=format&fit=crop&w=800&q=70',
+  'bsc-cse': 'https://images.unsplash.com/photo-1517180102446-f3ece451e9d8?auto=format&fit=crop&w=800&q=70',
+  'bsc-me': 'https://images.unsplash.com/photo-1537462715879-360eeb61a0ad?auto=format&fit=crop&w=800&q=70',
+  'bsc-ve': 'https://images.unsplash.com/photo-1503376780353-7e6692767b70?auto=format&fit=crop&w=800&q=70',
+  'bsc-le': 'https://images.unsplash.com/photo-1553413077-190dd305871c?auto=format&fit=crop&w=800&q=70',
+  'bsc-bam': 'https://images.unsplash.com/photo-1521737604893-d14cc237f11d?auto=format&fit=crop&w=800&q=70',
+  'bsc-ibe': 'https://images.unsplash.com/photo-1460925895917-afdab827c52f?auto=format&fit=crop&w=800&q=70',
+  'bsc-tc': 'https://images.unsplash.com/photo-1414235077428-338989a2e8c0?auto=format&fit=crop&w=800&q=70',
+  'bsc-hort': 'https://images.unsplash.com/photo-1416879595882-3373a0480b5b?auto=format&fit=crop&w=800&q=70',
+  'ma-ree': 'https://images.unsplash.com/photo-1466611653911-95081537e5b7?auto=format&fit=crop&w=800&q=70',
+  'mba': 'https://images.unsplash.com/photo-1600880292203-757bb62b4baf?auto=format&fit=crop&w=800&q=70',
+  'phd-mba': 'https://images.unsplash.com/photo-1521587760476-6c12a4b040da?auto=format&fit=crop&w=800&q=70',
+  'prep-health': 'https://images.unsplash.com/photo-1532187863486-abf9dbad1b69?auto=format&fit=crop&w=800&q=70',
+  'course-hun-lang': 'https://images.unsplash.com/photo-1524995997946-a1c2e315a42f?auto=format&fit=crop&w=800&q=70',
+  'course-summer-robotics': 'https://images.unsplash.com/photo-1561144257-e32e8efc6c4f?auto=format&fit=crop&w=800&q=70',
+  'excursion-danube': 'https://images.unsplash.com/photo-1541849546-216549ae216d?auto=format&fit=crop&w=800&q=70',
+  'excursion-automotive': 'https://images.unsplash.com/photo-1565043666747-69f6646db940?auto=format&fit=crop&w=800&q=70',
+};
+const PROG_LEVEL_GRAD = { preparatory: 'from-amber-400 to-orange-500', bachelor: 'from-sky-500 to-blue-600', master: 'from-violet-500 to-purple-600', doctoral: 'from-primary to-orange-600' };
+function PROG_Banner({ program, className }) {
+  const grad = PROG_LEVEL_GRAD[program.level] || 'from-slate-500 to-slate-700';
+  return (
+    <div className={'relative overflow-hidden bg-gradient-to-br ' + grad + ' ' + (className || '')}>
+      <div className="absolute inset-0 flex items-center justify-center text-white/25"><Lucide.GraduationCap size={64} /></div>
+      {program.image_url ? <img src={program.image_url} alt="" loading="lazy" referrerPolicy="no-referrer" className="absolute inset-0 w-full h-full object-cover" onError={e => { e.currentTarget.style.display = 'none'; }} /> : null}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/25 to-transparent" />
+    </div>
+  );
+}
+
+function PROG_seed() {
+  const dl = '2026-06-30';
+  const now = todayStr();
+  const P = (id, code, name, level, faculty, degree, dur, ects, tuition, cap, steps, docs, summary, tags) =>
+    ({ id, code, name, level, faculty, degree, duration_semesters: dur, ects, tuition, currency: 'EUR', language: 'English', deadline: dl, capacity: cap, seats_taken: Math.floor(cap * (0.2 + Math.random() * 0.4)), is_open: true, summary, required_docs: docs, steps, tags, created_at: now });
+  const engSteps = ['personal', 'documents', 'math', 'interview', 'fee', 'review'];
+  const bizSteps = ['personal', 'documents', 'motivation', 'interview', 'fee', 'review'];
+  const list = [
+    P('prep-engmath', 'PREP', 'Preparatory English and Mathematics', 'preparatory', 'Preparatory Programme', 'Certificate', 2, 60, 1800, 60,
+      ['personal', 'documents', 'math', 'fee', 'review'], ['passport', 'hs_diploma'],
+      'A two-semester foundation year that strengthens English and mathematics so you can enter an English-taught bachelor programme with confidence.', ['Foundation', 'English + Maths']),
+    P('prep-health', 'PREP-H', 'Preparatory course for Health Sciences', 'preparatory', 'Preparatory Programme', 'Certificate', 2, 60, 1800, 40,
+      ['personal', 'documents', 'fee', 'review'], ['passport', 'hs_diploma'],
+      'A one-year preparatory track for applicants aiming at health- and life-science degrees.', ['Foundation', 'Science']),
+    P('course-hun-lang', 'HUN', 'Hungarian Language & Culture', 'course', 'International Office', 'Short course', 1, 10, 400, 60,
+      ['personal', 'fee', 'review'], ['passport'],
+      'A one-semester evening course in Hungarian language and culture for international students.', ['Language', 'Culture']),
+    P('course-summer-robotics', 'SUM-ROB', 'Summer School: Introduction to Robotics', 'course', 'GAMF Faculty of Engineering & Computer Science', 'Short course', 1, 6, 600, 30,
+      ['personal', 'documents', 'fee', 'review'], ['passport'],
+      'A two-week hands-on summer school building and programming small robots.', ['Summer', 'Robotics']),
+    P('excursion-danube', 'EXC-DAN', 'Study excursion: Budapest & the Danube Bend', 'excursion', 'International Office', 'Excursion', 1, 0, 90, 45,
+      ['personal', 'fee', 'review'], ['passport'],
+      'A guided two-day educational excursion to Budapest and the Danube Bend — history, industry and culture.', ['Excursion', 'Culture']),
+    P('excursion-automotive', 'EXC-AUTO', 'Industry visit: Automotive plant tour', 'excursion', 'GAMF Faculty of Engineering & Computer Science', 'Excursion', 1, 0, 0, 25,
+      ['personal', 'review'], [],
+      'A one-day educational visit to a regional automotive manufacturing plant — engineering in practice.', ['Excursion', 'Industry']),
+    P('bsc-cse', 'CSE', 'Computer Science Engineering', 'bachelor', 'GAMF Faculty of Engineering & Computer Science', 'BSc', 7, 210, 2900, 40,
+      engSteps, ['passport', 'hs_diploma', 'english'],
+      'Software, embedded systems, networks and AI foundations with strong regional IT-industry placements.', ['Software', 'AI', 'Industry links']),
+    P('bsc-me', 'ME', 'Mechanical Engineering', 'bachelor', 'GAMF Faculty of Engineering & Computer Science', 'BSc', 7, 210, 2900, 35,
+      engSteps, ['passport', 'hs_diploma', 'english'],
+      'Design, manufacturing and mechatronics with hands-on lab and workshop practice.', ['Mechatronics', 'Manufacturing']),
+    P('bsc-ve', 'VE', 'Vehicle Engineering', 'bachelor', 'GAMF Faculty of Engineering & Computer Science', 'BSc', 7, 210, 3000, 35,
+      engSteps, ['passport', 'hs_diploma', 'english'],
+      'Automotive design and testing, closely tied to the region\u2019s automotive manufacturing cluster.', ['Automotive', 'Testing']),
+    P('bsc-le', 'LE', 'Logistics Engineering', 'bachelor', 'GAMF Faculty of Engineering & Computer Science', 'BSc', 7, 210, 2800, 30,
+      engSteps, ['passport', 'hs_diploma', 'english'],
+      'Supply-chain, transport and warehouse systems engineering with data-driven optimisation.', ['Supply chain', 'Optimisation']),
+    P('bsc-bam', 'BAM', 'Business Administration and Management', 'bachelor', 'Faculty of Economics and Business', 'BSc', 7, 210, 2400, 45,
+      bizSteps, ['passport', 'hs_diploma', 'english', 'motivation'],
+      'Management, finance, marketing and entrepreneurship for a global business career.', ['Management', 'Finance']),
+    P('bsc-ibe', 'IBE', 'International Business Economics', 'bachelor', 'Faculty of Economics and Business', 'BSc', 7, 210, 2400, 40,
+      bizSteps, ['passport', 'hs_diploma', 'english', 'motivation'],
+      'International trade, economics and cross-border business in an English-only cohort.', ['Economics', 'International']),
+    P('bsc-tc', 'TC', 'Tourism and Catering', 'bachelor', 'Faculty of Economics and Business', 'BSc', 7, 210, 2400, 40,
+      bizSteps, ['passport', 'hs_diploma', 'english', 'motivation'],
+      'Hospitality, tourism management and catering with practical placements.', ['Hospitality', 'Tourism']),
+    P('bsc-hort', 'HORT', 'Horticultural Engineering', 'bachelor', 'Faculty of Horticulture & Rural Development', 'BSc', 7, 210, 2600, 25,
+      ['personal', 'documents', 'interview', 'fee', 'review'], ['passport', 'hs_diploma', 'english'],
+      'Plant production, greenhouse technology and sustainable horticulture.', ['Sustainability', 'Agri-tech']),
+    P('ma-ree', 'REE', 'Regional and Environmental Economics', 'master', 'Faculty of Economics and Business', 'MA', 4, 120, 3200, 25,
+      bizSteps, ['passport', 'bsc_diploma', 'english', 'motivation', 'cv'],
+      'Environmental policy, regional development and applied economics for a sustainable economy.', ['Policy', 'Sustainability']),
+    P('mba', 'MBA', 'Master of Business Administration', 'master', 'Faculty of Economics and Business', 'MBA', 4, 120, 3900, 30,
+      bizSteps, ['passport', 'bsc_diploma', 'english', 'motivation', 'cv'],
+      'A general-management MBA for early-career professionals, with leadership and strategy focus.', ['Leadership', 'Strategy']),
+    P('phd-mba', 'PHD', 'Management and Business Administration Sciences', 'doctoral', 'Doctoral School of Management & Business', 'PhD', 8, 240, 0, 12,
+      ['personal', 'documents', 'motivation', 'interview', 'review'], ['passport', 'msc_diploma', 'english', 'research', 'recommendation', 'cv'],
+      'A research doctorate supervised within the Doctoral School; tuition may be covered by scholarship.', ['Research', 'Doctoral']),
+  ];
+  return list.map(p => ({ ...p, image_url: PROG_IMGS[p.id] || null, kind: PROG_DEGREE_LEVELS.includes(p.level) ? 'degree' : 'program' }));
+}
+
+async function PROG_loadPrograms() {
+  const list = await dlSelect(PROG_TABLE, PROG_LS, PROG_seed, 'name', true);
+  // Add any seed programmes missing from an existing store (e.g. the newer
+  // short courses / excursions), and backfill images + category — all
+  // non-destructive (never overwrites an admin's own edits).
+  const seed = PROG_seed();
+  const has = {}; list.forEach(p => { has[p.id] = true; });
+  const missing = seed.filter(s => !has[s.id]);
+  let changed = missing.length > 0;
+  let merged = list.concat(missing).map(p => {
+    let q = p;
+    if (!q.image_url && PROG_IMGS[q.id]) { changed = true; q = { ...q, image_url: PROG_IMGS[q.id] }; }
+    if (!q.kind) { changed = true; q = { ...q, kind: PROG_kind(q) }; }
+    return q;
+  });
+  if (changed) {
+    if (DL_PROBE[PROG_TABLE] === 'ls') { try { dlLocalSave(PROG_LS, merged); } catch (e) {} }
+    else if (DL_PROBE[PROG_TABLE] === 'sb' && missing.length && window.sb) { try { await window.sb.from(PROG_TABLE).upsert(missing.map(s => ({ ...s, image_url: PROG_IMGS[s.id] || null, kind: PROG_kind(s) })), { onConflict: 'id', ignoreDuplicates: true }); } catch (e) {} }
+  }
+  return merged;
+}
+const PROG_loadApps = () => dlSelect(APP_TABLE, APP_LS, () => [], 'created_at', false);
+
+const PROG_STATUS = {
+  draft:     { label: 'Draft',      tone: 'slate' },
+  submitted: { label: 'Submitted',  tone: 'blue' },
+  in_review: { label: 'In review',  tone: 'amber' },
+  accepted:  { label: 'Accepted',   tone: 'green' },
+  waitlist:  { label: 'Waitlisted', tone: 'violet' },
+  rejected:  { label: 'Rejected',   tone: 'red' },
+};
+
+/* ---------- compact math placement generator ---------- */
+const PROG_rnd = (a, b) => Math.floor(Math.random() * (b - a + 1)) + a;
+function PROG_genMath() {
+  const x = PROG_rnd(2, 9), y = PROG_rnd(1, 8), a = x + y, b = x - y;
+  const ea = PROG_rnd(2, 6), eb = PROG_rnd(1, 4), ek = PROG_rnd(2, 3), eVal = Math.pow(ea - ek * eb, 2) + ea * eb;
+  const p = PROG_rnd(1, 5), q = PROG_rnd(1, 6), t = PROG_rnd(2, 5), qVal = t * t + p * t + q;
+  return [
+    { id: 't1', title: 'System of equations', prompt: 'Solve for x and y:  x + y = ' + a + '  and  x \u2212 y = ' + b, fields: [{ key: 'x', label: 'x =' }, { key: 'y', label: 'y =' }], answers: { x, y } },
+    { id: 't2', title: 'Evaluate the expression', prompt: 'Compute (a \u2212 ' + ek + 'b)\u00b2 + a\u00b7b  when  a = ' + ea + '  and  b = ' + eb, fields: [{ key: 'r', label: 'Value =' }], answers: { r: eVal } },
+    { id: 't3', title: 'Quadratic function', prompt: 'Given f(x) = x\u00b2 + ' + p + 'x + ' + q + ',  find f(' + t + ')', fields: [{ key: 'r', label: 'f(' + t + ') =' }], answers: { r: qVal } },
+  ];
+}
+const PROG_gradeMath = (tasks, ans) => {
+  let correct = 0;
+  for (const t of tasks) { const ok = t.fields.every(f => Math.abs(parseFloat(ans[t.id + '_' + f.key]) - t.answers[f.key]) < 1e-6); if (ok) correct++; }
+  return { correct, total: tasks.length, passed: correct >= Math.ceil(tasks.length * 0.67) };
+};
+function PROG_slots() {
+  const out = []; const base = new Date(); base.setHours(9, 0, 0, 0);
+  for (let d = 3; d <= 9; d += 2) for (const h of [9, 11, 14]) { const s = new Date(base.getTime() + d * 86400000); s.setHours(h); out.push({ id: 'IV-' + d + '-' + h, time: s.toISOString(), interviewer: h < 12 ? 'Dr. Kovács' : 'Szabó Péter' }); }
+  return out;
+}
+
+/* ---------- student: program detail + apply launcher ---------- */
+function PROG_Detail({ program, myApp, onClose, onApply }) {
+  if (!program) return null;
+  const dleft = DL_daysLeft(program.deadline);
+  const steps = program.steps || [];
+  return (
+    <UModal open={!!program} onClose={onClose} max="max-w-2xl" title={program.name} subtitle={program.degree + ' · ' + program.faculty} icon={<Lucide.GraduationCap size={20} />}>
+      <div className="space-y-6">
+        <div className="relative h-40 rounded-2xl overflow-hidden">
+          <PROG_Banner program={program} className="h-full" />
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <UBadge tone={PROG_LEVEL_TONE[program.level]}>{PROG_LEVELS[program.level]}</UBadge>
+          {(program.tags || []).map(t => <UBadge key={t} tone="slate">{t}</UBadge>)}
+        </div>
+        <p className="text-sm text-slate-500 leading-relaxed">{program.summary}</p>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {[['Tuition', DL_money(program.tuition) + (program.tuition ? '/sem' : '')], ['Duration', program.duration_semesters + ' semesters'], ['ECTS', program.ects], ['Language', program.language]].map(([k, v]) => (
+            <div key={k} className="bg-slate-50 rounded-2xl p-3"><div className="text-[10px] font-black text-slate-400 uppercase tracking-wider">{k}</div><div className="font-black text-slate-800 mt-0.5">{v}</div></div>
+          ))}
+        </div>
+        <div>
+          <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Admission steps for this programme</div>
+          <div className="flex flex-wrap items-center gap-2">
+            {steps.map((s, i) => { const def = PROG_STEP_DEFS[s]; const I = def ? def.icon : Lucide.Circle; return (
+              <React.Fragment key={s}>
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white border border-slate-100 text-[12px] font-bold text-slate-600"><I size={13} className="text-primary" /> {def ? def.label : s}</span>
+                {i < steps.length - 1 && <Lucide.ChevronRight size={13} className="text-slate-300" />}
+              </React.Fragment>
+            ); })}
+          </div>
+        </div>
+        <div>
+          <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Required documents</div>
+          <div className="grid sm:grid-cols-2 gap-2">
+            {(program.required_docs || []).map(d => <div key={d} className="flex items-center gap-2 text-sm text-slate-600"><Lucide.FileCheck size={15} className="text-emerald-500 flex-none" /> {PROG_DOC_DEFS[d] || d}</div>)}
+          </div>
+        </div>
+        <div className="flex items-center justify-between gap-4 pt-2 border-t border-slate-100">
+          <div className="text-sm">
+            {program.is_open ? <span className="font-bold text-slate-500">Deadline <span className="text-slate-800">{DL_date(program.deadline)}</span>{dleft != null && dleft >= 0 && <span className="text-primary"> · {dleft} days left</span>}</span> : <span className="font-bold text-red-500">Applications closed</span>}
+          </div>
+          {myApp ? <button className={U_btnPrimary} onClick={() => onApply(program)}><Lucide.ArrowRight size={16} /> Continue application</button>
+                 : <button className={U_btnPrimary} disabled={!program.is_open} onClick={() => onApply(program)}><Lucide.Send size={16} /> Apply now</button>}
+        </div>
+      </div>
+    </UModal>
+  );
+}
+
+/* ---------- student: the apply flow (runs the programme's own steps) ---------- */
+function ProgramApply({ program, app, user, onExit, onSaved }) {
+  const steps = program.steps || ['personal', 'review'];
+  const [cur, setCur] = useState(app);
+  const [idx, setIdx] = useState(Math.min(app.step_index || 0, steps.length - 1));
+  const [saving, setSaving] = useState(false);
+  const data = cur.data || {};
+  const setData = (patch) => setCur(c => ({ ...c, data: { ...(c.data || {}), ...patch } }));
+
+  const persist = async (extra = {}) => {
+    setSaving(true);
+    const patch = { step_index: idx, data: cur.data || {}, updated_at: new Date().toISOString(), ...extra };
+    const saved = await dlUpdate(APP_TABLE, cur.id, patch, APP_LS);
+    setSaving(false); if (saved) { setCur(saved); onSaved && onSaved(saved); }
+    return saved;
+  };
+  const goNext = async () => { const n = Math.min(idx + 1, steps.length - 1); setIdx(n); await persist({ step_index: n }); };
+  const goPrev = () => setIdx(i => Math.max(0, i - 1));
+  const stepKey = steps[idx];
+
+  return (
+    <div className="max-w-5xl mx-auto px-6 sm:px-8 py-8 animate-in fade-in duration-300">
+      <button onClick={onExit} className="flex items-center gap-2 text-sm font-bold text-slate-400 hover:text-primary mb-4 transition-colors"><Lucide.ArrowLeft size={16} /> Back to programmes</button>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+        <div>
+          <p className="text-primary font-black text-xs uppercase tracking-widest mb-1">{program.degree} application</p>
+          <h1 className="text-2xl font-black text-slate-900 tracking-tight">{program.name}</h1>
+        </div>
+        <UBadge tone={PROG_STATUS[cur.status] ? PROG_STATUS[cur.status].tone : 'slate'}>{PROG_STATUS[cur.status] ? PROG_STATUS[cur.status].label : cur.status}</UBadge>
+      </div>
+
+      <div className="grid lg:grid-cols-[240px,1fr] gap-6">
+        {/* step rail */}
+        <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-3 h-fit">
+          {steps.map((s, i) => { const def = PROG_STEP_DEFS[s] || { label: s, icon: Lucide.Circle }; const I = def.icon; const done = i < idx; const active = i === idx; return (
+            <button key={s} onClick={() => setIdx(i)} className={'w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-left transition-colors ' + (active ? 'bg-primary/10 text-primary' : done ? 'text-emerald-600 hover:bg-slate-50' : 'text-slate-500 hover:bg-slate-50')}>
+              <span className={'w-7 h-7 rounded-lg flex items-center justify-center flex-none ' + (active ? 'bg-primary text-white' : done ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-400')}>{done ? <Lucide.Check size={15} /> : <I size={15} />}</span>
+              <span className="text-[13px] font-bold">{def.label}</span>
+            </button>
+          ); })}
+        </div>
+
+        {/* step body */}
+        <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6 sm:p-8 min-h-[360px]">
+          <PROG_StepBody stepKey={stepKey} program={program} data={data} setData={setData} user={user} cur={cur} setCur={setCur}
+            onSubmit={async () => { await persist({ status: 'submitted', step_index: idx }); }} />
+          <div className="flex items-center justify-between gap-3 mt-8 pt-5 border-t border-slate-100">
+            <button onClick={goPrev} disabled={idx === 0} className={U_btnGhost + (idx === 0 ? ' opacity-0 pointer-events-none' : '')}><Lucide.ArrowLeft size={15} /> Back</button>
+            <div className="flex items-center gap-3">
+              <button onClick={() => persist()} className="text-sm font-bold text-slate-400 hover:text-slate-700 transition-colors">{saving ? 'Saving…' : 'Save & exit later'}</button>
+              {idx < steps.length - 1 && <button onClick={goNext} className={U_btnPrimary} disabled={!PROG_canAdvance(stepKey, program, data)}>Continue <Lucide.ArrowRight size={15} /></button>}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PROG_canAdvance(stepKey, program, data) {
+  if (stepKey === 'documents') return (program.required_docs || []).every(d => data.docs && data.docs[d]);
+  if (stepKey === 'math') return data.math && data.math.passed;
+  if (stepKey === 'motivation') return (data.motivation || '').trim().length >= 40;
+  if (stepKey === 'interview') return data.interview && data.interview.slot;
+  if (stepKey === 'fee') return program.tuition === 0 || (data.fee && data.fee.paid);
+  if (stepKey === 'personal') return data.personal && data.personal.name && data.personal.country;
+  return true;
+}
+
+/* ---------- per-step bodies ---------- */
+function PROG_StepBody({ stepKey, program, data, setData, user, cur, onSubmit }) {
+  if (stepKey === 'personal') {
+    const p = data.personal || { name: (user && user.name) || '', email: (user && user.email) || '', phone: '', country: '', dob: '' };
+    const set = (k, v) => setData({ personal: { ...p, [k]: v } });
+    return (
+      <div className="space-y-5">
+        <PROG_Head icon={Lucide.User} title="Personal details" sub="Confirm your contact information for this application." />
+        <div className="grid sm:grid-cols-2 gap-4">
+          <UField label="Full name"><input className={U_input} value={p.name} onChange={e => set('name', e.target.value)} /></UField>
+          <UField label="Email"><input className={U_input} value={p.email} onChange={e => set('email', e.target.value)} /></UField>
+          <UField label="Phone"><input className={U_input} value={p.phone} onChange={e => set('phone', e.target.value)} placeholder="+…" /></UField>
+          <UField label="Country of citizenship"><input className={U_input} value={p.country} onChange={e => set('country', e.target.value)} placeholder="e.g. Nigeria" /></UField>
+          <UField label="Date of birth"><input type="date" className={U_input} value={p.dob} onChange={e => set('dob', e.target.value)} /></UField>
+        </div>
+      </div>
+    );
+  }
+  if (stepKey === 'documents') {
+    const docs = data.docs || {};
+    const upload = async (id, e) => { const file = e.target.files && e.target.files[0]; if (!file) return; setData({ docs: { ...docs, [id]: { fileName: file.name, at: todayStr() } } }); };
+    return (
+      <div className="space-y-5">
+        <PROG_Head icon={Lucide.Upload} title="Upload documents" sub="These files are required for this programme." />
+        <div className="space-y-3">
+          {(program.required_docs || []).map(id => { const got = docs[id]; return (
+            <div key={id} className={'flex items-center justify-between gap-4 p-4 rounded-2xl border ' + (got ? 'border-emerald-100 bg-emerald-50/40' : 'border-slate-100')}>
+              <div className="flex items-center gap-3 min-w-0">
+                <div className={'w-9 h-9 rounded-xl flex items-center justify-center flex-none ' + (got ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-400')}>{got ? <Lucide.Check size={17} /> : <Lucide.FileText size={17} />}</div>
+                <div className="min-w-0"><div className="text-sm font-bold text-slate-700 truncate">{PROG_DOC_DEFS[id] || id}</div>{got && <div className="text-[11px] text-emerald-600 font-semibold truncate">{got.fileName}</div>}</div>
+              </div>
+              <label className={U_btnGhost + ' flex-none cursor-pointer text-[13px] py-2 px-4'}>{got ? 'Replace' : 'Upload'}<input type="file" className="hidden" onChange={e => upload(id, e)} /></label>
+            </div>
+          ); })}
+        </div>
+      </div>
+    );
+  }
+  if (stepKey === 'language') {
+    const l = data.language || { cert: '', level: '' };
+    const set = (k, v) => setData({ language: { ...l, [k]: v } });
+    return (
+      <div className="space-y-5">
+        <PROG_Head icon={Lucide.Languages} title="English proficiency" sub="Tell us about your English certificate (B2 or higher recommended)." />
+        <div className="grid sm:grid-cols-2 gap-4">
+          <UField label="Certificate"><select className={U_input} value={l.cert} onChange={e => set('cert', e.target.value)}><option value="">Select…</option>{['IELTS', 'TOEFL', 'Cambridge', 'Duolingo', 'Medium of instruction', 'Other'].map(o => <option key={o}>{o}</option>)}</select></UField>
+          <UField label="Score / level"><input className={U_input} value={l.level} onChange={e => set('level', e.target.value)} placeholder="e.g. 6.5 / B2" /></UField>
+        </div>
+      </div>
+    );
+  }
+  if (stepKey === 'motivation') {
+    const val = data.motivation || '';
+    return (
+      <div className="space-y-4">
+        <PROG_Head icon={Lucide.PenLine} title="Motivation letter" sub="Why this programme? Minimum ~40 characters (a short paragraph is ideal)." />
+        <textarea className={U_input + ' min-h-[220px] resize-y'} value={val} onChange={e => setData({ motivation: e.target.value })} placeholder="Dear Admissions Committee, …" />
+        <div className="text-[11px] font-bold text-slate-400">{val.trim().length} characters</div>
+      </div>
+    );
+  }
+  if (stepKey === 'math') return <PROG_MathStep data={data} setData={setData} />;
+  if (stepKey === 'interview') {
+    const iv = data.interview || {};
+    const slots = PROG_slots();
+    const book = (s) => setData({ interview: { slot: s.time, interviewer: s.interviewer, teamsUrl: 'https://teams.microsoft.com/l/meetup-join/nje-' + s.id } });
+    return (
+      <div className="space-y-5">
+        <PROG_Head icon={Lucide.Video} title="Book your online interview" sub="A Microsoft Teams meeting is created automatically when you book." />
+        {iv.slot ? (
+          <div className="p-5 rounded-2xl bg-emerald-50 border border-emerald-100">
+            <div className="flex items-center gap-2 text-emerald-700 font-black mb-2"><Lucide.CalendarCheck size={18} /> Interview booked</div>
+            <div className="text-sm text-slate-600 font-bold">{DL_dateLong(iv.slot)} · {new Date(iv.slot).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</div>
+            <div className="text-sm text-slate-500">Interviewer: {iv.interviewer} · Microsoft Teams</div>
+            <button className="text-xs font-bold text-slate-400 hover:text-primary mt-2" onClick={() => setData({ interview: {} })}>Change time</button>
+          </div>
+        ) : (
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {slots.map(s => <button key={s.id} onClick={() => book(s)} className="text-left p-4 rounded-2xl border border-slate-100 hover:border-primary hover:bg-primary/5 transition-all"><div className="font-black text-slate-800 text-sm">{DL_date(s.time)}</div><div className="text-primary font-bold text-sm">{new Date(s.time).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</div><div className="text-[11px] text-slate-400 mt-1">{s.interviewer}</div></button>)}
+          </div>
+        )}
+      </div>
+    );
+  }
+  if (stepKey === 'fee') {
+    const fee = data.fee || {};
+    const isSmall = PROG_kind(program) === 'program';
+    const amount = isSmall ? (program.tuition || 0) : 200;
+    const feeLabel = isSmall ? 'Registration fee' : 'Application fee';
+    return (
+      <div className="space-y-5">
+        <PROG_Head icon={Lucide.CreditCard} title={feeLabel} sub={isSmall ? 'Secure your place — this fee confirms your registration.' : 'A one-time, non-refundable application fee is required to process your application.'} />
+        <div className="p-5 rounded-2xl bg-slate-50 flex items-center justify-between"><span className="font-bold text-slate-600">{feeLabel}</span><span className="text-2xl font-black text-slate-900">{DL_money(amount)}</span></div>
+        {amount === 0 ? (
+          <div className="flex items-center gap-2 text-emerald-600 font-black p-4 rounded-2xl bg-emerald-50 border border-emerald-100"><Lucide.CheckCircle2 size={18} /> No fee required — you're all set.</div>
+        ) : fee.paid ? (
+          <div className="flex items-center gap-2 text-emerald-600 font-black p-4 rounded-2xl bg-emerald-50 border border-emerald-100"><Lucide.CheckCircle2 size={18} /> Paid via {fee.method} · {fee.date}</div>
+        ) : (
+          <div className="flex flex-wrap gap-3">
+            <button className={U_btnPrimary} onClick={() => setData({ fee: { paid: true, method: 'Card', date: todayStr() } })}><Lucide.CreditCard size={16} /> Pay by card</button>
+            <button className={U_btnGhost} onClick={() => setData({ fee: { paid: true, method: 'Bank transfer', date: todayStr() } })}><Lucide.Landmark size={16} /> Mark bank transfer</button>
+          </div>
+        )}
+        <p className="text-[11px] text-slate-400">Test mode — no real charge is made.</p>
+      </div>
+    );
+  }
+  if (stepKey === 'review') {
+    const ok = program.steps.filter(s => s !== 'review').every(s => PROG_canAdvance(s, program, data));
+    const submitted = cur.status && cur.status !== 'draft';
+    return (
+      <div className="space-y-5">
+        <PROG_Head icon={Lucide.Send} title={submitted ? 'Application submitted' : 'Review & submit'} sub={submitted ? 'Your application is with the admissions team.' : 'Check everything is complete, then submit for review.'} />
+        {submitted ? (
+          <div className="p-6 rounded-2xl bg-emerald-50 border border-emerald-100 text-center">
+            <div className="w-14 h-14 rounded-2xl bg-emerald-500 text-white flex items-center justify-center mx-auto mb-3"><Lucide.CheckCircle2 size={28} /></div>
+            <div className="font-black text-emerald-800 text-lg">Thank you, {(data.personal && data.personal.name || '').split(' ')[0] || 'applicant'}!</div>
+            <p className="text-sm text-slate-500 mt-1 max-w-sm mx-auto">We\u2019ve received your application for <b>{program.name}</b>. You\u2019ll be notified about the next steps by email and in the Feed.</p>
+          </div>
+        ) : (
+          <>
+            <div className="space-y-2">
+              {program.steps.filter(s => s !== 'review').map(s => { const def = PROG_STEP_DEFS[s]; const done = PROG_canAdvance(s, program, data); return (
+                <div key={s} className="flex items-center gap-3 p-3 rounded-xl bg-slate-50"><span className={'w-6 h-6 rounded-lg flex items-center justify-center flex-none ' + (done ? 'bg-emerald-500 text-white' : 'bg-amber-400 text-white')}>{done ? <Lucide.Check size={13} /> : <Lucide.Minus size={13} />}</span><span className="text-sm font-bold text-slate-600">{def ? def.label : s}</span><span className="ml-auto text-[11px] font-black uppercase tracking-wider text-slate-400">{done ? 'Complete' : 'Incomplete'}</span></div>
+              ); })}
+            </div>
+            <button className={U_btnPrimary + ' w-full py-4'} disabled={!ok} onClick={onSubmit}>{ok ? 'Submit application' : 'Complete all steps to submit'}</button>
+          </>
+        )}
+      </div>
+    );
+  }
+  return <div className="text-slate-400">Unknown step.</div>;
+}
+const PROG_Head = ({ icon, title, sub }) => { const I = icon; return (
+  <div className="flex items-start gap-3"><div className="w-11 h-11 rounded-2xl bg-primary/10 text-primary flex items-center justify-center flex-none"><I size={20} /></div><div><h3 className="text-lg font-black text-slate-900 tracking-tight">{title}</h3><p className="text-sm text-slate-400">{sub}</p></div></div>
+); };
+
+function PROG_MathStep({ data, setData }) {
+  const [tasks, setTasks] = useState(null);
+  const [ans, setAns] = useState({});
+  const [result, setResult] = useState(data.math || null);
+  useEffect(() => { if (!tasks) setTasks(PROG_genMath()); }, []);
+  const grade = () => { const r = PROG_gradeMath(tasks, ans); setResult(r); setData({ math: r }); };
+  const reset = () => { setTasks(PROG_genMath()); setAns({}); setResult(null); setData({ math: null }); };
+  if (!tasks) return null;
+  return (
+    <div className="space-y-5">
+      <PROG_Head icon={Lucide.Calculator} title="Mathematics placement test" sub="Three short tasks. You need at least 2 correct to pass." />
+      <div className="space-y-4">
+        {tasks.map((t, i) => (
+          <div key={t.id} className="p-4 rounded-2xl border border-slate-100">
+            <div className="flex items-center gap-2 mb-2"><span className="w-6 h-6 rounded-lg bg-primary/10 text-primary text-xs font-black flex items-center justify-center">{i + 1}</span><span className="text-[11px] font-black uppercase tracking-wider text-slate-400">{t.title}</span></div>
+            <p className="text-sm font-bold text-slate-700 mb-3">{t.prompt}</p>
+            <div className="flex flex-wrap gap-3">
+              {t.fields.map(f => <label key={f.key} className="flex items-center gap-2 text-sm font-bold text-slate-500">{f.label}<input disabled={!!result} className="w-24 bg-slate-50 border border-slate-100 rounded-lg px-3 py-1.5 text-slate-800 focus:outline-none focus:ring-2 focus:ring-primary/20" value={ans[t.id + '_' + f.key] || ''} onChange={e => setAns(a => ({ ...a, [t.id + '_' + f.key]: e.target.value }))} /></label>)}
+            </div>
+          </div>
+        ))}
+      </div>
+      {result ? (
+        <div className={'p-4 rounded-2xl border flex items-center justify-between ' + (result.passed ? 'bg-emerald-50 border-emerald-100' : 'bg-red-50 border-red-100')}>
+          <div className={'font-black ' + (result.passed ? 'text-emerald-700' : 'text-red-600')}>{result.passed ? <span className="flex items-center gap-2"><Lucide.CheckCircle2 size={18} /> Passed — {result.correct}/{result.total} correct</span> : <span className="flex items-center gap-2"><Lucide.XCircle size={18} /> {result.correct}/{result.total} correct — try again</span>}</div>
+          {!result.passed && <button className={U_btnGhost} onClick={reset}><Lucide.RefreshCw size={15} /> New test</button>}
+        </div>
+      ) : <button className={U_btnPrimary} onClick={grade}>Submit answers</button>}
+    </div>
+  );
+}
+
+/* ---------- student catalog ---------- */
+function PROG_Catalog({ programs, myApps, onOpen, onContinue }) {
+  const [level, setLevel] = useState('all');
+  const [q, setQ] = useState('');
+  const list = programs.filter(p => (level === 'all' || p.level === level) && (!q || (p.name + ' ' + p.faculty).toLowerCase().includes(q.toLowerCase())));
+  const chips = [['all', 'All levels'], ...Object.entries(PROG_LEVELS)];
+  return (
+    <div>
+      <div className="flex flex-col sm:flex-row gap-3 mb-6">
+        <div className="relative flex-1"><Lucide.Search size={17} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" /><input className={U_input + ' pl-10'} placeholder="Search programmes…" value={q} onChange={e => setQ(e.target.value)} /></div>
+      </div>
+      <div className="flex items-center gap-2 overflow-x-auto pb-2 mb-5 custom-scrollbar">
+        {chips.map(([k, label]) => <button key={k} onClick={() => setLevel(k)} className={'flex-none px-4 py-2 rounded-full text-[13px] font-bold transition-all ' + (level === k ? 'bg-slate-900 text-white' : 'bg-white border border-slate-100 text-slate-500 hover:border-slate-300')}>{label}</button>)}
+      </div>
+      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {list.map(p => { const mine = myApps.find(a => a.program_id === p.id); const dleft = DL_daysLeft(p.deadline); return (
+          <div key={p.id} className="group bg-white rounded-3xl border border-slate-100 shadow-sm flex flex-col overflow-hidden hover:shadow-md hover:border-slate-200 transition-all">
+            <div className="relative h-32">
+              <PROG_Banner program={p} className="h-full" />
+              <div className="absolute top-3 left-3 right-3 flex items-center justify-between">
+                <UBadge tone={PROG_LEVEL_TONE[p.level]} className="!bg-white/90 backdrop-blur">{p.degree}</UBadge>
+                {!p.is_open ? <UBadge tone="red" className="!bg-white/90 backdrop-blur">Closed</UBadge> : mine ? <UBadge tone={PROG_STATUS[mine.status].tone} className="!bg-white/90 backdrop-blur">{PROG_STATUS[mine.status].label}</UBadge> : null}
+              </div>
+            </div>
+            <div className="p-5 flex flex-col flex-1">
+              <h3 className="font-black text-slate-900 tracking-tight leading-snug">{p.name}</h3>
+              <p className="text-[12px] text-slate-400 font-semibold mt-1">{p.faculty}</p>
+              <p className="text-sm text-slate-500 mt-3 leading-relaxed line-clamp-3 flex-1">{p.summary}</p>
+              <div className="flex items-center justify-between mt-4 pt-4 border-t border-slate-50">
+                <div><div className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Tuition</div><div className="font-black text-slate-800">{DL_money(p.tuition)}{p.tuition ? <span className="text-[11px] text-slate-400 font-bold">/sem</span> : ''}</div></div>
+                <button onClick={() => mine ? onContinue(p, mine) : onOpen(p)} className={'text-sm font-bold ' + (mine ? 'text-primary' : 'text-slate-500 group-hover:text-primary') + ' flex items-center gap-1 transition-colors'}>{mine ? 'Continue' : 'View'} <Lucide.ArrowRight size={15} /></button>
+              </div>
+            </div>
+          </div>
+        ); })}
+      </div>
+      {list.length === 0 && <div className="bg-white rounded-3xl border border-slate-100 mt-2"><UEmpty icon={<Lucide.Search size={24} />} title="No programmes match" subtitle="Try a different level or search term." /></div>}
+    </div>
+  );
+}
+
+/* ---------- admin: program editor (incl. per-program flow editor) ---------- */
+function PROG_Editor({ open, program, onClose, onSaved, scope }) {
+  const isDeg = scope === 'degrees';
+  const levelOpts = isDeg ? ['bachelor', 'master', 'doctoral'] : ['preparatory', 'course', 'excursion'];
+  const blank = { id: '', code: '', name: '', level: isDeg ? 'bachelor' : 'preparatory', faculty: '', degree: isDeg ? 'BSc' : 'Certificate', kind: isDeg ? 'degree' : 'program', duration_semesters: isDeg ? 7 : 2, ects: isDeg ? 210 : 30, tuition: isDeg ? 2500 : 400, currency: 'EUR', language: 'English', deadline: '2026-06-30', capacity: 30, seats_taken: 0, is_open: true, summary: '', image_url: '', required_docs: isDeg ? ['passport', 'hs_diploma', 'english'] : ['passport'], steps: isDeg ? ['personal', 'documents', 'interview', 'fee', 'review'] : ['personal', 'fee', 'review'], tags: [] };
+  const [f, setF] = useState(blank);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { if (open) setF(program ? { ...blank, ...program, required_docs: program.required_docs || [], steps: program.steps || [], tags: program.tags || [] } : blank); }, [open, program, scope]);
+  const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+  const toggleArr = (key, val) => setF(p => ({ ...p, [key]: p[key].includes(val) ? p[key].filter(x => x !== val) : [...p[key], val] }));
+  const moveStep = (i, dir) => setF(p => { const s = [...p.steps]; const j = i + dir; if (j < 0 || j >= s.length) return p; [s[i], s[j]] = [s[j], s[i]]; return { ...p, steps: s }; });
+  const uploadImg = async (e) => { const file = e.target.files && e.target.files[0]; if (!file) return; const dataUrl = await KB_readFileAsDataUrl(file); set('image_url', dataUrl); };
+
+  const save = async () => {
+    if (!f.name.trim()) return; setBusy(true);
+    const row = { ...f, kind: PROG_DEGREE_LEVELS.includes(f.level) ? 'degree' : 'program', tuition: Number(f.tuition) || 0, ects: Number(f.ects) || 0, duration_semesters: Number(f.duration_semesters) || 0, capacity: Number(f.capacity) || 0, tags: typeof f.tags === 'string' ? f.tags.split(',').map(s => s.trim()).filter(Boolean) : f.tags };
+    if (program) { await dlUpdate(PROG_TABLE, program.id, row, PROG_LS); }
+    else { row.id = uid('prog'); row.created_at = todayStr(); await dlInsert(PROG_TABLE, row, PROG_LS); }
+    setBusy(false); onSaved && onSaved(); onClose();
+  };
+
+  return (
+    <UModal open={open} onClose={onClose} max="max-w-3xl" title={(program ? 'Edit ' : 'New ') + (isDeg ? 'degree' : 'programme')} subtitle="Configure details and this programme's admission flow" icon={<Lucide.GraduationCap size={20} />}>
+      <div className="space-y-6">
+        <div className="grid sm:grid-cols-2 gap-4">
+          <UField label="Programme name"><input className={U_input} value={f.name} onChange={e => set('name', e.target.value)} /></UField>
+          <UField label="Faculty"><input className={U_input} value={f.faculty} onChange={e => set('faculty', e.target.value)} /></UField>
+          <UField label="Level"><select className={U_input} value={f.level} onChange={e => set('level', e.target.value)}>{levelOpts.map(k => <option key={k} value={k}>{PROG_LEVELS[k]}</option>)}</select></UField>
+          <UField label="Degree label"><input className={U_input} value={f.degree} onChange={e => set('degree', e.target.value)} placeholder="BSc / MA / MBA / PhD" /></UField>
+          <UField label="Tuition / semester (EUR)"><input type="number" className={U_input} value={f.tuition} onChange={e => set('tuition', e.target.value)} /></UField>
+          <UField label="Duration (semesters)"><input type="number" className={U_input} value={f.duration_semesters} onChange={e => set('duration_semesters', e.target.value)} /></UField>
+          <UField label="ECTS"><input type="number" className={U_input} value={f.ects} onChange={e => set('ects', e.target.value)} /></UField>
+          <UField label="Capacity"><input type="number" className={U_input} value={f.capacity} onChange={e => set('capacity', e.target.value)} /></UField>
+          <UField label="Application deadline"><input type="date" className={U_input} value={f.deadline} onChange={e => set('deadline', e.target.value)} /></UField>
+          <UField label="Tags (comma-separated)"><input className={U_input} value={Array.isArray(f.tags) ? f.tags.join(', ') : f.tags} onChange={e => set('tags', e.target.value)} /></UField>
+        </div>
+        <UField label="Summary"><textarea className={U_input + ' min-h-[70px]'} value={f.summary} onChange={e => set('summary', e.target.value)} /></UField>
+
+        {/* mockup image */}
+        <div>
+          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1.5">Programme image</span>
+          <div className="flex items-center gap-3">
+            <div className="w-32 h-20 rounded-xl overflow-hidden bg-slate-100 flex-none flex items-center justify-center text-slate-300">
+              {f.image_url ? <img src={f.image_url} alt="" className="w-full h-full object-cover" onError={e => { e.currentTarget.style.display = 'none'; }} /> : <Lucide.Image size={22} />}
+            </div>
+            <div className="flex-1 space-y-2">
+              <input className={U_input} value={f.image_url && f.image_url.indexOf('data:') === 0 ? '' : (f.image_url || '')} onChange={e => set('image_url', e.target.value)} placeholder={f.image_url && f.image_url.indexOf('data:') === 0 ? 'Uploaded image ✓' : 'Image URL (https://…)'} />
+              <div className="flex items-center gap-2">
+                <label className={U_btnGhost + ' cursor-pointer text-[13px] py-2 px-4'}><Lucide.Upload size={15} /> Upload image<input type="file" accept="image/*" className="hidden" onChange={uploadImg} /></label>
+                {f.image_url && <button type="button" className="text-[13px] font-bold text-slate-400 hover:text-red-500 px-2" onClick={() => set('image_url', '')}>Remove</button>}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* flow editor */}
+        <div className="rounded-2xl border border-slate-100 p-4">
+          <div className="flex items-center gap-2 mb-3"><Lucide.ListChecks size={16} className="text-primary" /><span className="text-sm font-black text-slate-700">Admission flow — steps</span></div>
+          <div className="grid sm:grid-cols-2 gap-2 mb-4">
+            {Object.entries(PROG_STEP_DEFS).map(([k, def]) => { const on = f.steps.includes(k); const I = def.icon; return (
+              <button key={k} onClick={() => toggleArr('steps', k)} className={'flex items-center gap-2 px-3 py-2 rounded-xl border text-[13px] font-bold transition-all ' + (on ? 'border-primary bg-primary/5 text-primary' : 'border-slate-100 text-slate-400 hover:border-slate-200')}><I size={15} /> {def.label}{on && <Lucide.Check size={14} className="ml-auto" />}</button>
+            ); })}
+          </div>
+          {f.steps.length > 0 && (
+            <div className="space-y-1.5">
+              <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Order</div>
+              {f.steps.map((s, i) => { const def = PROG_STEP_DEFS[s]; return (
+                <div key={s} className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-50"><span className="w-5 h-5 rounded bg-white text-[11px] font-black text-slate-500 flex items-center justify-center">{i + 1}</span><span className="text-sm font-bold text-slate-600">{def ? def.label : s}</span><div className="ml-auto flex gap-1"><button onClick={() => moveStep(i, -1)} className="w-6 h-6 rounded hover:bg-white text-slate-400"><Lucide.ChevronUp size={15} /></button><button onClick={() => moveStep(i, 1)} className="w-6 h-6 rounded hover:bg-white text-slate-400"><Lucide.ChevronDown size={15} /></button></div></div>
+              ); })}
+            </div>
+          )}
+        </div>
+
+        {/* required docs */}
+        <div className="rounded-2xl border border-slate-100 p-4">
+          <div className="flex items-center gap-2 mb-3"><Lucide.FileCheck size={16} className="text-primary" /><span className="text-sm font-black text-slate-700">Required documents</span></div>
+          <div className="grid sm:grid-cols-2 gap-2">
+            {Object.entries(PROG_DOC_DEFS).map(([k, label]) => { const on = f.required_docs.includes(k); return (
+              <button key={k} onClick={() => toggleArr('required_docs', k)} className={'flex items-center gap-2 px-3 py-2 rounded-xl border text-[12px] font-bold text-left transition-all ' + (on ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-100 text-slate-400 hover:border-slate-200')}><span className={'w-4 h-4 rounded flex-none flex items-center justify-center ' + (on ? 'bg-emerald-500 text-white' : 'bg-slate-200')}>{on && <Lucide.Check size={11} />}</span> {label}</button>
+            ); })}
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between gap-3 pt-2">
+          <label className="flex items-center gap-2.5 text-sm font-bold text-slate-600 cursor-pointer"><input type="checkbox" checked={f.is_open} onChange={e => set('is_open', e.target.checked)} className="w-4 h-4 accent-primary" /> Applications open</label>
+          <div className="flex gap-3"><button className={U_btnGhost} onClick={onClose}>Cancel</button><button className={U_btnPrimary} disabled={busy || !f.name.trim()} onClick={save}>{busy ? 'Saving…' : 'Save programme'}</button></div>
+        </div>
+      </div>
+    </UModal>
+  );
+}
+
+/* ---------- admin: applicants review ---------- */
+function PROG_Applicants({ programs, apps, onChange }) {
+  const [pid, setPid] = useState('all');
+  const rows = apps.filter(a => pid === 'all' || a.program_id === pid);
+  const nameOf = (id) => { const p = programs.find(x => x.id === id); return p ? p.name : id; };
+  const setStatus = async (a, status) => { await dlUpdate(APP_TABLE, a.id, { status, updated_at: new Date().toISOString() }, APP_LS); onChange && onChange(); };
+  return (
+    <div>
+      <div className="flex items-center gap-3 mb-5">
+        <select className={U_input + ' max-w-xs'} value={pid} onChange={e => setPid(e.target.value)}><option value="all">All programmes</option>{programs.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+        <span className="text-sm font-bold text-slate-400">{rows.length} application{rows.length === 1 ? '' : 's'}</span>
+      </div>
+      {rows.length === 0 ? <div className="bg-white rounded-3xl border border-slate-100"><UEmpty icon={<Lucide.Inbox size={24} />} title="No applications yet" subtitle="Applications from students will appear here." /></div> : (
+        <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+          <table className="w-full text-sm">
+            <thead><tr className="text-left text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100"><th className="px-5 py-3">Applicant</th><th className="px-5 py-3">Programme</th><th className="px-5 py-3">Progress</th><th className="px-5 py-3">Submitted</th><th className="px-5 py-3">Status</th></tr></thead>
+            <tbody>
+              {rows.map(a => { const p = programs.find(x => x.id === a.program_id); const total = p ? (p.steps || []).length : 1; const prog = Math.round(((a.step_index || 0) / Math.max(total - 1, 1)) * 100); return (
+                <tr key={a.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50/50">
+                  <td className="px-5 py-3"><div className="font-bold text-slate-700">{a.applicant_name || '—'}</div><div className="text-[11px] text-slate-400">{a.applicant_email}</div></td>
+                  <td className="px-5 py-3 text-slate-600 font-semibold">{nameOf(a.program_id)}</td>
+                  <td className="px-5 py-3"><div className="flex items-center gap-2"><div className="w-20 h-1.5 rounded-full bg-slate-100 overflow-hidden"><div className="h-full bg-primary rounded-full" style={{ width: prog + '%' }} /></div><span className="text-[11px] font-bold text-slate-400">{prog}%</span></div></td>
+                  <td className="px-5 py-3 text-[12px] text-slate-400 font-semibold">{a.status === 'draft' ? '—' : DL_date(a.updated_at || a.created_at)}</td>
+                  <td className="px-5 py-3"><select value={a.status} onChange={e => setStatus(a, e.target.value)} className="text-[12px] font-bold rounded-lg border border-slate-100 bg-slate-50 px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary/20">{Object.entries(PROG_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></td>
+                </tr>
+              ); })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------- main view (role-aware) ---------- */
+const ProgramsView = ({ user, scope = 'programs' }) => {
+  const isDeg = scope === 'degrees';
+  const [programs, setPrograms] = useState(null);
+  const [apps, setApps] = useState([]);
+  const [detail, setDetail] = useState(null);
+  const [applying, setApplying] = useState(null); // {program, app}
+  const [editor, setEditor] = useState({ open: false, program: null });
+  const [tab, setTab] = useState(isAdmin(user) ? 'manage' : 'explore');
+
+  const refetch = async () => { const [p, a] = await Promise.all([PROG_loadPrograms(), PROG_loadApps()]); setPrograms(p); setApps(a); };
+  useEffect(() => { refetch(); }, []);
+
+  const myApps = (apps || []).filter(a => a.applicant_email === (user && user.email));
+
+  const openApply = async (program) => {
+    let app = myApps.find(a => a.program_id === program.id);
+    if (!app) { app = { id: uid('APP'), program_id: program.id, applicant_email: user.email, applicant_name: user.name, status: 'draft', step_index: 0, data: {}, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }; await dlInsert(APP_TABLE, app, APP_LS); await refetch(); }
+    setDetail(null); setApplying({ program, app });
+  };
+
+  if (programs === null) return <div className="max-w-6xl mx-auto px-8 py-8"><div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">{[0, 1, 2, 3, 4, 5].map(i => <div key={i} className="h-56 rounded-3xl bg-white border border-slate-100 animate-pulse" />)}</div></div>;
+
+  if (applying) {
+    const fresh = apps.find(a => a.id === applying.app.id) || applying.app;
+    return <ProgramApply program={applying.program} app={fresh} user={user} onExit={() => { refetch(); setApplying(null); }} onSaved={() => refetch()} />;
+  }
+
+  const staff = isAdmin(user);
+  const scopedPrograms = staff ? programs.filter(p => PROG_kind(p) === (isDeg ? 'degree' : 'program')) : programs;
+  const scopedApps = apps.filter(a => scopedPrograms.some(p => p.id === a.program_id));
+  return (
+    <div className="max-w-6xl mx-auto px-6 sm:px-8 py-8 animate-in fade-in duration-500">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-6">
+        <div>
+          <p className="text-primary font-black text-xs uppercase tracking-widest mb-1">{staff ? (isDeg ? 'Degrees' : 'Programs') : 'Programmes'}</p>
+          <h1 className="text-3xl font-black text-slate-900 tracking-tight">{staff ? (isDeg ? 'Degree Management' : 'Program Management') : 'Study Programmes'}</h1>
+          <p className="text-slate-400 mt-1 font-medium">{staff ? (isDeg ? 'Manage degree programmes (BSc, MSc, MA, MBA, PhD), their admission flows and applicants.' : 'Manage preparatory programmes, short courses and educational excursions.') : 'Explore English-taught programmes at NJE and apply online.'}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {staff && <button className={U_btnGhost} onClick={() => setTab(tab === 'manage' ? 'applicants' : 'manage')}>{tab === 'manage' ? <><Lucide.Users size={16} /> Applicants</> : <><Lucide.GraduationCap size={16} /> {isDeg ? 'Degrees' : 'Programmes'}</>}</button>}
+          {staff && tab === 'manage' && <button className={U_btnPrimary} onClick={() => setEditor({ open: true, program: null })}><Lucide.Plus size={16} /> New {isDeg ? 'degree' : 'programme'}</button>}
+        </div>
+      </div>
+
+      {!staff && (
+        <>
+          <PROG_Catalog programs={programs} myApps={myApps} onOpen={setDetail} onContinue={(p, a) => setApplying({ program: p, app: a })} />
+          {myApps.length > 0 && (
+            <div className="mt-10">
+              <h2 className="text-lg font-black text-slate-900 mb-4">My applications</h2>
+              <div className="grid sm:grid-cols-2 gap-3">
+                {myApps.map(a => { const p = programs.find(x => x.id === a.program_id); if (!p) return null; return (
+                  <button key={a.id} onClick={() => setApplying({ program: p, app: a })} className="text-left bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex items-center gap-4 hover:border-primary transition-colors">
+                    <div className="w-11 h-11 rounded-2xl bg-primary/10 text-primary flex items-center justify-center flex-none"><Lucide.GraduationCap size={20} /></div>
+                    <div className="min-w-0 flex-1"><div className="font-bold text-slate-800 truncate">{p.name}</div><div className="text-[11px] text-slate-400">{p.degree}</div></div>
+                    <UBadge tone={PROG_STATUS[a.status].tone}>{PROG_STATUS[a.status].label}</UBadge>
+                  </button>
+                ); })}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {staff && tab === 'manage' && scopedPrograms.length === 0 && (
+        <div className="bg-white rounded-3xl border border-slate-100"><UEmpty icon={<Lucide.GraduationCap size={26} />} title={isDeg ? 'No degrees yet' : 'No programmes yet'} subtitle={isDeg ? 'Add your first degree programme (BSc, MSc, MA, MBA or PhD).' : 'Add a preparatory programme, short course or educational excursion.'} action={<button className={U_btnPrimary} onClick={() => setEditor({ open: true, program: null })}><Lucide.Plus size={16} /> New {isDeg ? 'degree' : 'programme'}</button>} /></div>
+      )}
+      {staff && tab === 'manage' && scopedPrograms.length > 0 && (
+        <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+          <table className="w-full text-sm">
+            <thead><tr className="text-left text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100"><th className="px-5 py-3">{isDeg ? 'Degree' : 'Programme'}</th><th className="px-5 py-3">Level</th><th className="px-5 py-3">Tuition</th><th className="px-5 py-3">Flow</th><th className="px-5 py-3">Deadline</th><th className="px-5 py-3">Status</th><th className="px-5 py-3"></th></tr></thead>
+            <tbody>
+              {scopedPrograms.map(p => { const apps4 = apps.filter(a => a.program_id === p.id).length; return (
+                <tr key={p.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50/50">
+                  <td className="px-5 py-3"><div className="flex items-center gap-3"><div className="w-12 h-9 rounded-lg overflow-hidden flex-none"><PROG_Banner program={p} className="h-full w-full" /></div><div><div className="font-bold text-slate-700">{p.name}</div><div className="text-[11px] text-slate-400">{p.faculty}{apps4 ? ' · ' + apps4 + ' applicant' + (apps4 === 1 ? '' : 's') : ''}</div></div></div></td>
+                  <td className="px-5 py-3"><UBadge tone={PROG_LEVEL_TONE[p.level]}>{p.degree}</UBadge></td>
+                  <td className="px-5 py-3 font-black text-slate-700">{DL_money(p.tuition)}</td>
+                  <td className="px-5 py-3 text-[12px] font-bold text-slate-400">{(p.steps || []).length} steps</td>
+                  <td className="px-5 py-3 text-[12px] font-semibold text-slate-500">{DL_date(p.deadline)}</td>
+                  <td className="px-5 py-3">{p.is_open ? <UBadge tone="green">Open</UBadge> : <UBadge tone="red">Closed</UBadge>}</td>
+                  <td className="px-5 py-3 text-right"><div className="flex items-center gap-1 justify-end"><button onClick={() => dlUpdate(PROG_TABLE, p.id, { is_open: !p.is_open }, PROG_LS).then(refetch)} className="w-8 h-8 rounded-lg hover:bg-slate-100 text-slate-400 flex items-center justify-center" title={p.is_open ? 'Close applications' : 'Open applications'}>{p.is_open ? <Lucide.Lock size={15} /> : <Lucide.LockOpen size={15} />}</button><button onClick={() => setEditor({ open: true, program: p })} className="w-8 h-8 rounded-lg hover:bg-slate-100 text-slate-400 flex items-center justify-center" title="Edit"><Lucide.Pencil size={15} /></button></div></td>
+                </tr>
+              ); })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {staff && tab === 'applicants' && <PROG_Applicants programs={scopedPrograms} apps={scopedApps} onChange={refetch} />}
+
+      <PROG_Detail program={detail} myApp={detail ? myApps.find(a => a.program_id === detail.id) : null} onClose={() => setDetail(null)} onApply={openApply} />
+      <PROG_Editor open={editor.open} program={editor.program} scope={scope} onClose={() => setEditor({ open: false, program: null })} onSaved={refetch} />
+    </div>
+  );
+};

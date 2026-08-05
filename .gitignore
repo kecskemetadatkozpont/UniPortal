@@ -1,0 +1,16 @@
+# app.bundle.js IS committed on purpose: GitHub Pages serves this branch
+# directly (no CI build step), so the built bundle has to be in the tree.
+# Regenerate it with `npm run build` after every change to app.jsx or features/.
+# Switching Pages to the ci/github-pages.yml workflow makes it a build artifact
+# again — see README, "Automatikus build".
+.app.build.tsx
+
+node_modules/
+
+# Source admissions documents contain real personal data (passport numbers,
+# bank details). They must never reach a public repo or Pages site.
+*.docx
+*.pdf
+
+.DS_Store
+*.log

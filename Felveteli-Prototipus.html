@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+<title>UniPortal — Felvételi folyamat (prototípus)</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: { extend: { colors: {
+      primary: { DEFAULT: 'rgb(208, 103, 0)', 50: '#fff9f2', 100: '#ffefdb', 200: '#ffdcb3', 300: '#ffbf7a', 400: '#ff9842', 500: '#d06700', 600: '#b85200', 700: '#943d00', 800: '#753207', 900: '#612b0a' },
+    } } }
+  };
+</script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Newsreader:opsz@6..72&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.js"></script>
+<style>
+  body { font-family: 'Inter', sans-serif; background: #f8fafc; }
+  @media print {
+    body { background: #fff; }
+    .screen-only { display: none !important; }
+    main, .flex { display: block !important; }
+    #letter-doc { border: none !important; box-shadow: none !important; max-width: none !important; }
+    @page { size: A4; margin: 14mm; }
+  }
+</style>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+<div id="root"></div>
+<script>lucide.createIcons && (window.lucide = lucide);</script>
+<script type="text/babel" src="proto/data.jsx"></script>
+<script type="text/babel" src="proto/components.jsx"></script>
+<script type="text/babel" src="proto/steps-a.jsx"></script>
+<script type="text/babel" src="proto/steps-b.jsx"></script>
+<script type="text/babel" src="proto/steps-c.jsx"></script>
+<script type="text/babel" src="proto/main.jsx"></script>
+</body>
+</html>

@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <title>UniPortal Pro — Neumann János Egyetem</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: {
+              DEFAULT: 'rgb(208, 103, 0)',
+              50: '#fff9f2', 100: '#ffefdb', 200: '#ffdcb3', 300: '#ffbf7a', 400: '#ff9842',
+              500: '#d06700', 600: '#b85200', 700: '#943d00', 800: '#753207', 900: '#612b0a',
+            },
+            indigo: {
+              50: '#fff9f2', 100: '#ffefdb', 200: '#ffdcb3', 300: '#ffbf7a', 400: '#ff9842',
+              500: '#d06700', 600: '#b85200', 700: '#943d00', 800: '#753207', 900: '#612b0a',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <style>
+    body { font-family: 'Inter', sans-serif; }
+    ::-webkit-scrollbar { width: 8px; }
+    ::-webkit-scrollbar-track { background: #f1f1f1; }
+    ::-webkit-scrollbar-thumb { background: rgb(208, 103, 0); border-radius: 10px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgb(184, 82, 0); }
+    .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.05); }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 10px; }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.3); }
+    #__boot { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: #0f172a; color: #fff; font-family: 'Inter', sans-serif; z-index: 9999; }
+    #__boot .s { width: 48px; height: 48px; border: 4px solid rgb(208,103,0); border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+  <script type="importmap">
+  {
+    "imports": {
+      "react": "https://esm.sh/react@18.3.1",
+      "react/": "https://esm.sh/react@18.3.1/",
+      "react-dom": "https://esm.sh/react-dom@18.3.1?deps=react@18.3.1",
+      "react-dom/client": "https://esm.sh/react-dom@18.3.1/client?deps=react@18.3.1",
+      "lucide-react": "https://esm.sh/lucide-react@0.460.0?external=react&deps=react@18.3.1",
+      "recharts": "https://esm.sh/recharts@2.13.3?external=react,react-dom&deps=react@18.3.1,react-dom@18.3.1",
+      "motion": "https://esm.sh/motion@11.13.5?external=react,react-dom&deps=react@18.3.1,react-dom@18.3.1",
+      "motion/react": "https://esm.sh/motion@11.13.5/react?external=react,react-dom&deps=react@18.3.1,react-dom@18.3.1"
+    }
+  }
+  </script>
+  <!-- Babel is only needed by the no-build fallback path; it is loaded on
+       demand there (see boot() below) so a built deploy never pays for it. -->
+  <!-- Supabase client (Step 4: live backend) -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script>
+    window.SUPABASE_URL = 'https://mdccyastwhzwtyukxlpk.supabase.co';
+    window.SUPABASE_ANON_KEY = 'sb_publishable_S6syNS_lBfb93fT54WaLJg_aYNDqv9M';
+    try {
+      window.sb = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+    } catch (e) { console.error('Failed to init Supabase client', e); }
+  </script>
+</head>
+<body class="bg-slate-50 text-slate-900 overflow-x-hidden">
+  <div id="__boot"><div class="s"></div></div>
+  <div id="root"></div>
+  <script type="module">
+    // Fast path: `npm run build` (and the Pages workflow) precompiles app.jsx +
+    // features/*.jsx into app.bundle.js with esbuild, so the browser skips the
+    // slow in-page Babel pass entirely. Without a build (plain `python3 -m
+    // http.server`) the file is absent and we fall back to compiling in-page.
+    async function hasPrebuilt() {
+      try { return (await fetch('app.bundle.js', { method: 'HEAD' })).ok; }
+      catch (e) { return false; }
+    }
+
+    function loadBabel() {
+      return new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = 'https://unpkg.com/@babel/standalone@7.29.0/babel.min.js';
+        s.integrity = 'sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y';
+        s.crossOrigin = 'anonymous';
+        s.onload = resolve;
+        s.onerror = () => reject(new Error('Failed to load @babel/standalone'));
+        document.head.appendChild(s);
+      });
+    }
+
+    async function boot() {
+      try {
+        // Deliberately outside the fallback: a runtime error inside the bundle
+        // must surface as an error, not silently re-mount the app via Babel.
+        if (await hasPrebuilt()) { await import('./app.bundle.js'); return; }
+        let src = await (await fetch('app.jsx')).text();
+        // New feature modules are concatenated into app.jsx's module (shared
+        // scope) at the /*__FEATURES__*/ marker, just before the App component.
+        const FEATURE_FILES = ['features/data-layer.jsx', 'features/knowledge-base.jsx', 'features/feed.jsx', 'features/programs.jsx', 'features/assistant.jsx'];
+        try {
+          const parts = await Promise.all(FEATURE_FILES.map(f => fetch(f).then(r => r.ok ? r.text() : '')));
+          const featureCode = parts.join('\n\n');
+          if (src.indexOf('/*__FEATURES__*/') >= 0) src = src.replace('/*__FEATURES__*/', featureCode);
+          else src += '\n\n' + featureCode;
+        } catch (e) { console.error('Feature modules failed to load', e); }
+        // Cache the compiled output keyed by source length so repeat visits
+        // skip the (slow) Babel pass and load near-instantly.
+        const cacheKey = 'uniportal_compiled_v4';
+        const cacheLenKey = 'uniportal_compiled_len_v4';
+        // Drop superseded compile caches so we don't hit the localStorage quota
+        // (these hold regenerable compiled code only — never user data).
+        try { ['uniportal_compiled_v3', 'uniportal_compiled_len_v3'].forEach(k => localStorage.removeItem(k)); } catch (e) {}
+        let code;
+        try {
+          if (localStorage.getItem(cacheLenKey) === String(src.length)) {
+            code = localStorage.getItem(cacheKey) || null;
+          }
+        } catch (e) {}
+        if (!code) {
+          await loadBabel();
+          code = Babel.transform(src, {
+            filename: 'app.tsx',
+            sourceType: 'module',
+            compact: true,
+            comments: false,
+            presets: [
+              ['typescript', { allExtensions: true, isTSX: true, onlyRemoveTypeImports: true }],
+              ['react', { runtime: 'classic' }]
+            ]
+          }).code;
+          try { localStorage.setItem(cacheKey, code); localStorage.setItem(cacheLenKey, String(src.length)); } catch (e) { try { localStorage.removeItem(cacheKey); localStorage.removeItem(cacheLenKey); } catch (e2) {} }
+        }
+        const blob = new Blob([code], { type: 'text/javascript' });
+        const url = URL.createObjectURL(blob);
+        await import(url);
+      } catch (err) {
+        console.error(err);
+        const boot = document.getElementById('__boot');
+        if (boot) {
+          boot.style.flexDirection = 'column';
+          boot.style.padding = '40px';
+          boot.innerHTML = '<div style="max-width:760px;font-family:monospace;color:#fca5a5;white-space:pre-wrap;font-size:13px;line-height:1.5">Hiba az alkalmazás betöltésekor:\n\n' +
+            String(err && (err.stack || err.message || err)).replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c])) + '</div>';
+        }
+      }
+    }
+    boot();
+  </script>
+</body>
+</html>

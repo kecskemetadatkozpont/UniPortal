@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <title>UniPortal Pro — Neumann János University | International Admissions Platform</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: {
+              DEFAULT: 'rgb(208, 103, 0)',
+              50: '#fff9f2', 100: '#ffefdb', 200: '#ffdcb3', 300: '#ffbf7a', 400: '#ff9842',
+              500: '#d06700', 600: '#b85200', 700: '#943d00', 800: '#753207', 900: '#612b0a',
+            },
+            ink: '#0f172a',
+          },
+          fontFamily: { sans: ['Inter', 'sans-serif'] },
+        }
+      }
+    }
+  </script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <!-- Supabase client (Step 5: real email + password auth) -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script>
+    window.SUPABASE_URL = 'https://mdccyastwhzwtyukxlpk.supabase.co';
+    window.SUPABASE_ANON_KEY = 'sb_publishable_S6syNS_lBfb93fT54WaLJg_aYNDqv9M';
+    try { window.sb = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY); }
+    catch (e) { console.error('Failed to init Supabase client', e); }
+  </script>
+  <style>
+    html { scroll-behavior: smooth; }
+    body { font-family: 'Inter', sans-serif; }
+    .grain { background-image: radial-gradient(circle at 1px 1px, rgba(208,103,0,.10) 1px, transparent 0); background-size: 22px 22px; }
+    ::-webkit-scrollbar { width: 10px; }
+    ::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
+
+    /* ===== Tutorial demos: JS-driven state machine (finite transitions) ===== */
+    .demo-stage.hidden { display: none; }
+    .demo-stage .fo { opacity: 1; transition: opacity .5s ease; }
+    .demo-stage.played .fo { opacity: 0; }
+    .demo-stage .fi { opacity: 0; transition: opacity .5s ease; }
+    .demo-stage.played .fi { opacity: 1; }
+    .demo-stage .fi.dl, .demo-stage .ri.dl { transition-delay: .35s; }
+    .demo-stage .gr { transition: width .9s cubic-bezier(.2,.7,.3,1); }
+    .demo-stage.played .gr { width: 88% !important; }
+    .demo-stage .ri { opacity: 0; transform: translateY(8px); transition: opacity .5s ease, transform .5s ease; }
+    .demo-stage.played .ri { opacity: 1; transform: none; }
+    .demo-stage .cur { opacity: 0; transition: top .8s cubic-bezier(.5,0,.2,1), left .8s cubic-bezier(.5,0,.2,1), opacity .4s ease; }
+    .demo-stage.played .cur { opacity: 1; top: 78px !important; left: 50% !important; }
+    @media (prefers-reduced-motion: reduce) { .demo-stage * { transition: none !important; } }
+  </style>
+</head>
+<body class="bg-white text-ink antialiased">
+
+  <!-- ===== NAV ===== -->
+  <header class="sticky top-0 z-40 bg-white/80 backdrop-blur-xl border-b border-slate-100">
+    <div class="max-w-6xl mx-auto px-6 flex items-center justify-between py-4">
+      <a href="#top" class="flex items-center gap-3">
+        <div class="flex items-center gap-2">
+          <span class="text-2xl font-black tracking-tight text-primary-600">NJE</span>
+          <span class="w-px h-7 bg-slate-200"></span>
+          <span class="leading-none">
+            <span class="block text-[11px] font-black tracking-[0.18em] text-ink">UNIPORTAL</span>
+            <span class="block text-[9px] font-bold tracking-[0.18em] text-slate-400">PRO</span>
+          </span>
+        </div>
+      </a>
+      <nav class="hidden md:flex items-center gap-8 text-sm font-semibold text-slate-500">
+        <a href="#audience" class="hover:text-primary-600 transition-colors">Who it's for</a>
+        <a href="#demos" class="hover:text-primary-600 transition-colors">See it in action</a>
+        <a href="#process" class="hover:text-primary-600 transition-colors">Process</a>
+        <a href="#modules" class="hover:text-primary-600 transition-colors">Modules</a>
+      </nav>
+      <div class="flex items-center gap-2">
+        <button onclick="openAuth('login')" class="px-4 py-2.5 rounded-xl text-sm font-bold text-ink hover:bg-slate-100 transition-colors">Sign in</button>
+        <button onclick="openAuth('register')" class="px-4 py-2.5 rounded-xl text-sm font-bold text-white bg-primary-600 hover:bg-primary-700 shadow-lg shadow-primary-600/20 transition-all active:scale-95">Sign up</button>
+      </div>
+    </div>
+  </header>
+
+  <main id="top">
+    <!-- ===== HERO ===== -->
+    <section class="relative overflow-hidden grain">
+      <div class="absolute -top-40 -right-40 w-[36rem] h-[36rem] rounded-full bg-primary-100/50 blur-3xl"></div>
+      <div class="max-w-6xl mx-auto px-6 pt-20 pb-24 grid lg:grid-cols-2 gap-16 items-center relative">
+        <div>
+          <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-primary-50 border border-primary-100 text-primary-700 text-xs font-bold mb-7">
+            <span class="w-1.5 h-1.5 rounded-full bg-primary-500"></span>
+            Neumann János University · International Admissions
+          </div>
+          <h1 class="text-[2.7rem] leading-[1.05] sm:text-6xl font-black tracking-tight text-ink" style="text-wrap:balance">
+            The entire admissions journey on <span class="text-primary-600">one platform</span>.
+          </h1>
+          <p class="mt-6 text-lg text-slate-500 leading-relaxed max-w-lg">
+            From application through review and visa to enrollment. Built for applicants, agents, and university staff — in one transparent system.
+          </p>
+          <div class="mt-9 flex flex-wrap items-center gap-3">
+            <button onclick="openAuth('register')" class="group px-6 py-3.5 rounded-2xl text-sm font-bold text-white bg-primary-600 hover:bg-primary-700 shadow-xl shadow-primary-600/25 transition-all active:scale-95 flex items-center gap-2">
+              Create account
+              <i data-lucide="arrow-right" class="w-4 h-4 group-hover:translate-x-0.5 transition-transform"></i>
+            </button>
+            <button onclick="document.getElementById('demos').scrollIntoView()" class="px-6 py-3.5 rounded-2xl text-sm font-bold text-ink bg-white border border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-all active:scale-95 flex items-center gap-2">
+              <i data-lucide="play" class="w-4 h-4 text-primary-600"></i> Watch demos
+            </button>
+          </div>
+          <div class="mt-7 flex items-center gap-5 text-xs font-semibold text-slate-400">
+            <span class="flex items-center gap-1.5"><i data-lucide="check" class="w-4 h-4 text-primary-500"></i> Try it instantly</span>
+            <span class="flex items-center gap-1.5"><i data-lucide="check" class="w-4 h-4 text-primary-500"></i> 12 integrated modules</span>
+          </div>
+        </div>
+
+        <!-- Product preview -->
+        <div class="relative">
+          <div class="absolute inset-0 scale-95 translate-y-6 bg-primary-200/30 rounded-[2rem] blur-2xl"></div>
+          <div class="relative rounded-[1.6rem] bg-white shadow-2xl shadow-slate-300/40 border border-slate-100 overflow-hidden">
+            <div class="flex items-center gap-2 px-4 h-10 bg-slate-50 border-b border-slate-100">
+              <span class="w-2.5 h-2.5 rounded-full bg-slate-300"></span>
+              <span class="w-2.5 h-2.5 rounded-full bg-slate-300"></span>
+              <span class="w-2.5 h-2.5 rounded-full bg-slate-300"></span>
+              <div class="ml-3 flex-1 h-5 rounded-md bg-white border border-slate-100 flex items-center px-2">
+                <span class="text-[9px] font-bold text-slate-300 tracking-wide">uniportal.nje.hu</span>
+              </div>
+            </div>
+            <div class="flex h-[19rem]">
+              <aside class="w-[34%] bg-primary-600 p-3.5 flex flex-col gap-1.5">
+                <div class="text-white font-black text-sm mb-3 px-1">UniPortal</div>
+                <div class="flex items-center gap-2 px-2.5 py-2 rounded-lg bg-white/20 text-white text-[10px] font-bold"><i data-lucide="wallet" class="w-3.5 h-3.5"></i> Finance</div>
+                <div class="flex items-center gap-2 px-2.5 py-2 rounded-lg text-white/70 text-[10px] font-semibold"><i data-lucide="file-text" class="w-3.5 h-3.5"></i> Admissions</div>
+                <div class="flex items-center gap-2 px-2.5 py-2 rounded-lg text-white/70 text-[10px] font-semibold"><i data-lucide="message-square" class="w-3.5 h-3.5"></i> CRM</div>
+                <div class="flex items-center gap-2 px-2.5 py-2 rounded-lg text-white/70 text-[10px] font-semibold"><i data-lucide="shield-check" class="w-3.5 h-3.5"></i> Visa</div>
+                <div class="flex items-center gap-2 px-2.5 py-2 rounded-lg text-white/70 text-[10px] font-semibold"><i data-lucide="bar-chart-2" class="w-3.5 h-3.5"></i> Reports</div>
+              </aside>
+              <div class="flex-1 p-4 bg-white">
+                <div class="text-sm font-black text-ink">Finance</div>
+                <div class="text-[9px] text-slate-400 font-semibold mb-3">Revenue & receivables</div>
+                <div class="grid grid-cols-2 gap-2.5 mb-4">
+                  <div class="rounded-xl bg-primary-50 border border-primary-100 p-2.5">
+                    <div class="text-[8px] font-bold text-primary-700/70 uppercase tracking-wider">Revenue (monthly)</div>
+                    <div class="text-lg font-black text-ink mt-0.5">€14,750</div>
+                    <div class="text-[8px] font-bold text-emerald-600 mt-0.5">+14.2%</div>
+                  </div>
+                  <div class="rounded-xl bg-slate-50 border border-slate-100 p-2.5">
+                    <div class="text-[8px] font-bold text-slate-400 uppercase tracking-wider">Pending</div>
+                    <div class="text-lg font-black text-ink mt-0.5">€14,200</div>
+                    <div class="text-[8px] font-bold text-slate-400 mt-0.5">3 items</div>
+                  </div>
+                </div>
+                <div class="flex items-end gap-1.5 h-16 px-1">
+                  <div class="flex-1 rounded-t bg-primary-200" style="height:42%"></div>
+                  <div class="flex-1 rounded-t bg-primary-300" style="height:64%"></div>
+                  <div class="flex-1 rounded-t bg-primary-400" style="height:50%"></div>
+                  <div class="flex-1 rounded-t bg-primary-500" style="height:82%"></div>
+                  <div class="flex-1 rounded-t bg-primary-600" style="height:70%"></div>
+                  <div class="flex-1 rounded-t bg-primary-300" style="height:58%"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== PERSONAS ===== -->
+    <section id="audience" class="py-24 bg-slate-50/60 border-y border-slate-100">
+      <div class="max-w-6xl mx-auto px-6">
+        <div class="max-w-2xl mb-14">
+          <span class="text-xs font-black uppercase tracking-[0.18em] text-primary-600">Who it's for</span>
+          <h2 class="mt-3 text-4xl font-black tracking-tight text-ink">One platform, three perspectives</h2>
+          <p class="mt-4 text-slate-500 text-lg">Every role gets its own focused interface — on shared, real-time data.</p>
+        </div>
+        <div class="grid md:grid-cols-3 gap-6">
+          <div class="bg-white rounded-3xl border border-slate-100 p-8 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all">
+            <div class="w-12 h-12 rounded-2xl bg-primary-50 text-primary-600 flex items-center justify-center mb-6"><i data-lucide="graduation-cap" class="w-6 h-6"></i></div>
+            <h3 class="text-xl font-black text-ink">For applicants</h3>
+            <p class="mt-2 text-sm text-slate-500 leading-relaxed">Apply and track your progress transparently, from admission to enrollment.</p>
+            <ul class="mt-5 space-y-2.5 text-sm text-slate-600">
+              <li class="flex gap-2.5"><i data-lucide="check" class="w-4 h-4 text-primary-500 shrink-0 mt-0.5"></i> Online application & document upload</li>
+              <li class="flex gap-2.5"><i data-lucide="check" class="w-4 h-4 text-primary-500 shrink-0 mt-0.5"></i> Video interview & status tracking</li>
+              <li class="flex gap-2.5"><i data-lucide="check" class="w-4 h-4 text-primary-500 shrink-0 mt-0.5"></i> Visa checklist & online payment</li>
+            </ul>
+            <button onclick="openAuth('register','student')" class="mt-7 w-full py-3 rounded-xl text-sm font-bold text-white bg-primary-600 hover:bg-primary-700 transition-colors">Sign up as applicant</button>
+          </div>
+          <div class="bg-white rounded-3xl border border-slate-100 p-8 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all">
+            <div class="w-12 h-12 rounded-2xl bg-primary-50 text-primary-600 flex items-center justify-center mb-6"><i data-lucide="briefcase" class="w-6 h-6"></i></div>
+            <h3 class="text-xl font-black text-ink">For agents & partners</h3>
+            <p class="mt-2 text-sm text-slate-500 leading-relaxed">Manage your submitted applicants and commission in a single portal.</p>
+            <ul class="mt-5 space-y-2.5 text-sm text-slate-600">
+              <li class="flex gap-2.5"><i data-lucide="check" class="w-4 h-4 text-primary-500 shrink-0 mt-0.5"></i> Manage applicants in one place</li>
+              <li class="flex gap-2.5"><i data-lucide="check" class="w-4 h-4 text-primary-500 shrink-0 mt-0.5"></i> Track commission & performance</li>
+              <li class="flex gap-2.5"><i data-lucide="check" class="w-4 h-4 text-primary-500 shrink-0 mt-0.5"></i> Shared admissions pipeline</li>
+            </ul>
+            <button onclick="openAuth('register','agent')" class="mt-7 w-full py-3 rounded-xl text-sm font-bold text-white bg-primary-600 hover:bg-primary-700 transition-colors">Sign up as agent</button>
+          </div>
+          <div class="bg-white rounded-3xl border border-slate-100 p-8 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all">
+            <div class="w-12 h-12 rounded-2xl bg-ink text-white flex items-center justify-center mb-6"><i data-lucide="building-2" class="w-6 h-6"></i></div>
+            <h3 class="text-xl font-black text-ink">For university staff</h3>
+            <p class="mt-2 text-sm text-slate-500 leading-relaxed">Review, finance, CRM and reporting — full end-to-end administration.</p>
+            <ul class="mt-5 space-y-2.5 text-sm text-slate-600">
+              <li class="flex gap-2.5"><i data-lucide="check" class="w-4 h-4 text-primary-500 shrink-0 mt-0.5"></i> Admissions review & finance</li>
+              <li class="flex gap-2.5"><i data-lucide="check" class="w-4 h-4 text-primary-500 shrink-0 mt-0.5"></i> CRM, communication & marketing</li>
+              <li class="flex gap-2.5"><i data-lucide="check" class="w-4 h-4 text-primary-500 shrink-0 mt-0.5"></i> Reports & system administration</li>
+            </ul>
+            <button onclick="openAuth('login')" class="mt-7 w-full py-3 rounded-xl text-sm font-bold text-ink bg-slate-100 hover:bg-slate-200 transition-colors">Staff sign in</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== DEMOS / SEE IT IN ACTION ===== -->
+    <section id="demos" class="py-24">
+      <div class="max-w-6xl mx-auto px-6">
+        <div class="max-w-2xl mb-14">
+          <span class="text-xs font-black uppercase tracking-[0.18em] text-primary-600">See it in action</span>
+          <h2 class="mt-3 text-4xl font-black tracking-tight text-ink">Short guided demos</h2>
+          <p class="mt-4 text-slate-500 text-lg">Watch the key features at work — pick a topic to play its quick walkthrough.</p>
+        </div>
+
+        <div class="grid lg:grid-cols-[300px_1fr] gap-8 items-start">
+          <!-- Tabs -->
+          <div class="flex lg:flex-col gap-2 overflow-x-auto pb-2 lg:pb-0" id="demoTabs"></div>
+
+          <!-- Stage -->
+          <div>
+            <div class="relative rounded-[1.4rem] bg-slate-900 border border-slate-800 shadow-2xl overflow-hidden">
+              <div class="flex items-center gap-2 px-4 h-9 bg-slate-800/60">
+                <span class="w-2.5 h-2.5 rounded-full bg-slate-600"></span>
+                <span class="w-2.5 h-2.5 rounded-full bg-slate-600"></span>
+                <span class="w-2.5 h-2.5 rounded-full bg-slate-600"></span>
+                <span class="ml-2 text-[10px] font-bold text-slate-500 tracking-wide flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-primary-500"></span> Auto-playing demo</span>
+                <span class="ml-auto text-[10px] font-bold text-slate-500" id="demoLabel">Admissions review</span>
+              </div>
+              <div class="p-6 sm:p-8 bg-gradient-to-br from-slate-50 to-slate-100 min-h-[20rem] flex items-center justify-center">
+                <div class="w-full max-w-md" id="demoStages">
+
+                  <!-- Demo: review -->
+                  <div class="demo-stage" data-demo="review">
+                    <div class="rounded-2xl bg-white border border-slate-100 shadow-lg p-5">
+                      <div class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Applicant evaluation</div>
+                      <div class="flex items-center gap-3 mb-5">
+                        <div class="w-10 h-10 rounded-xl bg-primary-100 text-primary-700 font-black flex items-center justify-center text-sm">CW</div>
+                        <div>
+                          <div class="text-sm font-black text-ink">Chen Wei</div>
+                          <div class="text-[11px] text-slate-400 font-semibold">BSc Business Admin</div>
+                        </div>
+                        <div class="ml-auto relative w-24 h-7">
+                          <span class="fo absolute inset-0 flex items-center justify-center rounded-full bg-amber-100 text-amber-700 text-[10px] font-black uppercase tracking-wide">Submitted</span>
+                          <span class="fi absolute inset-0 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-700 text-[10px] font-black uppercase tracking-wide">Accepted</span>
+                        </div>
+                      </div>
+                      <div class="space-y-3">
+                        <div>
+                          <div class="flex justify-between text-[11px] font-bold mb-1"><span class="text-slate-500">Overall score</span><span class="text-primary-600">88 / 100</span></div>
+                          <div class="h-2.5 rounded-full bg-slate-100 overflow-hidden"><div class="gr h-full rounded-full bg-primary-500" style="width:14%"></div></div>
+                        </div>
+                        <div class="grid grid-cols-3 gap-2 pt-1">
+                          <div class="rounded-lg bg-slate-50 p-2 text-center"><div class="text-[8px] font-bold text-slate-400 uppercase">Motivation</div><div class="text-xs font-black text-ink">4/5</div></div>
+                          <div class="rounded-lg bg-slate-50 p-2 text-center"><div class="text-[8px] font-bold text-slate-400 uppercase">GPA</div><div class="text-xs font-black text-ink">9/10</div></div>
+                          <div class="rounded-lg bg-slate-50 p-2 text-center"><div class="text-[8px] font-bold text-slate-400 uppercase">Language</div><div class="text-xs font-black text-ink">5/5</div></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Demo: finance -->
+                  <div class="demo-stage hidden" data-demo="finance">
+                    <div class="rounded-2xl bg-white border border-slate-100 shadow-lg p-5">
+                      <div class="flex items-center justify-between mb-4">
+                        <div class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Payments</div>
+                        <div class="relative text-right">
+                          <span class="fo block text-sm font-black text-ink">€14,700</span>
+                          <span class="fi absolute inset-0 text-sm font-black text-emerald-600">€14,750</span>
+                          <span class="ri dl absolute -right-1 -top-4 text-[10px] font-black text-emerald-500">+€50</span>
+                        </div>
+                      </div>
+                      <div class="flex items-center gap-3 p-3 rounded-xl border border-slate-100 bg-slate-50/50">
+                        <div class="w-9 h-9 rounded-lg bg-primary-100 text-primary-700 flex items-center justify-center"><i data-lucide="receipt" class="w-4 h-4"></i></div>
+                        <div class="min-w-0">
+                          <div class="text-xs font-black text-ink">Application Fee · €50</div>
+                          <div class="text-[10px] text-slate-400 font-semibold">Chen Wei · Bank transfer</div>
+                        </div>
+                        <div class="ml-auto flex items-center gap-2">
+                          <div class="relative w-16 h-6">
+                            <span class="fo absolute inset-0 flex items-center justify-center rounded-full bg-amber-100 text-amber-700 text-[9px] font-black uppercase">Pending</span>
+                            <span class="fi absolute inset-0 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-700 text-[9px] font-black uppercase">Paid</span>
+                          </div>
+                          <span class="inline-flex items-center justify-center px-2.5 py-1.5 rounded-lg bg-emerald-600 text-white text-[9px] font-black">Verify</span>
+                        </div>
+                      </div>
+                      <div class="mt-3 text-[10px] text-slate-400 font-semibold flex items-center gap-1.5"><i data-lucide="lock" class="w-3 h-3"></i> Verified transfers post to revenue instantly.</div>
+                    </div>
+                  </div>
+
+                  <!-- Demo: interview -->
+                  <div class="demo-stage hidden" data-demo="interview">
+                    <div class="relative rounded-2xl bg-white border border-slate-100 shadow-lg p-5">
+                      <div class="cur absolute z-10 w-4 h-4" style="top:8px;left:64%"><i data-lucide="mouse-pointer-2" class="w-4 h-4 text-ink fill-white"></i></div>
+                      <div class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Interview slots · Mar 25</div>
+                      <div class="space-y-2">
+                        <div class="flex items-center justify-between p-3 rounded-xl border border-slate-100"><span class="text-xs font-bold text-ink">09:00 – 09:30</span><span class="text-[9px] font-black uppercase text-slate-400">Available</span></div>
+                        <div class="relative flex items-center justify-between p-3 rounded-xl border border-primary-200 bg-primary-50/40">
+                          <span class="text-xs font-bold text-ink">10:00 – 10:30</span>
+                          <span class="relative w-20 h-5">
+                            <span class="fo absolute inset-0 flex items-center justify-end text-[9px] font-black uppercase text-slate-400">Available</span>
+                            <span class="fi absolute inset-0 flex items-center justify-end gap-1 text-[9px] font-black uppercase text-emerald-600"><i data-lucide="video" class="w-3 h-3"></i> Booked</span>
+                          </span>
+                        </div>
+                        <div class="flex items-center justify-between p-3 rounded-xl border border-slate-100"><span class="text-xs font-bold text-ink">11:00 – 11:30</span><span class="text-[9px] font-black uppercase text-slate-400">Available</span></div>
+                      </div>
+                      <div class="fi dl mt-3 text-[10px] text-emerald-600 font-bold flex items-center gap-1.5"><i data-lucide="link" class="w-3 h-3"></i> Teams meeting link generated automatically</div>
+                    </div>
+                  </div>
+
+                  <!-- Demo: crm -->
+                  <div class="demo-stage hidden" data-demo="crm">
+                    <div class="rounded-2xl bg-white border border-slate-100 shadow-lg overflow-hidden">
+                      <div class="flex items-center gap-2.5 px-4 py-3 bg-emerald-600 text-white">
+                        <div class="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center"><i data-lucide="message-circle" class="w-4 h-4"></i></div>
+                        <div><div class="text-xs font-black">Chen Wei</div><div class="text-[9px] text-white/70 font-semibold">WhatsApp · online</div></div>
+                      </div>
+                      <div class="p-4 bg-[#f0f2f5] min-h-[9rem] flex flex-col justify-end gap-2">
+                        <div class="fo self-start flex items-center gap-1 px-3 py-2 rounded-2xl rounded-bl-sm bg-white shadow-sm">
+                          <span class="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
+                          <span class="w-1.5 h-1.5 rounded-full bg-slate-300"></span>
+                          <span class="w-1.5 h-1.5 rounded-full bg-slate-200"></span>
+                        </div>
+                        <div class="ri self-end max-w-[85%] px-3 py-2 rounded-2xl rounded-br-sm bg-[#d9fdd3] shadow-sm">
+                          <p class="text-[11px] text-ink leading-snug">Dear Chen Wei, your application has been <b>accepted</b>! Please complete enrollment by Apr 1. 🎓</p>
+                          <div class="fi dl flex items-center justify-end gap-1 mt-1 text-[8px] text-emerald-600 font-bold">12:04 <i data-lucide="check-check" class="w-3 h-3"></i></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                </div>
+              </div>
+              <div class="h-1 bg-slate-800"></div>
+            </div>
+            <p class="mt-4 text-sm text-slate-500 font-medium flex items-center gap-2" id="demoCaption">
+              <i data-lucide="info" class="w-4 h-4 text-primary-500 shrink-0"></i>
+              <span>Reviewers score an applicant — the status updates to Accepted in real time.</span>
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== WORKFLOW ===== -->
+    <section id="process" class="py-24 bg-slate-50/60 border-y border-slate-100">
+      <div class="max-w-6xl mx-auto px-6">
+        <div class="max-w-2xl mb-14">
+          <span class="text-xs font-black uppercase tracking-[0.18em] text-primary-600">The process</span>
+          <h2 class="mt-3 text-4xl font-black tracking-tight text-ink">The admission journey, end to end</h2>
+        </div>
+        <div class="grid md:grid-cols-4 gap-6">
+          <div class="relative">
+            <div class="text-5xl font-black text-primary-100">01</div>
+            <div class="w-11 h-11 rounded-2xl bg-primary-50 text-primary-600 flex items-center justify-center -mt-3 mb-4"><i data-lucide="file-text" class="w-5 h-5"></i></div>
+            <h3 class="font-black text-ink">Application</h3>
+            <p class="mt-1.5 text-sm text-slate-500 leading-relaxed">Online form, documents and recommendation letters.</p>
+          </div>
+          <div class="relative">
+            <div class="text-5xl font-black text-primary-100">02</div>
+            <div class="w-11 h-11 rounded-2xl bg-primary-50 text-primary-600 flex items-center justify-center -mt-3 mb-4"><i data-lucide="pie-chart" class="w-5 h-5"></i></div>
+            <h3 class="font-black text-ink">Review & interview</h3>
+            <p class="mt-1.5 text-sm text-slate-500 leading-relaxed">Scoring, video interview and slot booking in one place.</p>
+          </div>
+          <div class="relative">
+            <div class="text-5xl font-black text-primary-100">03</div>
+            <div class="w-11 h-11 rounded-2xl bg-primary-50 text-primary-600 flex items-center justify-center -mt-3 mb-4"><i data-lucide="shield-check" class="w-5 h-5"></i></div>
+            <h3 class="font-black text-ink">Offer & visa</h3>
+            <p class="mt-1.5 text-sm text-slate-500 leading-relaxed">Conditional offer, visa checklist and compliance.</p>
+          </div>
+          <div class="relative">
+            <div class="text-5xl font-black text-primary-100">04</div>
+            <div class="w-11 h-11 rounded-2xl bg-primary-50 text-primary-600 flex items-center justify-center -mt-3 mb-4"><i data-lucide="check-circle-2" class="w-5 h-5"></i></div>
+            <h3 class="font-black text-ink">Enrollment</h3>
+            <p class="mt-1.5 text-sm text-slate-500 leading-relaxed">Payment, invoicing and finalized enrollment.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== MODULES ===== -->
+    <section id="modules" class="py-24 bg-ink text-white relative overflow-hidden">
+      <div class="absolute -bottom-32 -left-32 w-[34rem] h-[34rem] rounded-full bg-primary-600/20 blur-3xl"></div>
+      <div class="max-w-6xl mx-auto px-6 relative">
+        <div class="max-w-2xl mb-14">
+          <span class="text-xs font-black uppercase tracking-[0.18em] text-primary-400">Modules</span>
+          <h2 class="mt-3 text-4xl font-black tracking-tight">One system, twelve modules</h2>
+          <p class="mt-4 text-slate-400 text-lg">Everything you need for international admissions and the student lifecycle.</p>
+        </div>
+        <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4" id="moduleGrid"></div>
+      </div>
+    </section>
+
+    <!-- ===== CTA ===== -->
+    <section class="py-24">
+      <div class="max-w-4xl mx-auto px-6">
+        <div class="rounded-[2rem] bg-primary-600 grain px-10 py-16 text-center shadow-2xl shadow-primary-600/25 relative overflow-hidden">
+          <div class="absolute inset-0 bg-gradient-to-br from-primary-500/0 to-primary-800/30"></div>
+          <div class="relative">
+            <h2 class="text-3xl sm:text-4xl font-black text-white tracking-tight" style="text-wrap:balance">Ready to get started?</h2>
+            <p class="mt-4 text-primary-50/90 max-w-md mx-auto">Create your account in seconds, or sign in as staff.</p>
+            <div class="mt-8 flex flex-wrap justify-center gap-3">
+              <button onclick="openAuth('register')" class="px-7 py-3.5 rounded-2xl text-sm font-bold text-primary-700 bg-white hover:bg-primary-50 transition-all active:scale-95">Create account</button>
+              <button onclick="openAuth('login')" class="px-7 py-3.5 rounded-2xl text-sm font-bold text-white bg-white/15 border border-white/25 hover:bg-white/25 transition-all active:scale-95">Sign in</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ===== FOOTER ===== -->
+  <footer class="border-t border-slate-100 py-12">
+    <div class="max-w-6xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-6">
+      <div class="flex items-center gap-2">
+        <span class="text-xl font-black tracking-tight text-primary-600">NJE</span>
+        <span class="w-px h-6 bg-slate-200"></span>
+        <span class="text-xs font-bold tracking-wide text-slate-400">Neumann János University · UniPortal Pro</span>
+      </div>
+      <p class="text-xs text-slate-400">© 2026 Neumann János University. Demo interface.</p>
+    </div>
+  </footer>
+
+  <!-- ===== AUTH MODAL ===== -->
+  <div class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-ink/50 backdrop-blur-sm" id="authModal" onclick="if(event.target===this)closeAuth()">
+    <div class="modal-card w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden">
+      <div class="flex items-center justify-between px-7 pt-6">
+        <div class="flex items-center gap-2">
+          <span class="text-xl font-black tracking-tight text-primary-600">NJE</span>
+          <span class="w-px h-6 bg-slate-200"></span>
+          <span class="text-[11px] font-black tracking-[0.16em] text-ink">UNIPORTAL</span>
+        </div>
+        <button onclick="closeAuth()" class="w-9 h-9 rounded-xl flex items-center justify-center text-slate-400 hover:bg-slate-100 transition-colors"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+
+      <div class="px-7 mt-6">
+        <div class="flex p-1 bg-slate-100 rounded-2xl text-sm font-bold">
+          <button id="tabLogin" onclick="switchTab('login')" class="flex-1 py-2.5 rounded-xl transition-all">Sign in</button>
+          <button id="tabRegister" onclick="switchTab('register')" class="flex-1 py-2.5 rounded-xl transition-all">Sign up</button>
+        </div>
+      </div>
+
+      <!-- LOGIN -->
+      <form id="formLogin" class="px-7 py-7 space-y-4" onsubmit="return doLogin(event)">
+        <div>
+          <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Email address</label>
+          <div class="relative">
+            <i data-lucide="mail" class="w-4 h-4 text-slate-300 absolute left-4 top-1/2 -translate-y-1/2"></i>
+            <input id="loginEmail" type="email" required placeholder="e.g. admin@uni.hu" class="w-full bg-slate-50 border border-slate-100 rounded-2xl pl-11 pr-4 py-3.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-300 transition-all" />
+          </div>
+        </div>
+        <div>
+          <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Password</label>
+          <div class="relative">
+            <i data-lucide="lock" class="w-4 h-4 text-slate-300 absolute left-4 top-1/2 -translate-y-1/2"></i>
+            <input id="loginPassword" type="password" required placeholder="••••••••" class="w-full bg-slate-50 border border-slate-100 rounded-2xl pl-11 pr-4 py-3.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-300 transition-all" />
+          </div>
+        </div>
+        <div id="loginError" class="hidden text-[12px] font-semibold text-red-600 bg-red-50 border border-red-100 rounded-xl px-3 py-2.5"></div>
+        <button id="loginBtn" class="w-full py-3.5 rounded-2xl text-sm font-bold text-white bg-primary-600 hover:bg-primary-700 shadow-lg shadow-primary-600/20 transition-all active:scale-95">Sign in</button>
+        <div class="pt-4 border-t border-slate-100">
+          <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">Quick sign-in with a demo account</p>
+          <div class="flex flex-wrap gap-2" id="demoChips"></div>
+        </div>
+      </form>
+
+      <!-- REGISTER -->
+      <form id="formRegister" class="px-7 py-7 space-y-4 hidden" onsubmit="return doRegister(event)">
+        <div>
+          <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">I'm signing up as</label>
+          <div class="grid grid-cols-2 gap-2" id="personaPick">
+            <button type="button" data-persona="student" class="persona-btn py-2.5 rounded-xl text-sm font-bold border transition-all">Applicant</button>
+            <button type="button" data-persona="agent" class="persona-btn py-2.5 rounded-xl text-sm font-bold border transition-all">Agent</button>
+          </div>
+        </div>
+        <div>
+          <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Full name</label>
+          <input id="regName" type="text" required placeholder="e.g. Anna Kovács" class="w-full bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-300 transition-all" />
+        </div>
+        <div>
+          <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Email address</label>
+          <input id="regEmail" type="email" required placeholder="e.g. anna@example.com" class="w-full bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-300 transition-all" />
+        </div>
+        <div>
+          <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Password</label>
+          <input id="regPassword" type="password" required minlength="6" placeholder="At least 6 characters" class="w-full bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-300 transition-all" />
+        </div>
+        <div id="regError" class="hidden text-[12px] font-semibold text-red-600 bg-red-50 border border-red-100 rounded-xl px-3 py-2.5"></div>
+        <button id="regBtn" class="w-full py-3.5 rounded-2xl text-sm font-bold text-white bg-primary-600 hover:bg-primary-700 shadow-lg shadow-primary-600/20 transition-all active:scale-95">Create account</button>
+        <p class="text-[11px] text-slate-400 text-center leading-relaxed">By signing up you accept the privacy policy.</p>
+      </form>
+
+      <!-- REGISTER SUCCESS -->
+      <div id="regSuccess" class="px-7 py-9 hidden text-center">
+        <div class="w-16 h-16 rounded-full bg-primary-50 text-primary-600 flex items-center justify-center mx-auto mb-5"><i data-lucide="check" class="w-8 h-8"></i></div>
+        <h3 class="text-xl font-black text-ink">Welcome, <span id="regSuccessName">Anna</span>!</h3>
+        <p id="regSuccessMsg" class="mt-3 text-sm text-slate-500 leading-relaxed">Your account is ready.</p>
+        <button id="regSuccessEnter" class="mt-7 w-full py-3.5 rounded-2xl text-sm font-bold text-white bg-primary-600 hover:bg-primary-700 transition-all active:scale-95">Enter the platform</button>
+        <button onclick="switchTab('login')" class="mt-2 w-full py-2.5 text-xs font-bold text-slate-400 hover:text-ink transition-colors">Back to sign in</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /* ---- Modules ---- */
+    const MODULES = [
+      ['briefcase', 'Agent & partner portal', 'Manage applicants and commissions.'],
+      ['file-text', 'Application & admissions', 'Handle applications and documents.'],
+      ['message-square', 'Communication & CRM', 'Email, WhatsApp and campaigns.'],
+      ['wallet', 'Finance', 'Revenue, fees and invoicing.'],
+      ['shield-check', 'Visa & compliance', 'Visa checklist and risk management.'],
+      ['pie-chart', 'Admissions review', 'Scoring and reviewer collaboration.'],
+      ['calendar', 'Interview scheduling', 'Slots and video interviews.'],
+      ['target', 'Marketing & leads', 'Leads and campaign performance.'],
+      ['users', 'Student portal', 'A dedicated space for applicants.'],
+      ['bar-chart-2', 'Reports', 'Dashboards and exports.'],
+      ['zap', 'Intelligence', 'Automations and insights.'],
+      ['settings', 'System administration', 'Permissions and integrations.'],
+    ];
+    document.getElementById('moduleGrid').innerHTML = MODULES.map(([icon, name, desc]) => `
+      <div class="group rounded-2xl bg-white/[0.04] border border-white/10 p-5 hover:bg-white/[0.07] hover:border-primary-400/40 transition-all">
+        <div class="w-10 h-10 rounded-xl bg-primary-600/20 text-primary-300 flex items-center justify-center mb-3 group-hover:bg-primary-600 group-hover:text-white transition-colors">
+          <i data-lucide="${icon}" class="w-5 h-5"></i>
+        </div>
+        <h3 class="font-bold text-white text-sm">${name}</h3>
+        <p class="mt-1 text-xs text-slate-400 leading-relaxed">${desc}</p>
+      </div>`).join('');
+
+    /* ---- Demo tabs ---- */
+    const DEMOS = [
+      ['review', 'pie-chart', 'Admissions review', 'Reviewers score an applicant — the status updates to Accepted in real time.'],
+      ['finance', 'wallet', 'Finance', 'Verify a bank transfer and watch monthly revenue update instantly.'],
+      ['interview', 'calendar', 'Interview booking', 'Applicants book an interview slot; a Teams link is generated automatically.'],
+      ['crm', 'message-square', 'Communication', 'Send templated WhatsApp messages to applicants without leaving the platform.'],
+    ];
+    const demoMap = Object.fromEntries(DEMOS.map(d => [d[0], d]));
+    document.getElementById('demoTabs').innerHTML = DEMOS.map(([key, icon, label]) => `
+      <button data-key="${key}" onclick="showDemo('${key}', true)" class="demo-tab shrink-0 lg:w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl border text-left transition-all">
+        <span class="demo-tab-ic w-9 h-9 rounded-xl flex items-center justify-center shrink-0"><i data-lucide="${icon}" class="w-4 h-4"></i></span>
+        <span class="text-sm font-bold whitespace-nowrap lg:whitespace-normal">${label}</span>
+      </button>`).join('');
+
+    let demoTimer = null, userPicked = false, demoIdx = 0;
+    function styleTabs(active){
+      document.querySelectorAll('.demo-tab').forEach(t => {
+        const on = t.dataset.key === active;
+        t.className = 'demo-tab shrink-0 lg:w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl border text-left transition-all ' +
+          (on ? 'bg-primary-50 border-primary-200 text-primary-800 shadow-sm' : 'bg-white border-slate-100 text-slate-500 hover:border-slate-200');
+        const ic = t.querySelector('.demo-tab-ic');
+        ic.className = 'demo-tab-ic w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ' + (on ? 'bg-primary-600 text-white' : 'bg-slate-100 text-slate-400');
+      });
+    }
+    function playStage(key){
+      const stages = document.querySelectorAll('.demo-stage');
+      stages.forEach(s => { s.classList.toggle('hidden', s.dataset.demo !== key); s.classList.remove('played'); });
+      const active = [...stages].find(s => s.dataset.demo === key);
+      // Trigger the one-shot transition on the next frame, then rest in the end state.
+      requestAnimationFrame(() => requestAnimationFrame(() => { if (active) active.classList.add('played'); }));
+      styleTabs(key);
+      demoIdx = DEMOS.findIndex(d => d[0] === key);
+      document.getElementById('demoLabel').textContent = demoMap[key][2];
+      document.querySelector('#demoCaption span').textContent = demoMap[key][3];
+      lucide.createIcons();
+    }
+    function showDemo(key, fromClick){
+      if (fromClick) { userPicked = true; if (demoTimer) clearInterval(demoTimer); }
+      playStage(key);
+    }
+    function startDemoCycle(){
+      demoTimer = setInterval(() => {
+        if (userPicked) return;
+        demoIdx = (demoIdx + 1) % DEMOS.length;
+        playStage(DEMOS[demoIdx][0]);
+      }, 5200);
+    }
+
+    /* ---- Demo accounts ---- */
+    const DEMOACCTS = [
+      ['Admin', 'admin@uni.hu'], ['Admissions', 'admissions@uni.hu'], ['Finance', 'finance@uni.hu'],
+      ['Agent', 'agent@globalstudy.com'], ['Student', 'ammar@test.com'],
+    ];
+    document.getElementById('demoChips').innerHTML = DEMOACCTS.map(([label, email]) => `
+      <button type="button" onclick="fillDemo('${email}')" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 text-slate-600 hover:bg-primary-50 hover:text-primary-700 transition-colors">${label}</button>`).join('');
+    function fillDemo(email){ document.getElementById('loginEmail').value = email; document.getElementById('loginPassword').value = 'Demo1234!'; }
+    function enterApp(){ window.location.href = 'app.html'; }
+    function showErr(id, msg){ const el = document.getElementById(id); el.textContent = msg; el.classList.remove('hidden'); }
+    function hideErr(id){ document.getElementById(id).classList.add('hidden'); }
+
+    /* ---- Auth modal ---- */
+    const modal = document.getElementById('authModal');
+    let persona = 'student';
+    function openAuth(tab, p){
+      if (p) persona = p;
+      modal.classList.remove('hidden'); modal.classList.add('flex');
+      switchTab(tab || 'login');
+      document.body.style.overflow = 'hidden';
+      setTimeout(() => lucide.createIcons(), 0);
+    }
+    function closeAuth(){ modal.classList.add('hidden'); modal.classList.remove('flex'); document.body.style.overflow = ''; }
+    function switchTab(tab){
+      const login = tab === 'login';
+      document.getElementById('formLogin').classList.toggle('hidden', !login);
+      document.getElementById('formRegister').classList.toggle('hidden', login);
+      document.getElementById('regSuccess').classList.add('hidden');
+      const active = 'bg-white text-ink shadow-sm';
+      document.getElementById('tabLogin').className = 'flex-1 py-2.5 rounded-xl transition-all ' + (login ? active : 'text-slate-400');
+      document.getElementById('tabRegister').className = 'flex-1 py-2.5 rounded-xl transition-all ' + (!login ? active : 'text-slate-400');
+      if (!login) setPersona(persona);
+    }
+    function setPersona(p){
+      persona = p;
+      document.querySelectorAll('.persona-btn').forEach(b => {
+        const on = b.dataset.persona === p;
+        b.className = 'persona-btn py-2.5 rounded-xl text-sm font-bold border transition-all ' +
+          (on ? 'bg-primary-50 border-primary-300 text-primary-700' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300');
+      });
+    }
+    document.querySelectorAll('.persona-btn').forEach(b => b.addEventListener('click', () => setPersona(b.dataset.persona)));
+    async function doLogin(e){
+      e.preventDefault();
+      hideErr('loginError');
+      const email = document.getElementById('loginEmail').value.trim();
+      const password = document.getElementById('loginPassword').value;
+      const btn = document.getElementById('loginBtn');
+      btn.disabled = true; const label = btn.textContent; btn.textContent = 'Signing in…';
+      try {
+        const { error } = await window.sb.auth.signInWithPassword({ email, password });
+        if (error) { showErr('loginError', error.message || 'Sign-in failed.'); btn.disabled = false; btn.textContent = label; return false; }
+        enterApp();
+      } catch (err) {
+        showErr('loginError', 'Connection error. Please try again.'); btn.disabled = false; btn.textContent = label;
+      }
+      return false;
+    }
+    async function doRegister(e){
+      e.preventDefault();
+      hideErr('regError');
+      const name = document.getElementById('regName').value.trim() || 'there';
+      const email = document.getElementById('regEmail').value.trim();
+      const password = document.getElementById('regPassword').value;
+      const role = persona === 'agent' ? 'AGENT' : 'STUDENT';
+      const btn = document.getElementById('regBtn');
+      btn.disabled = true; const label = btn.textContent; btn.textContent = 'Creating…';
+      try {
+        const { data, error } = await window.sb.auth.signUp({ email, password, options: { data: { name, role }, emailRedirectTo: new URL('app.html', window.location.href).href } });
+        if (error) { showErr('regError', error.message || 'Sign-up failed.'); btn.disabled = false; btn.textContent = label; return false; }
+        document.getElementById('regSuccessName').textContent = name.split(' ')[0];
+        document.getElementById('formRegister').classList.add('hidden');
+        document.getElementById('regSuccess').classList.remove('hidden');
+        const enterBtn = document.getElementById('regSuccessEnter');
+        if (data.session) {
+          // Auto-confirmed: signed in right away.
+          document.getElementById('regSuccessMsg').textContent = 'Your account is ready. You are now signed in.';
+          enterBtn.textContent = 'Enter the platform';
+          enterBtn.onclick = () => enterApp();
+        } else {
+          // Email confirmation is enabled on the project.
+          document.getElementById('regSuccessMsg').textContent = 'Check your inbox to confirm your email, then sign in.';
+          enterBtn.textContent = 'Back to sign in';
+          enterBtn.onclick = () => switchTab('login');
+        }
+        setTimeout(() => lucide.createIcons(), 0);
+      } catch (err) {
+        showErr('regError', 'Connection error. Please try again.'); btn.disabled = false; btn.textContent = label;
+      }
+      return false;
+    }
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeAuth(); });
+
+    /* ---- Init ---- */
+    showDemo('review', false);
+    startDemoCycle();
+    lucide.createIcons();
+  </script>
+</body>
+</html>

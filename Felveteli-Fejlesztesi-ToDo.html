@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+<title>Felvételi modul — Fejlesztési ToDo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Newsreader:ital,opsz@0,6..72;1,6..72&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --indigo: #4f46e5;
+    --indigo-50: #eef2ff;
+    --indigo-100: #e0e7ff;
+    --ink: #1e293b;
+    --ink-soft: #475569;
+    --muted: #94a3b8;
+    --line: #e2e8f0;
+    --green: #059669;
+    --green-bg: #ecfdf5;
+    --amber: #d97706;
+    --amber-bg: #fffbeb;
+    --blue: #2563eb;
+    --blue-bg: #eff6ff;
+    --red: #dc2626;
+    --red-bg: #fef2f2;
+    --paper: #ffffff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: #f1f5f9;
+    color: var(--ink);
+    font-family: "Plus Jakarta Sans", system-ui, -apple-system, sans-serif;
+    font-size: 15px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .doc {
+    box-sizing: border-box;
+    max-width: 8.5in;
+    margin: 0 auto;
+    background: var(--paper);
+    padding: 64px clamp(24px, 5vw, 0.85in) 96px;
+  }
+  .doc-frame { width: 100%; border-collapse: collapse; }
+  .doc-frame td { padding: 0; }
+  .hdr-space, .ftr-space { display: none; }
+
+  h1, h2, h3, h4 { text-wrap: balance; line-height: 1.2; }
+  p, li { text-wrap: pretty; }
+
+  /* ---- masthead ---- */
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 11px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--indigo); background: var(--indigo-50);
+    padding: 6px 12px; border-radius: 999px;
+  }
+  .eyebrow .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--indigo); }
+  h1 {
+    font-size: 38px; font-weight: 800; letter-spacing: -.02em;
+    margin: 18px 0 10px; color: #0f172a;
+  }
+  .lede {
+    font-family: "Newsreader", Georgia, serif;
+    font-size: 19px; line-height: 1.5; color: var(--ink-soft);
+    max-width: 36em; margin: 0 0 28px;
+  }
+  .meta-row {
+    display: flex; flex-wrap: wrap; gap: 8px 28px;
+    padding: 16px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+    font-size: 13px; color: var(--ink-soft); margin-bottom: 8px;
+  }
+  .meta-row b { color: var(--ink); font-weight: 700; }
+
+  /* ---- legend ---- */
+  .legend {
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px 24px;
+    background: #f8fafc; border: 1px solid var(--line); border-radius: 14px;
+    padding: 18px 20px; margin: 28px 0 8px;
+  }
+  .legend h4 { grid-column: 1 / -1; margin: 0 0 4px; font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+  .legend .row { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--ink-soft); }
+
+  .badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 11px; font-weight: 700; letter-spacing: .02em;
+    padding: 3px 9px; border-radius: 999px; white-space: nowrap;
+  }
+  .badge.done { color: var(--green); background: var(--green-bg); }
+  .badge.partial { color: var(--amber); background: var(--amber-bg); }
+  .badge.new { color: var(--blue); background: var(--blue-bg); }
+  .badge.blocked { color: var(--red); background: var(--red-bg); }
+  .badge.later { color: #7c3aed; background: #f5f3ff; }
+  .badge .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+  /* ---- section ---- */
+  .epic { margin-top: 44px; }
+  .epic-head { display: flex; align-items: flex-start; gap: 16px; padding-bottom: 14px; border-bottom: 2px solid #0f172a; }
+  .epic-num {
+    flex: none; width: 38px; height: 38px; border-radius: 11px;
+    background: #0f172a; color: #fff; font-weight: 800; font-size: 17px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .epic-head h2 { margin: 0; font-size: 23px; font-weight: 800; letter-spacing: -.01em; color: #0f172a; }
+  .epic-head .sub { margin: 3px 0 0; font-size: 13px; color: var(--muted); font-weight: 500; }
+
+  /* ---- task ---- */
+  .task {
+    display: grid; grid-template-columns: 22px 1fr; gap: 12px;
+    padding: 16px 0; border-bottom: 1px solid var(--line);
+  }
+  .task:last-child { border-bottom: none; }
+  .check {
+    width: 19px; height: 19px; border: 2px solid #cbd5e1; border-radius: 6px;
+    margin-top: 2px;
+  }
+  .task-main { min-width: 0; }
+  .task-title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+  .task-title .t { font-weight: 700; font-size: 15.5px; color: #0f172a; }
+  .task-desc { margin: 6px 0 0; font-size: 13.5px; color: var(--ink-soft); }
+  .task-desc code {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px;
+    background: var(--indigo-50); color: var(--indigo); padding: 1px 6px; border-radius: 5px;
+  }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+  .tag {
+    font-size: 11px; font-weight: 600; color: var(--ink-soft);
+    background: #f1f5f9; border: 1px solid var(--line);
+    padding: 2px 9px; border-radius: 6px;
+  }
+  .tag.owner { color: var(--indigo); background: var(--indigo-50); border-color: var(--indigo-100); }
+  .tag.src { color: #0f766e; background: #f0fdfa; border-color: #ccfbf1; }
+
+  /* subtasks */
+  .sub-list { margin: 9px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+  .sub-list li { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; color: var(--ink-soft); }
+  .sub-list li .sq { flex: none; width: 13px; height: 13px; border: 1.5px solid #cbd5e1; border-radius: 4px; margin-top: 2px; }
+  .sub-list li b { color: var(--ink); font-weight: 700; }
+
+  /* callout / questions */
+  .callout {
+    border-left: 4px solid var(--amber); background: var(--amber-bg);
+    padding: 16px 20px; border-radius: 0 12px 12px 0; margin: 16px 0;
+  }
+  .callout h4 { margin: 0 0 8px; font-size: 14px; color: #92400e; }
+  .callout.resolved { border-left-color: var(--green); background: var(--green-bg); }
+  .callout.resolved h4 { color: #065f46; }
+  .callout.resolved li { color: #065f46; }
+  .callout ul { margin: 0; padding-left: 18px; }
+  .callout li { font-size: 13.5px; color: #78350f; margin: 4px 0; }
+
+  /* source cards */
+  .src-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 6px; }
+  .src-card { border: 1px solid var(--line); border-radius: 13px; padding: 16px 18px; background: #fff; }
+  .src-card .fn { font-size: 12px; font-weight: 700; color: var(--indigo); font-family: ui-monospace, Menlo, monospace; }
+  .src-card .ti { font-weight: 700; margin: 4px 0 6px; font-size: 14.5px; color: #0f172a; }
+  .src-card p { margin: 0; font-size: 12.5px; color: var(--ink-soft); line-height: 1.5; }
+
+  .note-inline { color: var(--muted); font-style: italic; }
+
+  @page { size: letter; margin: 0; }
+  @media print {
+    html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    html, body { margin: 0; padding: 0; background: #fff; }
+    .doc { max-width: none !important; margin: 0 !important; padding: 0 0.7in !important; }
+    .hdr-space, .ftr-space { display: table-cell; height: 0.7in; }
+    h1, h2, h3, h4 { break-after: avoid; }
+    .task, .src-card, .callout, .legend, .epic-head, tr { break-inside: avoid; }
+    p, li { orphans: 3; widows: 3; }
+    .epic { break-inside: avoid-page; }
+  }
+  @media (max-width: 640px) {
+    .legend, .src-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<main class="doc">
+  <table class="doc-frame" role="presentation">
+    <thead><tr><td class="hdr-space"></td></tr></thead>
+    <tbody><tr><td>
+
+      <span class="eyebrow"><span class="dot"></span>UniPortal Pro · Neumann János Egyetem</span>
+      <h1>Felvételi modul — Fejlesztési ToDo</h1>
+      <p class="lede">A jelentkezéstől a hivatalos felvételi dokumentum kiállításáig tartó folyamat fejlesztési feladatlistája, a megbeszélés jegyzete és a négy csatolt forrásdokumentum alapján.</p>
+
+      <div class="meta-row">
+        <span><b>Verzió</b> · v1 backlog</span>
+        <span><b>Dátum</b> · 2026.06.29</span>
+        <span><b>Hatókör</b> · Felvételi (Admissions) + Hallgatói Portál</span>
+        <span><b>Forrás</b> · jegyzet + 4 dokumentum</span>
+      </div>
+
+      <div class="legend">
+        <h4>Státusz-jelölés</h4>
+        <div class="row"><span class="badge done"><span class="dot"></span>Kész</span> Már él az appban</div>
+        <div class="row"><span class="badge partial"><span class="dot"></span>Részben</span> Mock / UI megvan, valós logika hiányzik</div>
+        <div class="row"><span class="badge new"><span class="dot"></span>Új</span> Nulláról építendő</div>
+        <div class="row"><span class="badge blocked"><span class="dot"></span>Blokkolt</span> Külső anyagra / döntésre vár</div>
+      </div>
+
+      <!-- ================= EPIC 1 ================= -->
+      <section class="epic">
+        <div class="epic-head">
+          <div class="epic-num">1</div>
+          <div>
+            <h2>Diák felvételizik — a jelentkezői folyamat</h2>
+            <p class="sub">A regisztrációtól a feltételes felvételi kiváltásáig vezető önkiszolgáló folyamat.</p>
+          </div>
+        </div>
+
+        <div class="task">
+          <div class="check"></div>
+          <div class="task-main">
+            <div class="task-title"><span class="t">Regisztráció a felületre</span><span class="badge partial"><span class="dot"></span>Részben</span></div>
+            <p class="task-desc">Önálló jelentkezői fiók létrehozása (e-mail + jelszó, megerősítés). Jelenleg a landing oldalon demó-belépés van, valós regisztráció/hitelesítés nélkül.</p>
+            <div class="tags"><span class="tag">Auth</span><span class="tag">Onboarding</span></div>
+          </div>
+        </div>
+
+        <div class="task">
+          <div class="check"></div>
+          <div class="task-main">
+            <div class="task-title"><span class="t">Szakválasztás — több szakra jelentkezés</span><span class="badge new"><span class="dot"></span>Új</span></div>
+            <p class="task-desc">Választható szaklista, a jelentkező egyszerre <b>több szakra</b> is jelentkezhet. A szaklista a <code>Courses.pdf</code> alapján töltendő fel; a véglegeset Tündi adja meg.</p>
+            <ul class="sub-list">
+              <li><span class="sq"></span>BSc/BSc szakok: International Business Economics, Tourism &amp; Catering, Business Administration &amp; Management, Computer Science Eng., Mechanical Eng., Vehicle Eng., Logistics Eng., Horticultural Eng., IBE Online</li>
+              <li><span class="sq"></span>MA/MBA/PhD: Regional &amp; Environmental Economics, MBA, MBA Double Degree, Doctoral Program in Management</li>
+              <li><span class="sq"></span>Preparatory: English &amp; Math felkészítő kurzus</li>
+            </ul>
+            <div class="tags"><span class="tag owner">Owner · Tündi</span><span class="tag src">Forrás · Courses.pdf</span></div>
+          </div>
+        </div>
+
+        <div class="task">
+          <div class="check"></div>
+          <div class="task-main">
+            <div class="task-title"><span class="t">1. lépés — Dokumentum-check + jegyzetek</span><span class="badge new"><span class="dot"></span>Új</span></div>
+            <p class="task-desc">A folyamat első kapuja: a feltöltött dokumentumok ellenőrzési felülete a felvételis munkatársnak, belső <b>jegyzetekkel (notes)</b> jelentkezőnként.</p>
+            <div class="tags"><span class="tag owner">Owner · Tündi</span><span class="tag">Workflow</span></div>
+          </div>
+        </div>
+
+        <div class="task">
+          <div class="check"></div>
+          <div class="task-main">
+            <div class="task-title"><span class="t">Dokumentum-feltöltés (PDF / kép)</span><span class="badge partial"><span class="dot"></span>Részben</span></div>
+            <p class="task-desc">A jelentkező feltölti a kötelező dokumentumait. Jelenleg csak vízum-checklist mock van; a felvételi dokumentum-típusok és a feltöltő nincs kész.</p>
+            <ul class="sub-list">
+              <li><span class="sq"></span><b>Iskolai tanulmányi adatok</b> — bizonyítvány / diploma / leckekönyv</li>
+              <li><span class="sq"></span><b>Útlevél</b></li>
+              <li><span class="sq"></span><b>Nyelvvizsga-papír</b></li>
+              <li><span class="sq"></span><b>Motivációs levél</b></li>
+              <li><span class="sq"></span><b>Szakmai gyakorlat</b> igazolása</li>
+              <li><span class="sq"></span><b>Tárolási kérdéskörök</b> — biztonságos tárhely, hozzáférés, GDPR, megőrzési idő (lásd 3.5)</li>
+            </ul>
+            <div class="tags"><span class="tag">Upload</span><span class="tag">Storage</span></div>
+          </div>
+        </div>
+
+        <div class="task">
+          <div class="check"></div>
+          <div class="task-main">
+            <div class="task-title"><span class="t">Adatkinyerés — kézi, esetleg AI (OCR)</span><span class="badge partial"><span class="dot"></span>Részben</span></div>
+            <p class="task-desc">A feltöltött dokumentumokból adatkinyerés. Az app jelenleg „AI szkennelve" címkét mutat látszat-jelleggel; valós OCR/AI-kinyerés és kézi felülvizsgálat (human-in-the-loop) építendő.</p>
+            <div class="tags"><span class="tag">AI / OCR</span><span class="tag">Data entry</span></div>
+          </div>
+        </div>
+
+        <div class="task">
+          <div class="check"></div>
+          <div class="task-main">
+            <div class="task-title"><span class="t">Duplicate Finder — csalásszűrés</span><span class="badge new"><span class="dot"></span>Új</span></div>
+            <p class="task-desc">Duplikált / hamisított jelentkezések és dokumentumok felismerése (azonos útlevél, ismételten benyújtott / sablonozott motivációs levél, átfedő adatok). A működéshez Tündi <b>átverés-példákat</b> küld a szabályok kalibrálásához.</p>
+            <div class="tags"><span class="tag owner">Owner · Tündi (példák)</span><span class="tag">Anti-fraud</span></div>
+          </div>
+        </div>
+
+        <div class="task">
+          <div class="check"></div>
+          <div class="task-main">
+            <div class="task-title"><span class="t">Integrált matematika feladatok — random generálás</span><span class="badge new"><span class="dot"></span>Új</span></div>
+            <p class="task-desc">Beépített matek-teszt a jelentkezői folyamatban, jelentkezőnként <b>véletlenszerűen generált</b> feladatokkal (anti-csalás). A <code>Mathematics placement test PDF</code> 4 feladattípusa paraméterezhető sablonként szolgál; a feladatbankot Tündi adja.</p>
+            <ul class="sub-list">
+              <li><span class="sq"></span>Lineáris egyenletrendszer megoldása (random együtthatók)</li>
+              <li><span class="sq"></span>Kifejezés egyszerűsítése + behelyettesítés</li>
+              <li><span class="sq"></span>Másodfokú függvény ábrázolása</li>
+              <li><span class="sq"></span>Logaritmus / szögfüggvény kiértékelése</li>
+              <li><span class="sq"></span>Automatikus pontozás + sikerküszöb</li>
+            </ul>
+            <div class="tags"><span class="tag owner">Owner · Tündi (feladatbank)</span><span class="tag src">Forrás · Math placement test</span></div>
+          </div>
+        </div>
+
+        <div class="task">
+          <div class="check"></div>
+          <div class="task-main">
+            <div class="task-title"><span class="t">Interjúfoglalás feltétele</span><span class="badge new"><span class="dot"></span>Új</span></div>
+            <p class="task-desc">A jelentkező <b>csak akkor foglalhat interjút</b>, ha a dokumentum-check rendben van. A foglalás megvan slot-szinten (lásd 2.7), de a gate-feltétel logikája hiányzik.</p>
+            <div class="tags"><span class="tag">Workflow gate</span></div>
+          </div>
+        </div>
+
+        <div class="task">
+          <div class="check"></div>
+          <div class="task-main">
+            <div class="task-title"><span class="t">Trigger: feltételes felvételi kiváltása</span><span class="badge new"><span class="dot"></span>Új</span></div>
+            <p class="task-desc">Ha <b>a matek is jó és a dokumentum is jó</b>, automatikusan kimegy a <b>Conditional Acceptance Letter</b> (lásd 2.1). Ez köti össze az 1. és 2. epicet.</p>
+            <div class="tags"><span class="tag">Automation</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= EPIC 2 ================= -->
+      <section class="epic">
+        <div class="epic-head">
+          <div class="epic-num">2</div>
+          <div>
+            <h2>Hivatalos felvételi dokumentumok kiállítása</h2>
+            <p class="sub">A jelentkezői adatokból automatikusan generált, iktatott és aláírt levelek.</p>
+          </div>
+        </div>
+
+        <div class="task">
+          <div class="check"></div>
+          <div class="task-main">
+            <div class="task-title"><span class="t">Conditional Acceptance Letter</span><span class="badge partial"><span class="dot"></span>Részben</span></div>
+            <p class="task-desc">Jelenleg csak státuszt vált (<code>sendConditionalAdmission</code>) — valós dokumentum nem készül. Tartalmi mintaként a <code>CAL_TC-IBE.docx</code> szolgál (szak, tandíj EUR 3000/szemeszter, befizetendő díjak, IBAN, visszatérítési szabályzat, határidők). Tartalmi jóváhagyás: <b>Krix Orsolya megkérdezése</b>; a sablont <b>Tündi küldi</b>.</p>
+            <div class="tags"><span class="tag owner">Owner · Krix Orsolya (jóváhagyás)</span><span class="tag owner">Tündi (sablon)</span><span class="tag src">Forrás · CAL_TC-IBE.docx</span></div>
+          </div>
+        </div>
+
+        <div class="task">
+          <div class="check"></div>
+          <div class="task-main">
+            <div class="task-title"><span class="t">Final Acceptance Letter</span><span class="badge partial"><span class="dot"></span>Részben</span></div>
+            <p class="task-desc">A díjak beérkezése után kiállított végleges levél. Az appban van „Végleges Felvételi" UI, de valós generálás nélkül. Tartalmi jóváhagyás: <b>Krix Orsolya megkérdezése</b>; sablon: <b>Tündi küldi</b> (<code>FAL_MINTA</code>).</p>
+            <div class="tags"><span class="tag owner">Owner · Krix Orsolya (jóváhagyás)</span><span class="tag owner">Tündi (sablon)</span><span class="tag src">Forrás · FAL_MINTA</span></div>
+          </div>
+        </div>
+
+        <div class="task">
+          <div class="check"></div>
+          <div class="task-main">
+            <div class="task-title"><span class="t">Automatikus dokumentumgenerálás</span><span class="badge new"><span class="dot"></span>Új</span></div>
+            <p class="task-desc">A sablon mezőinek (név, útlevélszám, ország, szak, díjak, dátumok) automatikus kitöltése a <b>jelentkező által felvitt adatokból</b>, majd PDF-export.</p>
+            <div class="tags"><span class="tag">Templating</span><span class="tag">PDF</span></div>
+          </div>
+        </div>
+
+        <div class="task">
+          <div class="check"></div>
+          <div class="task-main">
+            <div class="task-title"><span class="t">Iktatás</span><span class="badge new"><span class="dot"></span>Új</span></div>
+            <p class="task-desc">Minden kiállított dokumentum <b>iktatószámot</b> kap és iktatva tárolódik (kibocsátási idő, kibocsátó, jelentkező, verzió, visszakereshetőség).</p>
+            <div class="tags"><span class="tag">Records</span><span class="tag">Audit</span></div>
+          </div>
+        </div>
+
+        <div class="task">
+          <div class="check"></div>
+          <div class="task-main">
+            <div class="task-title"><span class="t">„Melyik szakra vettük fel" — a levélen</span><span class="badge new"><span class="dot"></span>Új</span></div>
+            <p class="task-desc">A felvett szak egyértelmű megjelenítése a levélen (több szakra jelentkezés esetén a ténylegesen elfogadott szak).</p>
+            <div class="tags"><span class="tag">Templating</span></div>
+          </div>
+        </div>
+
+        <div class="task">
+          <div class="check"></div>
+          <div class="task-main">
+            <div class="task-title"><span class="t">Digitális aláírás — Flintsign API</span><span class="badge new"><span class="dot"></span>Új</span><span class="badge later"><span class="dot"></span>Később</span></div>
+            <p class="task-desc">A kiállított dokumentumok hiteles <b>digitális aláírása a Flintsign API-n keresztül</b>. <b>Döntés:</b> a Flintsign integrációt később építjük be a rendszerbe. Az aláíró személyének kérdése (a CAL-mintán <span class="note-inline">Dr. József Kárpáti dékán</span> szerepel) szintén későbbre halasztva.</p>
+            <div class="tags"><span class="tag">Flintsign API</span><span class="tag">e-signature</span></div>
+          </div>
+        </div>
+
+        <div class="task">
+          <div class="check"></div>
+          <div class="task-main">
+            <div class="task-title"><span class="t">Online interjúfoglalás — automatikus Teams meeting</span><span class="badge partial"><span class="dot"></span>Részben</span></div>
+            <p class="task-desc">Interjúslot-foglalás + Teams meeting link. Az appban a foglalás <b>mock Teams URL-t</b> generál — valós Microsoft Teams / Graph API integráció (naptár, meeting létrehozás, e-mail értesítés) építendő.</p>
+            <div class="tags"><span class="tag">MS Teams / Graph API</span><span class="tag">Scheduling</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= EPIC 3 ================= -->
+      <section class="epic">
+        <div class="epic-head">
+          <div class="epic-num">3</div>
+          <div>
+            <h2>Törzsadatok és háttér-infrastruktúra</h2>
+            <p class="sub">Mindkét folyamatot kiszolgáló, külső anyagra váró elemek.</p>
+          </div>
+        </div>
+
+        <div class="task">
+          <div class="check"></div>
+          <div class="task-main">
+            <div class="task-title"><span class="t">Letter template-ek</span><span class="badge blocked"><span class="dot"></span>Blokkolt</span></div>
+            <p class="task-desc">A CAL és FAL végleges sablonjainak feltöltése és mezősítése (merge fields). <b>Tündi küldi.</b></p>
+            <div class="tags"><span class="tag owner">Owner · Tündi</span></div>
+          </div>
+        </div>
+
+        <div class="task">
+          <div class="check"></div>
+          <div class="task-main">
+            <div class="task-title"><span class="t">Szaklista feltöltése</span><span class="badge blocked"><span class="dot"></span>Blokkolt</span></div>
+            <p class="task-desc">A választható szakok véglegesítése és karbantartása. <b>Tündi küldi</b>; kiindulás a <code>Courses.pdf</code>.</p>
+            <div class="tags"><span class="tag owner">Owner · Tündi</span><span class="tag src">Forrás · Courses.pdf</span></div>
+          </div>
+        </div>
+
+        <div class="task">
+          <div class="check"></div>
+          <div class="task-main">
+            <div class="task-title"><span class="t">Matek feladatbank + generátor</span><span class="badge blocked"><span class="dot"></span>Blokkolt</span></div>
+            <p class="task-desc">A feladattípusok, paraméter-tartományok és megoldókulcsok a random generátorhoz. <b>Tündi küldi.</b></p>
+            <div class="tags"><span class="tag owner">Owner · Tündi</span></div>
+          </div>
+        </div>
+
+        <div class="task">
+          <div class="check"></div>
+          <div class="task-main">
+            <div class="task-title"><span class="t">Átverés / csalás példák</span><span class="badge blocked"><span class="dot"></span>Blokkolt</span></div>
+            <p class="task-desc">Valós csalási esetek a Duplicate Finder szabályainak kalibrálásához. <b>Tündi küldi.</b></p>
+            <div class="tags"><span class="tag owner">Owner · Tündi</span></div>
+          </div>
+        </div>
+
+        <div class="task">
+          <div class="check"></div>
+          <div class="task-main">
+            <div class="task-title"><span class="t">Tárolás / GDPR / megőrzés</span><span class="badge new"><span class="dot"></span>Új</span></div>
+            <p class="task-desc">Biztonságos dokumentum-tárhely, hozzáférés-szabályozás, megőrzési idők és GDPR-megfelelés (a feltöltött személyes okmányokhoz).</p>
+            <div class="tags"><span class="tag">Infra</span><span class="tag">Compliance</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= OPEN QUESTIONS ================= -->
+      <section class="epic">
+        <div class="epic-head">
+          <div class="epic-num">?</div>
+          <div>
+            <h2>Nyitott kérdések — döntésre vár</h2>
+            <p class="sub">Megválaszolandó a fejlesztés előtt / közben.</p>
+          </div>
+        </div>
+        <div class="callout resolved">
+          <h4>Digitális aláírás — eldöntve</h4>
+          <ul>
+            <li><b>Flintsign API</b>-t használunk az aláíráshoz — az integrációt <b>később</b> építjük be a rendszerbe.</li>
+            <li>Az aláíró személyének kérdésével (dékán vs. Krix Orsolya) <b>később</b> foglalkozunk.</li>
+          </ul>
+        </div>
+        <div class="callout">
+          <h4>Krix Orsolya felé</h4>
+          <ul>
+            <li>Jóváhagyja a CAL és FAL tartalmát a csatolt minták alapján?</li>
+          </ul>
+        </div>
+        <div class="callout">
+          <h4>Tündi felé</h4>
+          <ul>
+            <li>Végleges CAL + FAL sablonok mezőkkel.</li>
+            <li>Végleges, induló szaklista (a Courses.pdf pontosítása).</li>
+            <li>Matek feladatbank + paraméterek a random generáláshoz.</li>
+            <li>Átverés-példák a Duplicate Finder kalibrálásához.</li>
+            <li>Kötelező dokumentumok listája szakonként (eltér-e prep / BSc / MSc között?).</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- ================= SOURCES ================= -->
+      <section class="epic">
+        <div class="epic-head">
+          <div class="epic-num">§</div>
+          <div>
+            <h2>Forrásdokumentumok</h2>
+            <p class="sub">A backlog alapjául szolgáló csatolt anyagok.</p>
+          </div>
+        </div>
+        <div class="src-grid">
+          <div class="src-card">
+            <div class="fn">CAL_TC-IBE.docx</div>
+            <div class="ti">Conditional Acceptance Letter (minta)</div>
+            <p>IBE / Tourism &amp; Catering. Tartalmazza a szakot, tandíjat (EUR 3000/szemeszter), befizetendő díjakat (application EUR 200, első 2 szemeszter EUR 6000, kollégium EUR 1000), IBAN-t, határidőket és a teljes visszatérítési szabályzatot.</p>
+          </div>
+          <div class="src-card">
+            <div class="fn">FAL_MINTA-új-VE.docx</div>
+            <div class="ti">Final Acceptance Letter (minta)</div>
+            <p>A végleges felvételi levél mintája — a díjak beérkezése után kiállított dokumentum sablonja.</p>
+          </div>
+          <div class="src-card">
+            <div class="fn">Courses.pdf</div>
+            <div class="ti">Szakok listája</div>
+            <p>A John von Neumann University angol nyelvű képzései: BSc/BSc, MA, MBA, PhD és Preparatory programok karonkénti bontásban.</p>
+          </div>
+          <div class="src-card">
+            <div class="fn">Mathematics placement test PDF</div>
+            <div class="ti">Matematika szintfelmérő (2022)</div>
+            <p>4 feladat: egyenletrendszer, kifejezés egyszerűsítése, másodfokú függvény ábrázolása, log/szögfüggvény kiértékelése. A random feladatgenerátor sablonja.</p>
+          </div>
+        </div>
+      </section>
+
+    </td></tr></tbody>
+    <tfoot><tr><td class="ftr-space"></td></tr></tfoot>
+  </table>
+</main>
+</body>
+</html>
