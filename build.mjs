@@ -30,6 +30,7 @@ const FEATURE_FILES = [
   'features/feed.jsx',
   'features/programs.jsx',
   'features/assistant.jsx',
+  'features/registrations.jsx',
 ];
 
 const EXTERNALS = [

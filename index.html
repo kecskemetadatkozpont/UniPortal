@@ -495,7 +495,10 @@
         </div>
         <div id="regError" class="hidden text-[12px] font-semibold text-red-600 bg-red-50 border border-red-100 rounded-xl px-3 py-2.5"></div>
         <button id="regBtn" class="w-full py-3.5 rounded-2xl text-sm font-bold text-white bg-primary-600 hover:bg-primary-700 shadow-lg shadow-primary-600/20 transition-all active:scale-95">Create account</button>
-        <p class="text-[11px] text-slate-400 text-center leading-relaxed">By signing up you accept the privacy policy.</p>
+        <p class="text-[11px] text-slate-400 text-center leading-relaxed">
+          You will need to confirm your email address, and an administrator approves every new account before it can be used.<br />
+          By signing up you accept the privacy policy.
+        </p>
       </form>
 
       <!-- REGISTER SUCCESS -->
@@ -656,14 +659,20 @@
         document.getElementById('formRegister').classList.add('hidden');
         document.getElementById('regSuccess').classList.remove('hidden');
         const enterBtn = document.getElementById('regSuccessEnter');
+        // Two gates stand between signing up and using the platform: the
+        // applicant must confirm their email address, and an administrator
+        // must then approve the account (migration 07). Say so plainly —
+        // otherwise the pending screen after sign-in reads as a failure.
         if (data.session) {
-          // Auto-confirmed: signed in right away.
-          document.getElementById('regSuccessMsg').textContent = 'Your account is ready. You are now signed in.';
-          enterBtn.textContent = 'Enter the platform';
+          // Email confirmation is switched off on the project: signed in
+          // already, but still waiting for approval.
+          document.getElementById('regSuccessMsg').textContent =
+            'Your account has been created and is now waiting for administrator approval. You can sign in, but the platform stays locked until it is approved.';
+          enterBtn.textContent = 'Continue';
           enterBtn.onclick = () => enterApp();
         } else {
-          // Email confirmation is enabled on the project.
-          document.getElementById('regSuccessMsg').textContent = 'Check your inbox to confirm your email, then sign in.';
+          document.getElementById('regSuccessMsg').textContent =
+            'Check your inbox and confirm your email address. After that an administrator reviews your registration — you will be able to sign in once it is approved.';
           enterBtn.textContent = 'Back to sign in';
           enterBtn.onclick = () => switchTab('login');
         }

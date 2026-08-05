@@ -118,6 +118,7 @@ Lépésenként ugyanez:
 | `04_admission_processes.sql` | megosztott jelentkezési folyamatok + üzenetek + realtime | ✅ telepítve |
 | `05_features.sql` | hírfolyam, programok, jelentkezések, AI tudásbázis | ✅ telepítve |
 | `06_harden_rls.sql` | anonim írás kikapcsolása | ✅ telepítve |
+| `07_registration_approval.sql` | regisztráció-jóváhagyás + superadmin | ⛔ **még nem futott le** |
 
 > **`05_features.sql` nélkül** a Hírfolyam / Programok / AI asszisztens modulok
 > egy seed-elt `localStorage` tárolóra esnek vissza: működnek, de eszközönként
@@ -132,6 +133,43 @@ Lépésenként ugyanez:
 
 Az Authentication → Sign In / Providers → Email alatt a **Confirm email** legyen
 **kikapcsolva**, különben az új regisztráció megerősítő e-mailre vár.
+
+### Regisztráció, e-mail-megerősítés, jóváhagyás
+
+Új fiók két kapun megy át, mielőtt használható lenne:
+
+1. **Megerősített e-mail-cím.** Supabase Auth intézi; kapcsold be:
+   Authentication → Sign In / Providers → Email → **Confirm email**.
+   Megerősítés nélkül a belépés `Email not confirmed` hibával elutasítva.
+2. **Superadmin jóváhagyás.** Minden regisztráció `approval_status='pending'`
+   állapotban jön létre. A felhasználó be tud lépni, de a *Jóváhagyásra vár*
+   képernyőnél megáll, és **egyetlen adatsort sem kap** — ezt nem a felület,
+   hanem az RLS érvényesíti (`public.is_approved()` minden adattáblán).
+
+**Superadmin:** `kecskemet.adatkozpont@gmail.com`. Ez az egyetlen fiók, amely
+látja a *Regisztrációk* menüpontot, és jóváhagyhat / elutasíthat / szerepkört
+adhat. Még az `ADMIN` sem. Az e-mail-cím a `public.superadmin_email()`
+függvényben van, egy helyen cserélhető.
+
+A superadmin fióknak egyszer regisztrálnia kell a felületen a fenti címmel — a
+`handle_new_user` trigger felismeri, és azonnal `SUPERADMIN` + `approved`
+állapotot ad neki. (Ha az e-mail nem érkezik meg, a fiók kézzel is
+megerősíthető: Authentication → Users → a felhasználó → Confirm email.)
+
+Önjóváhagyás nem lehetséges: a `profiles_protect_privileges` trigger
+visszaírja a `role` / `approval_status` / `agencyId` / `studentId` mezőket, ha
+nem superadmin módosít — a nyers PostgREST API-n keresztül is.
+
+> ⚠️ **E-mail-kézbesítés:** a Supabase beépített levélküldője erősen
+> korlátozott (óránként néhány levél) és tesztelésre való. Mielőtt valódi
+> jelentkezők regisztrálnának, állíts be saját SMTP-t (Resend, SendGrid,
+> Postmark…): Authentication → Emails → SMTP Settings.
+
+> ℹ️ Ebben a Supabase projektben a `public.profiles` táblát **egy másik
+> alkalmazás is használja** (publikációs/kutatói nyilvántartás — saját `status`,
+> `is_researcher`, `affiliation` oszlopokkal). Ezért hívják az UniPortal mezőjét
+> `approval_status`-nak: a másik alkalmazás `status` oszlopát nem olvassuk és
+> nem írjuk. Ha a `profiles` sémáját bővíted, erre figyelj.
 
 ### Biztonság
 

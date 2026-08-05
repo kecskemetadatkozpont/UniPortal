@@ -43,6 +43,7 @@ const AppView = {
   PROGRAMS: 'programs',
   TRAININGS: 'trainings',
   ASSISTANT: 'assistant',
+  REGISTRATIONS: 'registrations',
 };
 
 const MENU_ITEMS = [
@@ -62,6 +63,8 @@ const MENU_ITEMS = [
   { id: AppView.REPORTS, label: 'Riportok', icon: <Lucide.BarChart2 size={20} /> },
   { id: AppView.INTELLIGENCE, label: 'Intelligence', icon: <Lucide.Zap size={20} /> },
   { id: AppView.SYSTEM_ADMIN, label: 'Rendszerkezelés', icon: <Lucide.Settings size={20} /> },
+  // Superadmin-only; the sidebar filter hides it from every other role.
+  { id: AppView.REGISTRATIONS, label: 'Regisztrációk', icon: <Lucide.UserCheck size={20} /> },
 ];
 
 /* ============ In-memory database (mirrors server.ts) ============ */
@@ -9030,19 +9033,36 @@ const App: React.FC = () => {
     } catch (e) { /* profile may not exist yet */ }
     const meta = authUser.user_metadata || {};
     const role = (profile && profile.role) || meta.role || 'STUDENT';
+    // Registrations need superadmin approval (migration 07). Gate on
+    // `approval_status` only when the column actually exists, so this build
+    // also runs against a database where 07 has not been applied yet — there,
+    // every account stays usable exactly as before. RLS ensures the profile
+    // row is always readable by its owner, so a null profile is not a pending
+    // one. NB: `profiles.status` belongs to a different app sharing this
+    // Supabase project — never read or write it here.
+    const hasApprovalFlow = !!profile && Object.prototype.hasOwnProperty.call(profile, 'approval_status');
+    const status = hasApprovalFlow ? (profile.approval_status || 'pending') : 'approved';
     const ov = loadAccountOverride(authUser.email);
     setCurrentUser({
       id: (profile && profile.id) || authUser.id,
       name: ov.name || (profile && profile.name) || meta.name || authUser.email,
       email: authUser.email,
       role,
+      status,
+      rejected_reason: profile && profile.rejected_reason,
       phone: ov.phone || (profile && profile.phone) || '',
       country: ov.country || (profile && profile.country) || '',
       birthDate: ov.birthDate || (profile && profile.birthDate) || '',
       agencyId: profile && profile.agencyId,
       avatar: (profile && profile.avatar_url) || ov.avatar || 'https://i.pravatar.cc/150?u=' + encodeURIComponent(authUser.email),
     });
-    setActiveView(viewForRole(role));
+    // Land the superadmin on the approvals queue when something is waiting;
+    // everyone else (and an empty queue) gets the Campus Feed.
+    let view = viewForRole(role);
+    if (status === 'approved' && role === 'SUPERADMIN' && (await REG_pendingCount()) > 0) {
+      view = AppView.REGISTRATIONS;
+    }
+    setActiveView(view);
   };
 
   // Check the existing session on load, and react to sign-in / sign-out.
@@ -9163,9 +9183,18 @@ const App: React.FC = () => {
     );
   }
 
+  // Signed in, but the superadmin has not approved (or has revoked) access.
+  // The RLS policies from migration 07 enforce the same thing server-side —
+  // this screen only explains it.
+  if (currentUser.status !== 'approved') {
+    return <PendingApprovalScreen user={currentUser} onLogout={handleLogout} />;
+  }
+
   // Filter menu items based on user role
   const filteredMenuItems = MENU_ITEMS.filter(item => {
-    if (currentUser.role === 'ADMIN') return true;
+    // Approving registrations is the superadmin's alone — not even ADMIN.
+    if (item.id === AppView.REGISTRATIONS) return currentUser.role === 'SUPERADMIN';
+    if (currentUser.role === 'SUPERADMIN' || currentUser.role === 'ADMIN') return true;
     if (currentUser.role === 'AGENT') return [AppView.FEED, AppView.PROGRAMS, AppView.ASSISTANT, AppView.AGENT_PORTAL, AppView.INTERVIEWS].includes(item.id);
     if (currentUser.role === 'FINANCE') return [AppView.FEED, AppView.ASSISTANT, AppView.FINANCE, AppView.AGENT_PORTAL, AppView.INTERVIEWS, AppView.REPORTS].includes(item.id);
     if (currentUser.role === 'ADMISSIONS') return [AppView.FEED, AppView.ASSISTANT, AppView.ADMISSIONS_CORE, AppView.EVALUATION, AppView.ENGAGEMENT_CRM, AppView.IMMIGRATION, AppView.INTERVIEWS, AppView.MARKETING_LEADS, AppView.REPORTS, AppView.INTELLIGENCE].includes(item.id);
@@ -9191,6 +9220,10 @@ const App: React.FC = () => {
       case AppView.PROGRAMS: return <ProgramsView user={currentUser} scope="programs" />;
       case AppView.TRAININGS: return <ProgramsView user={currentUser} scope="degrees" />;
       case AppView.ASSISTANT: return <AssistantView user={currentUser} />;
+      case AppView.REGISTRATIONS:
+        return currentUser.role === 'SUPERADMIN'
+          ? <RegistrationsView user={currentUser} />
+          : <FeedView user={currentUser} onNavigate={setActiveView} />;
       default: return <FeedView user={currentUser} onNavigate={setActiveView} />;
     }
   };
@@ -9265,7 +9298,7 @@ if (__boot) __boot.remove();
    ============================================================ */
 const HU_EN = {
   // menü / nav
-  'Ügynök és partner portál':'Agent & Partner Portal','Jelentkezés és Felvételi':'Applications & Admissions','Kommunikáció és CRM':'Communication & CRM','Pénzügyek':'Finance','Vízum és Compliance':'Visa & Compliance','Felvételi Bírálat':'Admissions Review','Interjú Foglalás':'Interview Booking','Marketing és Lead kezelés':'Marketing & Lead Management','Hallgatói Portál':'Student Portal','Riportok':'Reports','Rendszerkezelés':'System Administration','Intelligence':'Intelligence','Hírfolyam':'Feed','Programok':'Programs','Képzések':'Degrees','AI Asszisztens':'AI Assistant','Neumann János Egyetem':'John von Neumann University',
+  'Ügynök és partner portál':'Agent & Partner Portal','Jelentkezés és Felvételi':'Applications & Admissions','Kommunikáció és CRM':'Communication & CRM','Pénzügyek':'Finance','Vízum és Compliance':'Visa & Compliance','Felvételi Bírálat':'Admissions Review','Interjú Foglalás':'Interview Booking','Marketing és Lead kezelés':'Marketing & Lead Management','Hallgatói Portál':'Student Portal','Riportok':'Reports','Rendszerkezelés':'System Administration','Regisztrációk':'Registrations','Intelligence':'Intelligence','Hírfolyam':'Feed','Programok':'Programs','Képzések':'Degrees','AI Asszisztens':'AI Assistant','Neumann János Egyetem':'John von Neumann University',
   // fejléc
   'Globális keresés a tesztadatok között...':'Global search across demo data...','Profil megnyitása':'Open profile','Profilom':'My profile','Vissza':'Back','Mentés':'Save','Mentés…':'Saving…','Elmentve':'Saved','Bezárás':'Close','Összes':'View all',
   // profil
