@@ -1,6 +1,6 @@
 -- ============================================================
 -- UniPortal Pro — Supabase schema + seed (Step 2)
--- Neumann János University · International Admissions platform
+-- John von Neumann University · International Admissions platform
 --
 -- HOW TO RUN:
 --   1. Supabase dashboard → SQL Editor → New query
