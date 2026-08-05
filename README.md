@@ -116,25 +116,31 @@ Lépésenként ugyanez:
 | `02_auth_profiles.sql` | `profiles` tábla, sign-up trigger, 5 demo fiók | ✅ telepítve |
 | `03_avatars_storage.sql` | `avatars` bucket + storage policy-k | ✅ telepítve |
 | `04_admission_processes.sql` | megosztott jelentkezési folyamatok + üzenetek + realtime | ✅ telepítve |
-| `05_features.sql` | hírfolyam, programok, jelentkezések, AI tudásbázis | ⛔ **még nem futott le** |
-| `06_harden_rls.sql` | anonim írás kikapcsolása (ajánlott) | ⛔ opcionális |
+| `05_features.sql` | hírfolyam, programok, jelentkezések, AI tudásbázis | ✅ telepítve |
+| `06_harden_rls.sql` | anonim írás kikapcsolása | ✅ telepítve |
 
 > **`05_features.sql` nélkül** a Hírfolyam / Programok / AI asszisztens modulok
 > egy seed-elt `localStorage` tárolóra esnek vissza: működnek, de eszközönként
-> külön adatot látnak. A migráció után minden élőben megosztott lesz.
+> külön adatot látnak. A migráció után minden élőben megosztott — a táblák
+> üresen indulnak, és az első bejelentkezett betöltés tölti fel őket
+> (17 program, 6 hírfolyam-poszt, 9 tudásbázis-dokumentum).
+
+> A `programs` táblának **nincs `kind` oszlopa**, és nem is kell: a
+> program/képzés kategória a `level`-ből származik (`PROG_kind()`). Ha új mezőt
+> veszel fel a program-szerkesztőbe, előbb a `05_features.sql` sémáját bővítsd —
+> a PostgREST minden ismeretlen kulcsra `PGRST204`-gyel elutasítja az írást.
 
 Az Authentication → Sign In / Providers → Email alatt a **Confirm email** legyen
 **kikapcsolva**, különben az új regisztráció megerősítő e-mailre vár.
 
 ### Biztonság
 
-A `01`-es migráció `for all to anon, authenticated` policy-t tesz a 14 demo
-táblára. Mivel a publikálható kulcs benne van a statikus oldal forrásában, ez azt
-jelenti, hogy **bejelentkezés nélkül is bárki írhatja/törölheti a demo adatokat**.
-Az alkalmazás minden lekérdezése bejelentkezés után történik, ezért a
-[`supabase/06_harden_rls.sql`](supabase/06_harden_rls.sql) lefuttatásával az
-`anon` jogosultság elvehető anélkül, hogy bármi elromlana. Nyilvános demónál ez
-erősen ajánlott.
+A `01`-es migráció eredetileg `for all to anon, authenticated` policy-t tett a 14
+demo táblára, ami — mivel a publikálható kulcs benne van a statikus oldal
+forrásában — azt jelentette, hogy bejelentkezés nélkül is bárki írhatta/törölhette
+a demo adatokat. A [`06_harden_rls.sql`](supabase/06_harden_rls.sql) ezt levette
+`authenticated`-re; ellenőrizve: anonim olvasás üres tömböt ad, anonim írás
+`42501`-gyel elutasítva, bejelentkezve viszont minden modul hiánytalanul működik.
 
 Élesítés előtt mindenképp cserélendő: szerepkör-alapú RLS a jelenlegi
 „mindenki mindent” policy-k helyett, és valódi jelszavak a demó fiókok helyett.
