@@ -128,7 +128,10 @@ function PROG_seed() {
       ['personal', 'documents', 'motivation', 'interview', 'review'], ['passport', 'msc_diploma', 'english', 'research', 'recommendation', 'cv'],
       'A research doctorate supervised within the Doctoral School; tuition may be covered by scholarship.', ['Research', 'Doctoral']),
   ];
-  return list.map(p => ({ ...p, image_url: PROG_IMGS[p.id] || null, kind: PROG_DEGREE_LEVELS.includes(p.level) ? 'degree' : 'program' }));
+  // `kind` is deliberately NOT part of a stored row: the programs table has no
+  // such column, and it is fully derived from `level` anyway. Read it through
+  // PROG_kind(), which falls back to that derivation.
+  return list.map(p => ({ ...p, image_url: PROG_IMGS[p.id] || null }));
 }
 
 async function PROG_loadPrograms() {
@@ -143,12 +146,11 @@ async function PROG_loadPrograms() {
   let merged = list.concat(missing).map(p => {
     let q = p;
     if (!q.image_url && PROG_IMGS[q.id]) { changed = true; q = { ...q, image_url: PROG_IMGS[q.id] }; }
-    if (!q.kind) { changed = true; q = { ...q, kind: PROG_kind(q) }; }
     return q;
   });
   if (changed) {
     if (DL_PROBE[PROG_TABLE] === 'ls') { try { dlLocalSave(PROG_LS, merged); } catch (e) {} }
-    else if (DL_PROBE[PROG_TABLE] === 'sb' && missing.length && window.sb) { try { await window.sb.from(PROG_TABLE).upsert(missing.map(s => ({ ...s, image_url: PROG_IMGS[s.id] || null, kind: PROG_kind(s) })), { onConflict: 'id', ignoreDuplicates: true }); } catch (e) {} }
+    else if (DL_PROBE[PROG_TABLE] === 'sb' && missing.length && window.sb) { try { await window.sb.from(PROG_TABLE).upsert(missing.map(s => ({ ...s, image_url: PROG_IMGS[s.id] || null })), { onConflict: 'id', ignoreDuplicates: true }); } catch (e) {} }
   }
   return merged;
 }
@@ -520,7 +522,7 @@ function PROG_Catalog({ programs, myApps, onOpen, onContinue }) {
 function PROG_Editor({ open, program, onClose, onSaved, scope }) {
   const isDeg = scope === 'degrees';
   const levelOpts = isDeg ? ['bachelor', 'master', 'doctoral'] : ['preparatory', 'course', 'excursion'];
-  const blank = { id: '', code: '', name: '', level: isDeg ? 'bachelor' : 'preparatory', faculty: '', degree: isDeg ? 'BSc' : 'Certificate', kind: isDeg ? 'degree' : 'program', duration_semesters: isDeg ? 7 : 2, ects: isDeg ? 210 : 30, tuition: isDeg ? 2500 : 400, currency: 'EUR', language: 'English', deadline: '2026-06-30', capacity: 30, seats_taken: 0, is_open: true, summary: '', image_url: '', required_docs: isDeg ? ['passport', 'hs_diploma', 'english'] : ['passport'], steps: isDeg ? ['personal', 'documents', 'interview', 'fee', 'review'] : ['personal', 'fee', 'review'], tags: [] };
+  const blank = { id: '', code: '', name: '', level: isDeg ? 'bachelor' : 'preparatory', faculty: '', degree: isDeg ? 'BSc' : 'Certificate', duration_semesters: isDeg ? 7 : 2, ects: isDeg ? 210 : 30, tuition: isDeg ? 2500 : 400, currency: 'EUR', language: 'English', deadline: '2026-06-30', capacity: 30, seats_taken: 0, is_open: true, summary: '', image_url: '', required_docs: isDeg ? ['passport', 'hs_diploma', 'english'] : ['passport'], steps: isDeg ? ['personal', 'documents', 'interview', 'fee', 'review'] : ['personal', 'fee', 'review'], tags: [] };
   const [f, setF] = useState(blank);
   const [busy, setBusy] = useState(false);
   useEffect(() => { if (open) setF(program ? { ...blank, ...program, required_docs: program.required_docs || [], steps: program.steps || [], tags: program.tags || [] } : blank); }, [open, program, scope]);
@@ -531,7 +533,7 @@ function PROG_Editor({ open, program, onClose, onSaved, scope }) {
 
   const save = async () => {
     if (!f.name.trim()) return; setBusy(true);
-    const row = { ...f, kind: PROG_DEGREE_LEVELS.includes(f.level) ? 'degree' : 'program', tuition: Number(f.tuition) || 0, ects: Number(f.ects) || 0, duration_semesters: Number(f.duration_semesters) || 0, capacity: Number(f.capacity) || 0, tags: typeof f.tags === 'string' ? f.tags.split(',').map(s => s.trim()).filter(Boolean) : f.tags };
+    const row = { ...f, tuition: Number(f.tuition) || 0, ects: Number(f.ects) || 0, duration_semesters: Number(f.duration_semesters) || 0, capacity: Number(f.capacity) || 0, tags: typeof f.tags === 'string' ? f.tags.split(',').map(s => s.trim()).filter(Boolean) : f.tags };
     if (program) { await dlUpdate(PROG_TABLE, program.id, row, PROG_LS); }
     else { row.id = uid('prog'); row.created_at = todayStr(); await dlInsert(PROG_TABLE, row, PROG_LS); }
     setBusy(false); onSaved && onSaved(); onClose();
