@@ -65,15 +65,25 @@ Eredetileg az `app.html` **futásidőben**, Babel standalone-nal fordította le 
 másodperc fordítás). A `build.mjs` ezt egyszer, előre elvégzi esbuild-del:
 
 ```
-app.jsx + feature modulok  →  app.bundle.js   536 kB minified / 112 kB gzip
+app.jsx + feature modulok + React/lucide/recharts  →  app.bundle.js
+1736 kB minified / 411 kB gzip, egyetlen kérés
 ```
+
+A függőségek is bekerülnek a bundle-be. Külsőként hagyva a böngésző az
+`esm.sh`-ról oldotta fel őket (a recharts d3/lodash fájával együtt):
+**138 modul-kérés** sorosított waterfallban minden betöltéskor. Mérve:
+bejelentkezés → app váz **1308 ms → 532 ms**, 160 → 21 kérés.
 
 Az `app.html` megnézi, hogy létezik-e az `app.bundle.js`; ha nem (pl. sima
 `python3 -m http.server` build nélkül), visszaesik a régi, Babel-es útra. Így a
 demó akkor sem törik el, ha a build kimarad.
 
-Mért idő a bejelentkező képernyőig, helyi szerveren: **~0,5 s** az előfordított
-bundle-lel.
+Az `app.html`-ben lévő import map megmarad: a build nélküli tartalék útnak
+(Babel a böngészőben) továbbra is szüksége van rá.
+
+> Mivel a Pages közvetlenül a `main` ágat szolgálja ki, az `app.bundle.js` be van
+> commitolva — most már 1,7 MB-osan. Ha bekapcsolod a CI buildet (lásd *Deploy*),
+> build artifact lesz belőle, és nem terheli a git-előzményeket.
 
 ---
 
@@ -119,7 +129,8 @@ Lépésenként ugyanez:
 | `05_features.sql` | hírfolyam, programok, jelentkezések, AI tudásbázis | ✅ telepítve |
 | `06_harden_rls.sql` | anonim írás kikapcsolása | ✅ telepítve |
 | `07_registration_approval.sql` | regisztráció-jóváhagyás + superadmin | ✅ telepítve |
-| `08_documents_storage.sql` | jelentkezői dokumentumok Storage-ba (20 MB) | ⛔ **még nem futott le** |
+| `08_documents_storage.sql` | jelentkezői dokumentumok Storage-ba (20 MB) | ✅ telepítve |
+| `09_process_list_view.sql` | folyamatlista fájltartalom nélkül (teljesítmény) | ⛔ **még nem futott le** |
 
 > **`05_features.sql` nélkül** a Hírfolyam / Programok / AI asszisztens modulok
 > egy seed-elt `localStorage` tárolóra esnek vissza: működnek, de eszközönként
@@ -131,6 +142,18 @@ Lépésenként ugyanez:
 > program/képzés kategória a `level`-ből származik (`PROG_kind()`). Ha új mezőt
 > veszel fel a program-szerkesztőbe, előbb a `05_features.sql` sémáját bővítsd —
 > a PostgREST minden ismeretlen kulcsra `PGRST204`-gyel elutasítja az írást.
+
+### Teljesítmény
+
+A felvételi listák a `admission_process_list` **nézetből** olvasnak
+(`09_process_list_view.sql`), nem közvetlenül a táblából. A nézet ugyanazokat a
+sorokat adja, de a `data.docs` alól kiveszi a beágyazott fájltartalmat.
+
+Enélkül a lista `select('*')`-ot futtatott a teljes `data` JSONB-re,
+12 másodpercenként ismételve — mérve **12,5 MB / 3,6 mp** egyetlen lekérésre.
+Ez volt az oka a „sokszor lassan tölt" jelenségnek. A megnyitott folyamat
+teljes sorát az app külön, egyesével kéri le; a poll 60 mp-re ritkult, mert a
+realtime feliratkozás (04-es migráció) úgyis azonnal értesít.
 
 ### Jelentkezői dokumentumok
 

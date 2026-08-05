@@ -12,8 +12,12 @@
 // modules are spliced into app.jsx's module scope at its __FEATURES__ marker,
 // so they keep sharing one scope.
 //
-// React / react-dom / lucide-react / recharts stay external — the import map
-// in app.html resolves them from esm.sh, same as the no-build path.
+// React / react-dom / lucide-react / recharts are bundled in. Leaving them
+// external meant the browser resolved them (and recharts' d3 / lodash tree)
+// from esm.sh at runtime: 138 module requests in a serialised waterfall on
+// every load. One request is worth the extra bytes — measured 1308 ms -> 532 ms
+// to the app shell. The import map in app.html stays for the no-build fallback,
+// which still compiles app.jsx in the browser and does need it.
 //
 // Usage:  npm run build     (the Pages workflow runs this before deploying)
 // ============================================================
@@ -33,10 +37,9 @@ const FEATURE_FILES = [
   'features/registrations.jsx',
 ];
 
-const EXTERNALS = [
-  'react', 'react-dom', 'react-dom/client',
-  'lucide-react', 'recharts', 'motion', 'motion/react',
-];
+// `motion` is only referenced by the shim at the top of app.jsx, which renders
+// plain elements — nothing to bundle.
+const EXTERNALS = ['motion', 'motion/react'];
 
 let src = readFileSync(join(root, 'app.jsx'), 'utf8');
 const features = FEATURE_FILES.map((f) => readFileSync(join(root, f), 'utf8')).join('\n\n');
@@ -59,6 +62,7 @@ try {
     jsx: 'transform', // classic runtime — React is imported at the top of app.jsx
     minify: true,
     external: EXTERNALS,
+    define: { 'process.env.NODE_ENV': '"production"' },  // React's production build
     logOverride: { 'duplicate-object-key': 'silent' }, // known dupes in the HU→EN table
     metafile: true,
   });
