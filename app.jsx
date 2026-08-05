@@ -303,6 +303,74 @@ const api = {
   },
 };
 
+/* ============ Applicant documents (Supabase Storage) ============
+   Uploaded documents live in the private `documents` bucket (migration 08),
+   not inside admission_processes.data — a scanned passport as base64 inside
+   a JSONB column that is rewritten on every autosave does not scale, and the
+   old code silently dropped anything over 4 MB while reporting success.
+
+   A stored entry is { fileName, type, size, path }. Entries created before
+   this change still carry { dataUrl }; every reader goes through DOC_src(),
+   so both keep working. */
+
+const DOC_MAX_BYTES = 20 * 1024 * 1024;          // hard limit shown to the user
+const DOC_INLINE_FALLBACK_BYTES = 4 * 1024 * 1024; // only if Storage is unavailable
+const DOC_BUCKET = 'documents';
+
+function DOC_fmtSize(bytes) {
+  if (!bytes && bytes !== 0) return '';
+  return bytes >= 1024 * 1024
+    ? (bytes / (1024 * 1024)).toFixed(bytes >= 10 * 1024 * 1024 ? 0 : 1) + ' MB'
+    : Math.max(1, Math.round(bytes / 1024)) + ' KB';
+}
+
+// Keep object keys ASCII-safe: Storage rejects some characters in keys.
+function DOC_safeName(name) {
+  return String(name || 'file')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9._-]/g, '_')
+    .slice(-80);
+}
+
+async function DOC_upload(file, ownerId, processId, docId) {
+  if (!window.sb || !ownerId) throw new Error('storage-unavailable');
+  const path = [ownerId, processId || 'draft', docId + '-' + Date.now().toString(36) + '-' + DOC_safeName(file.name)].join('/');
+  const { error } = await sb.storage.from(DOC_BUCKET).upload(path, file, {
+    upsert: true,
+    contentType: file.type || 'application/octet-stream',
+  });
+  if (error) throw error;
+  return path;
+}
+
+// Signed URLs expire, so cache per path for a little under the TTL.
+const DOC_URL_CACHE = new Map();
+async function DOC_src(entry) {
+  if (!entry) return '';
+  if (entry.dataUrl) return entry.dataUrl;      // legacy inline document
+  if (!entry.path || !window.sb) return '';
+  const hit = DOC_URL_CACHE.get(entry.path);
+  if (hit && hit.until > Date.now()) return hit.url;
+  const { data, error } = await sb.storage.from(DOC_BUCKET).createSignedUrl(entry.path, 3600);
+  if (error || !data) return '';
+  DOC_URL_CACHE.set(entry.path, { url: data.signedUrl, until: Date.now() + 50 * 60 * 1000 });
+  return data.signedUrl;
+}
+
+// pdf.js only needs the bytes; accept both a data: URL and an https: one.
+async function DOC_bytes(src) {
+  if (!src) return null;
+  if (src.startsWith('data:')) {
+    const bin = atob(src.split(',')[1] || '');
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+  }
+  const res = await fetch(src);
+  if (!res.ok) throw new Error('fetch-failed');
+  return new Uint8Array(await res.arrayBuffer());
+}
+
 /* ============ useApi hook ============ */
 function useApi(apiMethod) {
   const [data, setData] = useState(null);
@@ -1549,7 +1617,7 @@ const AdmissionsCore = ({ user }) => {
       setAiReport({ d, p: proc, loading: true });
       const entry = (proc.data && proc.data.docs && proc.data.docs[d.id]) || {};
       let docText = '';
-      if (entry.dataUrl && (entry.type || '').indexOf('pdf') >= 0) docText = await extractPdfText(entry.dataUrl);
+      if ((entry.type || '').indexOf('pdf') >= 0) docText = await extractPdfText(await DOC_src(entry));
       const prompt = 'Egyetemi felvételi iroda dokumentum-ellenőrző asszisztense vagy. Elemezd a jelentkező feltöltött dokumentumát, és KIZÁRÓLAG érvényes, minifikált JSON-t adj vissza (markdown nélkül).\n\nElvárt dokumentumtípus (hely): "' + d.label + '"\nFájlnév: "' + (entry.fileName || '') + '"\nMIME típus: "' + (entry.type || 'ismeretlen') + '"\nFájlméret (bájt): ' + (entry.size || 0) + '\nJelentkező (űrlap szerint): ' + ((proc.data && proc.data.account && proc.data.account.fullName) || '') + '\n\nKinyert dokumentum-szöveg (üres lehet, ha kép/szkennelt):\n"""' + (docText || '(nincs kinyerhető szöveg)') + '"""\n\nA JSON pontosan ilyen szerkezetű legyen:\n{"detectedType":string,"matchesExpected":boolean,"authenticity":"authentic"|"review"|"suspicious","confidence":number,"extractedFields":{kulcs:ertek},"redFlags":[string],"summary":string,"recommendation":string}\nA szöveges mezők magyarul legyenek. Légy tömör és konkrét. Ha nincs kinyerhető szöveg, a metaadatok és a fájltípus alapján adj óvatos becslést, és jelezd a redFlags között.';
       try {
         if (!window.claude || !window.claude.complete) throw new Error('Az AI szolgáltatás nem elérhető ebben a nézetben.');
@@ -1566,9 +1634,10 @@ const AdmissionsCore = ({ user }) => {
       const url = avatarUrl(p); const nm = pName(p);
       return (<div className="relative rounded-xl overflow-hidden bg-primary/10 text-primary flex items-center justify-center font-black flex-none" style={{ width: size, height: size }}><span>{(nm[0] || '?').toUpperCase()}</span>{url && <img src={url} alt="" className="absolute inset-0 w-full h-full object-cover" onError={e => { e.target.style.display = 'none'; }} />}</div>);
     };
-    const downloadDoc = (d, fileName, proc) => {
+    const downloadDoc = async (d, fileName, proc) => {
       const entry = (proc.data && proc.data.docs && proc.data.docs[d.id]) || {};
-      if (entry.dataUrl) { const a = document.createElement('a'); a.href = entry.dataUrl; a.download = fileName || 'dokumentum'; document.body.appendChild(a); a.click(); a.remove(); return; }
+      const src = await DOC_src(entry);
+      if (src) { const a = document.createElement('a'); a.href = src; a.download = fileName || 'dokumentum'; a.target = '_blank'; document.body.appendChild(a); a.click(); a.remove(); return; }
       const content = 'NEUMANN JÁNOS EGYETEM — Felvételi dokumentum (demó)\n\nJelentkező: ' + pName(proc) + '\nDokumentum: ' + d.label + '\nFájl: ' + fileName + '\n\n(Nincs csatolt fájl ehhez a tételhez.)';
       const blob = new Blob([content], { type: 'text/plain' });
       const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = (fileName || 'dokumentum') + '.txt'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -1748,8 +1817,8 @@ const AdmissionsCore = ({ user }) => {
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()}>
                 <div className="p-4 border-b border-slate-100 flex items-center justify-between"><div className="font-bold text-slate-800 text-sm flex items-center gap-2"><previewDoc.d.Icon size={16} className="text-primary" /> {previewDoc.d.label}</div><button onClick={() => setPreviewDoc(null)} className="text-slate-400 hover:text-slate-700"><Lucide.X size={18} /></button></div>
                 <div className="p-4 bg-slate-50">
-                  {(() => { const e = (previewDoc.p.data && previewDoc.p.data.docs && previewDoc.p.data.docs[previewDoc.d.id]) || {}; return e.dataUrl ? ((e.type || '').indexOf('pdf') >= 0 ? <PdfObject dataUrl={e.dataUrl} /> : <img src={e.dataUrl} alt={previewDoc.fileName} className="max-h-[60vh] mx-auto rounded-xl border border-slate-200" />) : (
-                    <div className="bg-white border border-slate-200 rounded-xl mx-auto max-h-[55vh] aspect-[3/4] w-full max-w-xs flex flex-col items-center justify-center text-center p-6"><previewDoc.d.Icon size={48} className="text-slate-300 mb-4" /><div className="font-mono text-xs text-slate-400">{previewDoc.fileName}</div><div className="font-bold text-slate-700 mt-2">{previewDoc.d.label}</div>{previewDoc.d.id === 'passport' && previewDoc.p.data && previewDoc.p.data.extracted && (<div className="mt-4 text-xs text-slate-500 space-y-0.5"><div>{previewDoc.p.data.extracted.name}</div><div>{previewDoc.p.data.extracted.passportNumber}</div><div>{previewDoc.p.data.extracted.country}</div></div>)}<div className="mt-4 text-[10px] text-slate-300">Nincs előnézet</div></div>
+                  {(() => { const e = (previewDoc.p.data && previewDoc.p.data.docs && previewDoc.p.data.docs[previewDoc.d.id]) || {}; return (e.path || e.dataUrl) ? <DocViewer entry={e} fileName={previewDoc.fileName} /> : (
+                    <div className="bg-white border border-slate-200 rounded-xl mx-auto max-h-[55vh] aspect-[3/4] w-full max-w-xs flex flex-col items-center justify-center text-center p-6"><previewDoc.d.Icon size={48} className="text-slate-300 mb-4" /><div className="font-mono text-xs text-slate-400">{previewDoc.fileName}</div><div className="font-bold text-slate-700 mt-2">{previewDoc.d.label}</div>{previewDoc.d.id === 'passport' && previewDoc.p.data && previewDoc.p.data.extracted && (<div className="mt-4 text-xs text-slate-500 space-y-0.5"><div>{previewDoc.p.data.extracted.name}</div><div>{previewDoc.p.data.extracted.passportNumber}</div><div>{previewDoc.p.data.extracted.country}</div></div>)}<div className="mt-4 text-[10px] text-slate-300">Nincs csatolt fájl</div></div>
                   ); })()}
                 </div>
                 <div className="p-4 border-t border-slate-100 flex justify-end"><button onClick={() => downloadDoc(previewDoc.d, previewDoc.fileName, previewDoc.p)} className="bg-primary text-white px-4 py-2 rounded-lg text-sm font-bold inline-flex items-center gap-1.5"><Lucide.Download size={14} /> Letöltés</button></div>
@@ -5379,19 +5448,20 @@ async function spFetchMsgs(ownerEmail) {
     return data.map(r => ({ id: r.id, processId: r.process_id, owner: r.owner_email, applicant: r.applicant, sender: r.sender, subject: r.subject, preview: r.preview, tone: r.tone, attachments: r.attachments || [], read: !!r.read, date: r.date }));
   } catch (e) { return null; }
 }
-async function extractPdfText(dataUrl) {
+// `src` is either a data: URL (legacy inline document) or a signed Storage URL.
+async function extractPdfText(src) {
   try {
     const pdfjs = await import('https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.min.mjs');
     pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.worker.min.mjs';
-    const b64 = (dataUrl || '').split(',')[1] || '';
-    const bin = atob(b64); const bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const bytes = await DOC_bytes(src);
+    if (!bytes) return '';
     const pdf = await pdfjs.getDocument({ data: bytes }).promise;
     let text = ''; const pages = Math.min(pdf.numPages, 6);
     for (let n = 1; n <= pages; n++) { const page = await pdf.getPage(n); const tc = await page.getTextContent(); text += tc.items.map(it => it.str).join(' ') + '\n'; }
     return text.slice(0, 6000);
   } catch (e) { return ''; }
 }
-function PdfObject({ dataUrl }) {
+function PdfObject({ src }) {
   const containerRef = React.useRef(null);
   const [status, setStatus] = React.useState('loading');
   React.useEffect(() => {
@@ -5400,10 +5470,8 @@ function PdfObject({ dataUrl }) {
       try {
         const pdfjs = await import('https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.min.mjs');
         pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.worker.min.mjs';
-        const base64 = dataUrl.split(',')[1] || '';
-        const bin = atob(base64);
-        const bytes = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const bytes = await DOC_bytes(src);
+        if (cancelled || !bytes) return;
         const pdf = await pdfjs.getDocument({ data: bytes }).promise;
         if (cancelled) return;
         const container = containerRef.current;
@@ -5425,14 +5493,43 @@ function PdfObject({ dataUrl }) {
       } catch (e) { setStatus('error'); }
     })();
     return () => { cancelled = true; };
-  }, [dataUrl]);
+  }, [src]);
   return (
     <div className="w-full overflow-auto bg-slate-100 rounded-xl p-3" style={{ maxHeight: '62vh' }}>
       {status === 'loading' && <div className="text-center text-slate-400 text-sm py-10">PDF betöltése…</div>}
-      {status === 'error' && <div className="text-center text-red-500 text-sm py-10">A PDF nem jeleníthető meg. <a href={dataUrl} download className="text-primary font-bold underline">Letöltés</a></div>}
+      {status === 'error' && <div className="text-center text-red-500 text-sm py-10">A PDF nem jeleníthető meg. <a href={src} download target="_blank" rel="noreferrer" className="text-primary font-bold underline">Letöltés</a></div>}
       <div ref={containerRef}></div>
     </div>
   );
+}
+
+/* Resolves a stored document to a usable URL: inline data: URL for legacy
+   entries, a short-lived signed URL for anything in Storage. */
+function useDocSrc(entry) {
+  const key = entry ? (entry.path || (entry.dataUrl ? 'inline' : '')) : '';
+  const [src, setSrc] = React.useState('');
+  React.useEffect(() => {
+    let dead = false;
+    setSrc('');
+    if (!key) return;
+    DOC_src(entry).then(u => { if (!dead) setSrc(u); }).catch(() => {});
+    return () => { dead = true; };
+  }, [key]);
+  return src;
+}
+
+function DocViewer({ entry, fileName }) {
+  const src = useDocSrc(entry);
+  if (!src) return <div className="text-center text-slate-400 text-sm py-10">Dokumentum betöltése…</div>;
+  return ((entry && entry.type) || '').indexOf('pdf') >= 0
+    ? <PdfObject src={src} />
+    : <img src={src} alt={fileName || ''} className="max-h-[60vh] mx-auto rounded-xl border border-slate-200" />;
+}
+
+function DocDownloadLink({ entry, fileName, className, children }) {
+  const src = useDocSrc(entry);
+  if (!src) return null;
+  return <a href={src} download={fileName} target="_blank" rel="noreferrer" className={className}>{children}</a>;
 }
 const AdmissionsHub = (() => {
 
@@ -5699,25 +5796,69 @@ const AdmissionsHub = (() => {
           if (d.id === 'internship') return { ...base, 'Munkáltató': 'TechCorp Ltd.', 'Pozíció': 'Intern', 'Időtartam': rnd(3, 12) + ' hónap' };
           return base;
         };
-        const onUpload = (d, file) => {
+        const onUpload = async (d, file) => {
           if (!file) return;
-          const big = file.size > 4 * 1024 * 1024;
-          const finish = (dataUrl) => {
-            const nd = { ...docs, [d.id]: { fileName: file.name, status: 'uploaded', type: file.type, size: file.size, dataUrl } };
+
+          // Over the limit: say so and keep whatever was uploaded before.
+          // Never report success for a document we did not store.
+          if (file.size > DOC_MAX_BYTES) {
+            setUploadMsg({
+              tone: 'error',
+              text: d.label + ' — a fájl ' + DOC_fmtSize(file.size) + ', a megengedett legfeljebb '
+                + DOC_fmtSize(DOC_MAX_BYTES) + '. Kérjük, tömörítsd vagy csökkentsd a felbontását, és töltsd fel újra.',
+            });
+            setTimeout(() => setUploadMsg(''), 8000);
+            return;
+          }
+
+          const finish = (stored) => {
+            const nd = { ...docs, [d.id]: { fileName: file.name, status: 'uploaded', type: file.type, size: file.size, ...stored } };
             const patch = { docs: nd, aiExtracts: { ...(data.aiExtracts || {}), [d.id]: aiExtract(d, file) }, aiChecks: { ...(data.aiChecks || {}), [d.id]: aiCheck(d, file) } };
             if (d.ocr) patch.extracted = mockPassportOCR(acc);
             set(patch);
-            setUploadMsg(d.label + ' — sikeresen feltöltve'); setTimeout(() => setUploadMsg(''), 3000);
+            setUploadMsg({ tone: 'ok', text: d.label + ' — sikeresen feltöltve (' + DOC_fmtSize(file.size) + ')' });
+            setTimeout(() => setUploadMsg(''), 3000);
           };
-          if (big) { finish(null); return; }
+
+          setUploadMsg({ tone: 'busy', text: d.label + ' — feltöltés folyamatban…' });
+          // currentUser.id is the Supabase auth uid, which is also the first
+          // path segment the Storage policies check.
+          const authId = (user && user.id) || null;
+          try {
+            const path = await DOC_upload(file, authId, process && process.id, d.id);
+            finish({ path });
+            return;
+          } catch (e) {
+            // Storage not set up yet (migration 08) or upload rejected: keep the
+            // old inline behaviour for small files so the demo still works, and
+            // be explicit when the file is too large to inline.
+            console.warn('Document upload to Storage failed, falling back to inline.', e);
+            if (file.size > DOC_INLINE_FALLBACK_BYTES) {
+              setUploadMsg({
+                tone: 'error',
+                text: d.label + ' — a dokumentumtár jelenleg nem elérhető, így ez a fájl most nem menthető el. Próbáld újra később, vagy tölts fel legfeljebb '
+                  + DOC_fmtSize(DOC_INLINE_FALLBACK_BYTES) + ' méretűt.',
+              });
+              setTimeout(() => setUploadMsg(''), 9000);
+              return;
+            }
+          }
           const reader = new FileReader();
-          reader.onload = () => finish(reader.result);
+          reader.onload = () => finish({ dataUrl: reader.result });
+          reader.onerror = () => {
+            setUploadMsg({ tone: 'error', text: d.label + ' — a fájl beolvasása nem sikerült.' });
+            setTimeout(() => setUploadMsg(''), 6000);
+          };
           reader.readAsDataURL(file);
         };
         const setEx = (k, v) => set({ extracted: { ...ex, [k]: v } });
         return (
           <div className="grid lg:grid-cols-2 gap-6">
             <div className="space-y-3">
+              <p className="text-[11px] font-bold text-slate-400 flex items-center gap-1.5 px-1">
+                <Lucide.Info size={13} className="flex-none" />
+                PDF vagy kép, dokumentumonként legfeljebb {DOC_fmtSize(DOC_MAX_BYTES)}.
+              </p>
               {DOC_TYPES.map(d => {
                 const up = docs[d.id] && docs[d.id].fileName;
                 return (
@@ -5976,22 +6117,32 @@ const AdmissionsHub = (() => {
             )}
           </div>
         </div>
-        {uploadMsg && (
-          <div className="fixed bottom-6 right-6 z-50 bg-emerald-600 text-white px-5 py-3 rounded-2xl shadow-xl flex items-center gap-2"><Lucide.CheckCircle2 size={18} /> <span className="font-bold text-sm">{uploadMsg}</span></div>
-        )}
+        {uploadMsg && (() => {
+          // Older call sites passed a plain string; treat that as success.
+          const m = typeof uploadMsg === 'string' ? { tone: 'ok', text: uploadMsg } : uploadMsg;
+          const skin = m.tone === 'error' ? 'bg-red-600' : m.tone === 'busy' ? 'bg-slate-800' : 'bg-emerald-600';
+          return (
+            <div className={'fixed bottom-6 right-6 z-50 max-w-sm text-white px-5 py-3 rounded-2xl shadow-xl flex items-start gap-2.5 ' + skin} role="status">
+              <span className="flex-none mt-0.5">
+                {m.tone === 'error' ? <Lucide.AlertTriangle size={18} />
+                  : m.tone === 'busy' ? <Lucide.Loader2 size={18} className="animate-spin" />
+                  : <Lucide.CheckCircle2 size={18} />}
+              </span>
+              <span className="font-bold text-sm leading-snug">{m.text}</span>
+            </div>
+          );
+        })()}
         {previewDoc && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm" onClick={() => setPreviewDoc(null)}>
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()}>
               <div className="p-4 border-b border-slate-100 flex items-center justify-between"><div className="font-bold text-slate-800 text-sm flex items-center gap-2"><previewDoc.d.Icon size={16} className="text-primary" /> {previewDoc.d.label}</div><button onClick={() => setPreviewDoc(null)} className="text-slate-400 hover:text-slate-700"><Lucide.X size={18} /></button></div>
               <div className="p-4 bg-slate-50">
-                {previewDoc.entry && previewDoc.entry.dataUrl ? (
-                  (previewDoc.entry.type || '').indexOf('pdf') >= 0
-                    ? <PdfObject dataUrl={previewDoc.entry.dataUrl} />
-                    : <img src={previewDoc.entry.dataUrl} alt={previewDoc.fileName} className="max-h-[60vh] mx-auto rounded-xl border border-slate-200" />
+                {previewDoc.entry && (previewDoc.entry.path || previewDoc.entry.dataUrl) ? (
+                  <DocViewer entry={previewDoc.entry} fileName={previewDoc.fileName} />
                 ) : (
-                  <div className="bg-white border border-slate-200 rounded-xl mx-auto max-h-[55vh] aspect-[3/4] w-full max-w-xs flex flex-col items-center justify-center text-center p-6"><previewDoc.d.Icon size={48} className="text-slate-300 mb-4" /><div className="font-mono text-xs text-slate-400">{previewDoc.fileName}</div><div className="font-bold text-slate-700 mt-2">{previewDoc.d.label}</div>{previewDoc.d.id === 'passport' && ex && <div className="mt-4 text-xs text-slate-500 space-y-0.5"><div>{ex.name}</div><div>{ex.passportNumber}</div><div>{ex.country}</div></div>}<div className="mt-4 text-[10px] text-slate-300">Nincs előnézet (a fájl mérete miatt)</div></div>
+                  <div className="bg-white border border-slate-200 rounded-xl mx-auto max-h-[55vh] aspect-[3/4] w-full max-w-xs flex flex-col items-center justify-center text-center p-6"><previewDoc.d.Icon size={48} className="text-slate-300 mb-4" /><div className="font-mono text-xs text-slate-400">{previewDoc.fileName}</div><div className="font-bold text-slate-700 mt-2">{previewDoc.d.label}</div>{previewDoc.d.id === 'passport' && ex && <div className="mt-4 text-xs text-slate-500 space-y-0.5"><div>{ex.name}</div><div>{ex.passportNumber}</div><div>{ex.country}</div></div>}<div className="mt-4 text-[10px] text-slate-300">Nincs csatolt fájl</div></div>
                 )}
-                {previewDoc.entry && previewDoc.entry.dataUrl && <div className="mt-3 text-right"><a href={previewDoc.entry.dataUrl} download={previewDoc.fileName} className="bg-primary text-white px-4 py-2 rounded-lg text-sm font-bold inline-flex items-center gap-1.5"><Lucide.Download size={14} /> Letöltés</a></div>}
+                {previewDoc.entry && (previewDoc.entry.path || previewDoc.entry.dataUrl) && <div className="mt-3 text-right"><DocDownloadLink entry={previewDoc.entry} fileName={previewDoc.fileName} className="bg-primary text-white px-4 py-2 rounded-lg text-sm font-bold inline-flex items-center gap-1.5"><Lucide.Download size={14} /> Letöltés</DocDownloadLink></div>}
               </div>
             </div>
           </div>

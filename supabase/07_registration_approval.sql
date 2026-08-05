@@ -124,11 +124,17 @@ create trigger on_auth_user_created
 -- UniPortal jogosultsági mezőit írja vissza, hacsak nem superadmin módosít.
 create or replace function public.profiles_protect_privileges()
 returns trigger language plpgsql security definer set search_path = public as $$
+declare actor text;
 begin
-  if public.is_superadmin() then
+  -- auth.uid() is null when there is no end-user JWT: the SQL Editor, a
+  -- service-role key, a migration. Those are trusted server-side contexts and
+  -- must stay able to fix an account by hand — the guard is only about what a
+  -- signed-in client may do to itself.
+  if public.is_superadmin() or auth.uid() is null then
     if new.approval_status is distinct from old.approval_status then
       new.approved_at := case when new.approval_status = 'approved' then now() else null end;
-      new.approved_by := (select email from public.profiles where id = auth.uid());
+      select email into actor from public.profiles where id = auth.uid();
+      new.approved_by := coalesce(actor, 'sql-editor');
     end if;
     return new;
   end if;

@@ -118,7 +118,8 @@ Lépésenként ugyanez:
 | `04_admission_processes.sql` | megosztott jelentkezési folyamatok + üzenetek + realtime | ✅ telepítve |
 | `05_features.sql` | hírfolyam, programok, jelentkezések, AI tudásbázis | ✅ telepítve |
 | `06_harden_rls.sql` | anonim írás kikapcsolása | ✅ telepítve |
-| `07_registration_approval.sql` | regisztráció-jóváhagyás + superadmin | ⛔ **még nem futott le** |
+| `07_registration_approval.sql` | regisztráció-jóváhagyás + superadmin | ✅ telepítve |
+| `08_documents_storage.sql` | jelentkezői dokumentumok Storage-ba (20 MB) | ⛔ **még nem futott le** |
 
 > **`05_features.sql` nélkül** a Hírfolyam / Programok / AI asszisztens modulok
 > egy seed-elt `localStorage` tárolóra esnek vissza: működnek, de eszközönként
@@ -131,8 +132,22 @@ Lépésenként ugyanez:
 > veszel fel a program-szerkesztőbe, előbb a `05_features.sql` sémáját bővítsd —
 > a PostgREST minden ismeretlen kulcsra `PGRST204`-gyel elutasítja az írást.
 
-Az Authentication → Sign In / Providers → Email alatt a **Confirm email** legyen
-**kikapcsolva**, különben az új regisztráció megerősítő e-mailre vár.
+### Jelentkezői dokumentumok
+
+A feltöltött dokumentumok a privát `documents` Storage bucketbe kerülnek
+(`08_documents_storage.sql`), a folyamat JSONB mezőjében csak az elérési út
+marad. **Felső határ dokumentumonként 20 MB** — a böngésző és a bucket
+`file_size_limit`-je is ezt érvényesíti. Efölött a jelentkező hibaüzenetet kap,
+és a korábban feltöltött fájlja érintetlen marad.
+
+Ki mit lát: a jelentkező a saját `<auth.uid()>/…` mappáját, az ügyintézők
+(`SUPERADMIN`, `ADMIN`, `ADMISSIONS`, `FINANCE`) mindenkiét — `public.is_staff()`.
+Az olvasás rövid életű aláírt URL-lel történik, a bucket nem publikus.
+
+> A `08` migráció előtt (vagy ha a Storage nem elérhető) a 4 MB alatti fájlok a
+> régi módon, beágyazva mentődnek, hogy a demó ne törjön el; e fölött a
+> jelentkező azt kapja, hogy a dokumentumtár nem érhető el. A régebbi,
+> beágyazott dokumentumok továbbra is megnyithatók.
 
 ### Regisztráció, e-mail-megerősítés, jóváhagyás
 
