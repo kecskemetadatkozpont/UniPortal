@@ -371,6 +371,76 @@ async function DOC_bytes(src) {
   return new Uint8Array(await res.arrayBuffer());
 }
 
+/* ============ WhatsApp (Meta Cloud API) ============
+   Sending goes through the `whatsapp-send` Edge Function: the access token is
+   server-side only, and the function refuses anyone who is not staff. Inbound
+   messages and delivery receipts arrive on the `whatsapp-webhook` function and
+   land in wa_messages, which this reads with a realtime subscription.
+
+   Until the functions are deployed the send falls back to writing a simulated
+   row directly, so the CRM inbox is shared and live either way. */
+
+const WA_TEMPLATES = [
+  { name: 'missing_documents',  label: 'Hiánypótlás emlékeztető' },
+  { name: 'admission_decision', label: 'Felvételi döntés' },
+  { name: 'payment_reminder',   label: 'Fizetési határidő' },
+  { name: 'interview_invite',   label: 'Interjú időpont' },
+];
+
+const WA_norm = (raw) => String(raw ?? '').replace(/[^\d]/g, '').replace(/^0+/, '');
+
+async function WA_thread(waId) {
+  if (!window.sb || !waId) return [];
+  const { data, error } = await sb.from('wa_messages')
+    .select('*').eq('wa_id', waId).order('created_at', { ascending: true }).limit(200);
+  if (error) throw error;
+  return data || [];
+}
+
+// True while the applicant's 24-hour service window is open. Outside it Meta
+// only accepts pre-approved templates, so the composer says so instead of
+// letting the send fail at the API.
+async function WA_windowOpen(waId) {
+  if (!window.sb || !waId) return false;
+  try {
+    const { data, error } = await sb.rpc('wa_window_open', { p_wa_id: waId });
+    return error ? false : !!data;
+  } catch (e) { return false; }
+}
+
+async function WA_send({ to, text, template, language, components, sentBy }) {
+  const waId = WA_norm(to);
+  if (!waId) throw new Error('Hiányzó telefonszám.');
+  if (!window.sb) throw new Error('Nincs kapcsolat a háttérrendszerrel.');
+
+  try {
+    const { data, error } = await sb.functions.invoke('whatsapp-send', {
+      body: { to: waId, text, template, language, components },
+    });
+    if (error) throw error;
+    if (data && data.error) throw new Error(data.detail || data.error);
+    return data;
+  } catch (e) {
+    // The function may simply not be deployed yet. Record the message as
+    // simulated so the conversation still exists — but never claim it was
+    // delivered.
+    const { error: insErr } = await sb.from('wa_messages').insert({
+      id: 'WA-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8),
+      wa_id: waId,
+      direction: 'out',
+      msg_type: template ? 'template' : 'text',
+      body: template ? (text || '[sablon: ' + template + ']') : text,
+      template_name: template || null,
+      status: 'queued',
+      sent_by: sentBy || null,
+      simulated: true,
+    });
+    if (insErr) throw new Error(insErr.message);
+    await sb.from('wa_contacts').upsert({ wa_id: waId, last_message_at: new Date().toISOString() }, { onConflict: 'wa_id' });
+    return { ok: true, simulated: true, status: 'queued', fallback: true };
+  }
+}
+
 /* ============ Loading placeholders ============
    A table that quietly swaps its rows a second after it appears reads as a
    glitch; a skeleton says "this is still arriving". Used for the first load
@@ -2476,7 +2546,7 @@ const mockMessages: Message[] = [
   { id: '3', sender: 'Kovács Ádám', content: 'Mikor várható a végleges felvételi döntés?', timestamp: 'Hétfő', type: 'WhatsApp', direction: 'Incoming' },
 ];
 
-const EngagementCRM: React.FC = () => {
+const EngagementCRM: React.FC = ({ user }) => {
   const [activeSubView, setActiveSubView] = useState<CRMSubView>('inbox');
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(null);
   const [isVideoRecording, setIsVideoRecording] = useState(false);
@@ -2491,6 +2561,13 @@ const EngagementCRM: React.FC = () => {
   const [sendSuccess, setSendSuccess] = useState(false);
   const [messageText, setMessageText] = useState('');
   const [activeChannel, setActiveChannel] = useState<'Email' | 'WhatsApp'>('Email');
+
+  // --- WhatsApp: valódi szál a wa_messages táblából, realtime frissítéssel ---
+  const [waThread, setWaThread] = useState([]);
+  const [waLoading, setWaLoading] = useState(false);
+  const [waWindowOpen, setWaWindowOpen] = useState(false);
+  const [waNotice, setWaNotice] = useState('');
+  const [waTemplate, setWaTemplate] = useState('');
 
   const whatsappStudents = students?.filter(s => !!s.phone) || [];
   const [whatsappSearch, setWhatsappSearch] = useState('');
@@ -2507,19 +2584,28 @@ const EngagementCRM: React.FC = () => {
     setIsSending(true);
     try {
       if (channel === 'WhatsApp') {
-        // In a real app, we'd use the student's phone number
-        // For the demo, we'll use a placeholder or the student's email as a mock "to"
-        await api.sendWhatsAppMessage({
-          to: selectedStudent.phone || '36301234567', 
-          text: messageText
+        setWaNotice('');
+        const res = await WA_send({
+          to: selectedStudent.phone,
+          text: waTemplate ? '' : messageText,
+          template: waTemplate || '',
+          language: 'hu',
+          sentBy: (user && user.email) || null,
         });
+        if (res && (res.simulated || res.fallback)) {
+          setWaNotice(res.fallback
+            ? 'Elmentve, de nem küldtük ki: a whatsapp-send függvény még nincs telepítve.'
+            : 'Elmentve, de nem küldtük ki: a Meta-hitelesítés (WHATSAPP_ACCESS_TOKEN) még nincs beállítva.');
+        }
+        setWaThread(await WA_thread(WA_norm(selectedStudent.phone)));
+        setWaTemplate('');
       } else {
         // Mock email sending
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
       
-      // Add message to local state for immediate feedback
-      mockMessages.push({
+      // Az e-mail csatorna továbbra is mock; a WhatsApp már a wa_messages táblát írja.
+      if (channel !== 'WhatsApp') mockMessages.push({
         id: Date.now().toString(),
         sender: 'Rendszer',
         content: messageText,
@@ -2569,6 +2655,34 @@ const EngagementCRM: React.FC = () => {
 
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const selectedStudent = students?.find(s => s.id === selectedStudentId) || students?.[0];
+
+  // A kiválasztott partner szálának betöltése + élő frissítés. A realtime a
+  // webhookon beérkező üzeneteket is azonnal behozza, oldalfrissítés nélkül.
+  const waId = WA_norm(selectedStudent && selectedStudent.phone);
+  useEffect(() => {
+    if (!waId) { setWaThread([]); setWaWindowOpen(false); return; }
+    let alive = true;
+    setWaLoading(true);
+    const load = async () => {
+      try {
+        const [rows, open] = await Promise.all([WA_thread(waId), WA_windowOpen(waId)]);
+        if (!alive) return;
+        setWaThread(rows); setWaWindowOpen(open);
+      } catch (e) {
+        if (alive) { setWaThread([]); setWaNotice('A beszélgetés betöltése nem sikerult: ' + (e.message || e)); }
+      } finally { if (alive) setWaLoading(false); }
+    };
+    load();
+    let channel = null;
+    try {
+      if (window.sb && sb.channel) {
+        channel = sb.channel('wa_' + waId)
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'wa_messages', filter: 'wa_id=eq.' + waId }, load)
+          .subscribe();
+      }
+    } catch (e) {}
+    return () => { alive = false; try { if (channel) sb.removeChannel(channel); } catch (e) {} };
+  }, [waId]);
 
   const renderInbox = () => (
     <div className="flex bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden h-[calc(100vh-280px)] animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -2782,20 +2896,42 @@ const EngagementCRM: React.FC = () => {
               <button className="mt-4 px-4 py-2 bg-slate-100 rounded-lg text-xs font-bold text-slate-700 hover:bg-slate-200 transition-all">Profil megtekintése</button>
             </div>
 
-            {mockMessages.filter(m => m.type === 'WhatsApp').map((msg) => (
-              <div key={msg.id} className={`flex ${msg.direction === 'Outgoing' ? 'justify-end' : 'justify-start'}`}>
+            {waLoading && (
+              <div className="space-y-3">
+                {[0,1,2].map(i => (
+                  <div key={i} className={'flex ' + (i === 1 ? 'justify-end' : 'justify-start')}>
+                    <SkeletonBar w={i === 1 ? '45%' : '58%'} h={38} className="rounded-3xl" />
+                  </div>
+                ))}
+              </div>
+            )}
+            {!waLoading && waThread.length === 0 && (
+              <p className="text-center text-xs text-slate-400 py-6">Még nincs üzenetváltás ezzel a jelentkezővel.</p>
+            )}
+            {!waLoading && waThread.map((msg) => (
+              <div key={msg.id} className={`flex ${msg.direction === 'out' ? 'justify-end' : 'justify-start'}`}>
                 <div className="flex items-end gap-2 max-w-[75%]">
-                  {msg.direction === 'Incoming' && (
+                  {msg.direction === 'in' && (
                     <div className="w-7 h-7 rounded-full bg-slate-200 flex-shrink-0 flex items-center justify-center text-[10px] font-bold">
                       {selectedStudent.name.charAt(0)}
                     </div>
                   )}
                   <div className={`p-3 px-4 rounded-3xl text-sm ${
-                    msg.direction === 'Outgoing' 
-                      ? 'bg-indigo-600 text-white rounded-br-none' 
+                    msg.direction === 'out'
+                      ? 'bg-indigo-600 text-white rounded-br-none'
                       : 'bg-slate-100 text-slate-800 rounded-bl-none'
                   }`}>
-                    <p className="leading-relaxed">{msg.content}</p>
+                    {msg.template_name && (
+                      <p className={'text-[10px] font-black uppercase tracking-wider mb-1 ' + (msg.direction === 'out' ? 'text-white/60' : 'text-slate-400')}>
+                        sablon · {msg.template_name}
+                      </p>
+                    )}
+                    <p className="leading-relaxed">{msg.body}</p>
+                    <p className={'text-[10px] mt-1 flex items-center gap-1 ' + (msg.direction === 'out' ? 'text-white/60' : 'text-slate-400')}>
+                      {new Date(msg.created_at).toLocaleString('hu-HU', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                      {msg.direction === 'out' && <> · {msg.simulated ? 'szimulált' : msg.status}</>}
+                      {msg.error && <> · <span className="text-red-300">{msg.error}</span></>}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -2805,6 +2941,25 @@ const EngagementCRM: React.FC = () => {
           {/* Input Area */}
           <div className="p-4 bg-white">
             <div className="flex items-center gap-2 max-w-5xl mx-auto">
+              {/* A Meta csak 24 órán belül engedi a szabad szöveget; azon kívül
+                  kizárólag jóváhagyott sablon mehet. Ezt itt jelezzük, hogy ne
+                  a Graph API hibájából derüljön ki. */}
+              {!waWindowOpen && (
+                <div className="absolute -top-14 left-6 right-6 flex items-center gap-2 bg-amber-50 border border-amber-100 text-amber-700 rounded-xl px-3 py-2 text-[12px] font-semibold">
+                  <ICONS.AlertCircle size={14} className="flex-none" />
+                  <span className="flex-1">A 24 órás ablak zárva — csak jóváhagyott sablon küldhető.</span>
+                  <select value={waTemplate} onChange={(e) => setWaTemplate(e.target.value)}
+                    className="bg-white border border-amber-200 rounded-lg px-2 py-1 text-[12px] font-bold">
+                    <option value="">Sablon választása…</option>
+                    {WA_TEMPLATES.map(t => <option key={t.name} value={t.name}>{t.label}</option>)}
+                  </select>
+                </div>
+              )}
+              {waNotice && (
+                <div className="absolute -top-14 left-6 right-6 bg-slate-800 text-white rounded-xl px-3 py-2 text-[12px] font-semibold flex items-center gap-2">
+                  <ICONS.Info size={14} className="flex-none" /> {waNotice}
+                </div>
+              )}
               <div className="flex items-center gap-1 text-indigo-600">
                 <button className="p-2 hover:bg-slate-100 rounded-full"><ICONS.PlusCircle size={24} /></button>
                 <button className="p-2 hover:bg-slate-100 rounded-full"><ICONS.Image size={24} /></button>
@@ -2826,6 +2981,7 @@ const EngagementCRM: React.FC = () => {
               </div>
               <button 
                 onClick={() => handleSendMessage('WhatsApp')}
+                disabled={isSending || (!waWindowOpen && !waTemplate)}
                 disabled={isSending || !messageText}
                 className={`p-2 rounded-full transition-all ${messageText ? 'text-indigo-600 hover:bg-indigo-50' : 'text-slate-300'}`}
               >
@@ -9466,7 +9622,7 @@ const App: React.FC = () => {
     switch (activeView) {
       case AppView.AGENT_PORTAL: return <AgentPortal user={currentUser} />;
       case AppView.ADMISSIONS_CORE: return <AdmissionsCore user={currentUser} />;
-      case AppView.ENGAGEMENT_CRM: return <EngagementCRM />;
+      case AppView.ENGAGEMENT_CRM: return <EngagementCRM user={currentUser} />;
       case AppView.FINANCE: return <Finance />;
       case AppView.IMMIGRATION: return <ImmigrationCompliance />;
       case AppView.EVALUATION: return <Evaluation />;

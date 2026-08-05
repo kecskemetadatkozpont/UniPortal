@@ -130,7 +130,8 @@ Lépésenként ugyanez:
 | `06_harden_rls.sql` | anonim írás kikapcsolása | ✅ telepítve |
 | `07_registration_approval.sql` | regisztráció-jóváhagyás + superadmin | ✅ telepítve |
 | `08_documents_storage.sql` | jelentkezői dokumentumok Storage-ba (20 MB) | ✅ telepítve |
-| `09_process_list_view.sql` | folyamatlista fájltartalom nélkül (teljesítmény) | ⛔ **még nem futott le** |
+| `09_process_list_view.sql` | folyamatlista fájltartalom nélkül (teljesítmény) | ✅ telepítve |
+| `10_whatsapp.sql` | WhatsApp üzenetek és kapcsolatok | ⛔ **még nem futott le** |
 
 > **`05_features.sql` nélkül** a Hírfolyam / Programok / AI asszisztens modulok
 > egy seed-elt `localStorage` tárolóra esnek vissza: működnek, de eszközönként
@@ -142,6 +143,20 @@ Lépésenként ugyanez:
 > program/képzés kategória a `level`-ből származik (`PROG_kind()`). Ha új mezőt
 > veszel fel a program-szerkesztőbe, előbb a `05_features.sql` sémáját bővítsd —
 > a PostgREST minden ismeretlen kulcsra `PGRST204`-gyel elutasítja az írást.
+
+### WhatsApp Business
+
+A *Kommunikáció és CRM → WhatsApp* fül a Meta Cloud API-ra van kötve, két Edge
+Functionön keresztül (`whatsapp-send`, `whatsapp-webhook`). Az access token
+kizárólag szerveroldalon létezik; a webhook `X-Hub-Signature-256` HMAC-kel
+hitelesíti a Metát. A beszélgetések a `wa_messages` táblában élnek, realtime
+frissítéssel.
+
+Telepítés és Meta-oldali teendők: [`supabase/functions/README.md`](supabase/functions/README.md).
+
+A rendszer a Meta-fiók előtt is használható: ilyenkor az üzenet `simulated`
+jelöléssel mentődik — a beszélgetés valódi és megosztott, csak nem megy ki.
+A felület mindig kiírja, melyik állapotban van.
 
 ### Teljesítmény
 
