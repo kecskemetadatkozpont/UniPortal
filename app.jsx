@@ -1553,7 +1553,10 @@ const AdmissionsCore = ({ user }) => {
       });
     };
     refetch();
-    const poll = setInterval(refetch, 12000);
+    // Realtime (migration 04) already pushes every change, so this is only a
+      // safety net for a dropped websocket — 12 s meant a needless round-trip
+      // five times a minute for every open tab.
+      const poll = setInterval(refetch, 60000);
     let channel = null;
     try {
       if (window.sb && sb.channel) {
@@ -1936,7 +1939,7 @@ const AdmissionsCore = ({ user }) => {
                   <div><h3 className="text-lg font-black text-slate-800">{nm}</h3><p className="text-xs text-slate-400">{(p.data && p.data.account && p.data.account.email) || p._owner || ''}</p></div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <button onClick={() => { setDetailFull(p); setDetailProc(null); setMsgSent(false); }} className="bg-primary text-white px-3 py-1.5 rounded-lg text-[11px] font-bold hover:bg-primary/90 inline-flex items-center gap-1.5"><Lucide.Maximize2 size={13} /> Részletes nézet</button>
+                  <button onClick={() => { setDetailFull(p); setDetailProc(null); setMsgSent(false); spFetchProc(p.id).then(full => { if (full) setDetailFull(cur => (cur && cur.id === p.id) ? { ...cur, ...full } : cur); }); }} className="bg-primary text-white px-3 py-1.5 rounded-lg text-[11px] font-bold hover:bg-primary/90 inline-flex items-center gap-1.5"><Lucide.Maximize2 size={13} /> Részletes nézet</button>
                   <button onClick={() => setDetailProc(null)} className="text-slate-400 hover:text-slate-700"><Lucide.X size={22} /></button>
                 </div>
               </div>
@@ -5427,14 +5430,44 @@ async function spSaveProc(ownerEmail, proc) {
   } catch (e) {}
 }
 async function spDeleteProc(id) { if (!window.sb || !id) return; try { await sb.from('admission_processes').delete().eq('id', id); } catch (e) {} }
+const spRow = (r) => ({ id: r.id, createdAt: r.created_at, step: r.step || 0, maxReached: r.max_reached || 0, done: !!r.done, data: r.data || {}, _owner: r.owner_email || 'demo', updatedAt: r.updated_at });
+
+/* Lists read from admission_process_list (migration 09), a view identical to
+   the table except that embedded file bytes are stripped out of data.docs.
+   Selecting '*' from the table here meant every poll dragged the applicants'
+   uploaded documents across the wire — measured at 12.5 MB / 3.6 s per call,
+   every 12 seconds. The full row is fetched only when a process is opened. */
+const SP_LIST_SOURCE = 'admission_process_list';
+let SP_LIST_VIEW_OK = true;   // set false once, if migration 09 is not applied
+
 async function spFetchProcs(ownerEmail) {
   if (!window.sb) return null;
-  try {
-    let q = sb.from('admission_processes').select('*');
+  const query = (table) => {
+    let q = sb.from(table).select('*');
     if (ownerEmail) q = q.eq('owner_email', ownerEmail);
-    const { data, error } = await q;
+    return q;
+  };
+  try {
+    let data = null, error = null;
+    if (SP_LIST_VIEW_OK) {
+      ({ data, error } = await query(SP_LIST_SOURCE));
+      // Remember a missing view so every later poll skips the failed probe.
+      if (error) SP_LIST_VIEW_OK = false;
+    }
+    if (!SP_LIST_VIEW_OK) ({ data, error } = await query('admission_processes'));
     if (error || !Array.isArray(data)) return null;
-    return data.map(r => ({ id: r.id, createdAt: r.created_at, step: r.step || 0, maxReached: r.max_reached || 0, done: !!r.done, data: r.data || {}, _owner: r.owner_email || 'demo', updatedAt: r.updated_at || '' }));
+    return data.map(spRow);
+  } catch (e) { return null; }
+}
+
+/* The full row, including any document still embedded in data. Called when a
+   process is opened, so the list never has to carry file bytes. */
+async function spFetchProc(id) {
+  if (!window.sb || !id) return null;
+  try {
+    const { data, error } = await sb.from('admission_processes').select('*').eq('id', id).maybeSingle();
+    if (error || !data) return null;
+    return spRow(data);
   } catch (e) { return null; }
 }
 async function spSaveMsg(m) { if (!window.sb || !m || !m.id) return; try { await sb.from('process_messages').upsert({ id: m.id, process_id: m.processId || null, owner_email: m.owner || null, applicant: m.applicant || null, sender: m.sender || null, subject: m.subject || null, preview: m.preview || null, tone: m.tone || null, attachments: m.attachments || [], read: !!m.read, date: m.date || '' }); } catch (e) {} }
@@ -6204,7 +6237,10 @@ const AdmissionsHub = (() => {
         });
       };
       refetch();
-      const poll = setInterval(refetch, 12000);
+      // Realtime (migration 04) already pushes every change, so this is only a
+      // safety net for a dropped websocket — 12 s meant a needless round-trip
+      // five times a minute for every open tab.
+      const poll = setInterval(refetch, 60000);
       let channel = null;
       try {
         if (window.sb && sb.channel) {
@@ -6243,7 +6279,7 @@ const AdmissionsHub = (() => {
             const pct = p.done ? 100 : Math.round(((p.maxReached || 0) / (STEP_DEFS.length - 1)) * 100);
             const stLabel = p.done ? 'Felvéve · levél kiállítva' : (STEP_DEFS[p.step] ? STEP_DEFS[p.step].label : '—');
             return (
-              <div key={p.id} onClick={() => setOpenId(p.id)} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 hover:border-primary/40 hover:shadow-md cursor-pointer transition-all group">
+              <div key={p.id} onClick={() => { setOpenId(p.id); spFetchProc(p.id).then(full => { if (full) setProcesses(ps => ps.map(x => x.id === p.id ? { ...x, ...full } : x)); }); }} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 hover:border-primary/40 hover:shadow-md cursor-pointer transition-all group">
                 <div className="flex items-start justify-between">
                   <div className="w-11 h-11 rounded-xl bg-primary/10 text-primary flex items-center justify-center font-black">{(nm[0] || '?').toUpperCase()}</div>
                   <button onClick={(e) => { e.stopPropagation(); delProcess(p.id); }} className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"><Lucide.Trash2 size={16} /></button>
