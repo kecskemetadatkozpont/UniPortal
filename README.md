@@ -200,9 +200,21 @@ Az olvasás rövid életű aláírt URL-lel történik, a bucket nem publikus.
    hanem az RLS érvényesíti (`public.is_approved()` minden adattáblán).
 
 **Superadmin:** `kecskemet.adatkozpont@gmail.com`. Ez az egyetlen fiók, amely
-látja a *Regisztrációk* menüpontot, és jóváhagyhat / elutasíthat / szerepkört
-adhat. Még az `ADMIN` sem. Az e-mail-cím a `public.superadmin_email()`
-függvényben van, egy helyen cserélhető.
+látja a *Regisztrációk* menüpontot. Még az `ADMIN` sem. Az e-mail-cím a
+`public.superadmin_email()` függvényben van, egy helyen cserélhető.
+
+A *Regisztrációk* nézet három füle:
+
+| Fül | Mit lehet |
+|---|---|
+| **Jóváhagyásra vár** | jóváhagyás a végleges szerepkör megadásával, vagy elutasítás indoklással |
+| **Felhasználók** | a **szerepkör bármikor átállítható** legördülőből; hozzáférés visszavonása |
+| **Elutasítva** | utólagos jóváhagyás |
+
+A saját sor zárolt (a superadmin nem tudja magát lefokozni), és `SUPERADMIN`
+szerepkör a felületről nem osztható — azt a `superadmin_email()` dönti el. A
+korlátozás nem csak felületi: a `profiles_protect_privileges` trigger minden
+más fiók szerepkör-módosítását visszaírja, a nyers API-n keresztül is.
 
 A superadmin fióknak egyszer regisztrálnia kell a felületen a fenti címmel — a
 `handle_new_user` trigger felismeri, és azonnal `SUPERADMIN` + `approved`

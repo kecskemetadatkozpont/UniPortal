@@ -39,6 +39,14 @@ async function REG_decide(row, status, role, reason) {
   if (error) throw error;
 }
 
+// Meglévő felhasználó szerepkörének átállítása. Ugyanaz az RLS + trigger
+// engedélyezi, mint a jóváhagyást: a profiles_protect_privileges csak akkor
+// engedi át a `role` mezőt, ha superadmin írja.
+async function REG_setRole(row, role) {
+  const { error } = await window.sb.from('profiles').update({ role }).eq('id', row.id);
+  if (error) throw error;
+}
+
 /* Hány regisztráció vár döntésre? A belépéskori kezdőnézethez is ezt hívjuk. */
 async function REG_pendingCount() {
   if (!window.sb) return 0;
@@ -63,6 +71,7 @@ function RegistrationsView({ user, onCountChange }) {
   const [roleDraft, setRoleDraft] = useState({});   // profileId -> role
   const [rejecting, setRejecting] = useState(null); // profile row
   const [reason, setReason] = useState('');
+  const [q, setQ] = useState('');
 
   const load = async () => {
     setErr('');
@@ -76,6 +85,13 @@ function RegistrationsView({ user, onCountChange }) {
     }
   };
   useEffect(() => { load(); }, []);
+
+  const changeRole = async (row, role) => {
+    setBusyId(row.id); setErr('');
+    try { await REG_setRole(row, role); await load(); }
+    catch (e) { setErr((e && e.message) || 'A szerepkör módosítása nem sikerült.'); }
+    finally { setBusyId(''); }
+  };
 
   const decide = async (row, status, role, why) => {
     setBusyId(row.id); setErr('');
@@ -93,9 +109,16 @@ function RegistrationsView({ user, onCountChange }) {
     );
   }
 
-  const pending = rows.filter(r => r.approval_status === 'pending');
-  const decided = rows.filter(r => r.approval_status !== 'pending' && r.role !== 'SUPERADMIN');
-  const list = tab === 'pending' ? pending : decided;
+  const match = (r) => {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return true;
+    return String(r.email || '').toLowerCase().includes(needle)
+        || String(r.name || '').toLowerCase().includes(needle);
+  };
+  const pending  = rows.filter(r => r.approval_status === 'pending').filter(match);
+  const active   = rows.filter(r => r.approval_status === 'approved').filter(match);
+  const rejected = rows.filter(r => r.approval_status === 'rejected').filter(match);
+  const list = tab === 'pending' ? pending : tab === 'users' ? active : rejected;
 
   return (
     <div className="p-8 max-w-6xl">
@@ -117,14 +140,19 @@ function RegistrationsView({ user, onCountChange }) {
         <div className="mt-6 text-sm font-semibold text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-3">{err}</div>
       )}
 
-      <div className="flex items-center gap-2 mt-7">
-        {[['pending', 'Jóváhagyásra vár', pending.length], ['decided', 'Elbírált', decided.length]].map(([k, label, n]) => (
+      <div className="flex items-center gap-2 mt-7 flex-wrap">
+        {[['pending', 'Jóváhagyásra vár', pending.length], ['users', 'Felhasználók', active.length], ['rejected', 'Elutasítva', rejected.length]].map(([k, label, n]) => (
           <button key={k} onClick={() => setTab(k)}
             className={'px-4 py-2 rounded-xl text-sm font-bold transition-colors ' +
               (tab === k ? 'bg-slate-900 text-white' : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-50')}>
             {label} <span className={'ml-1 ' + (tab === k ? 'text-white/60' : 'text-slate-400')}>{n}</span>
           </button>
         ))}
+        <div className="relative ml-auto">
+          <Lucide.Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" />
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Keresés név vagy e-mail szerint…"
+            className="w-64 bg-white border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
+        </div>
       </div>
 
       {list.length === 0 ? (
@@ -132,9 +160,14 @@ function RegistrationsView({ user, onCountChange }) {
           <div className="w-14 h-14 rounded-2xl bg-slate-50 text-slate-300 flex items-center justify-center mx-auto mb-4">
             <Lucide.UserCheck size={26} />
           </div>
-          <p className="font-bold text-slate-700">{tab === 'pending' ? 'Nincs függő regisztráció' : 'Még nincs elbírált regisztráció'}</p>
+          <p className="font-bold text-slate-700">
+            {q.trim() ? 'Nincs találat' : tab === 'pending' ? 'Nincs függő regisztráció' : tab === 'users' ? 'Még nincs jóváhagyott felhasználó' : 'Nincs elutasított regisztráció'}
+          </p>
           <p className="text-sm text-slate-400 mt-1">
-            {tab === 'pending' ? 'Az új jelentkezők és ügyintézők itt fognak megjelenni.' : 'A jóváhagyott és elutasított fiókok itt gyűlnek.'}
+            {q.trim() ? 'Próbálj más nevet vagy e-mail-címet.'
+              : tab === 'pending' ? 'Az új jelentkezők és ügyintézők itt fognak megjelenni.'
+              : tab === 'users' ? 'A jóváhagyott fiókok itt jelennek meg, szerepkörrel együtt.'
+              : 'Az elutasított fiókok itt gyűlnek.'}
           </p>
         </div>
       ) : (
@@ -143,7 +176,7 @@ function RegistrationsView({ user, onCountChange }) {
             <thead>
               <tr className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">
                 <th className="text-left px-5 py-3">Felhasználó</th>
-                <th className="text-left px-5 py-3">Kért szerepkör</th>
+                <th className="text-left px-5 py-3">{tab === 'users' ? 'Szerepkör' : 'Kért szerepkör'}</th>
                 <th className="text-left px-5 py-3">Regisztrált</th>
                 <th className="text-left px-5 py-3">Állapot</th>
                 <th className="text-right px-5 py-3">Döntés</th>
@@ -154,6 +187,7 @@ function RegistrationsView({ user, onCountChange }) {
                 const st = REG_STATUS_STYLE[r.approval_status] || REG_STATUS_STYLE.pending;
                 const chosen = roleDraft[r.id] || r.requested_role || r.role || 'STUDENT';
                 const busy = busyId === r.id;
+                const isSelf = !!(user && (user.id === r.id || user.email === r.email));
                 return (
                   <tr key={r.id} className="border-b border-slate-50 last:border-0">
                     <td className="px-5 py-4">
@@ -161,7 +195,32 @@ function RegistrationsView({ user, onCountChange }) {
                       <div className="text-[13px] text-slate-400">{r.email}</div>
                     </td>
                     <td className="px-5 py-4 text-sm font-semibold text-slate-600">
-                      {REG_ROLE_LABEL[r.requested_role || r.role] || r.requested_role || r.role || '—'}
+                      {tab === 'users' ? (
+                        isSelf ? (
+                          // A saját sorát senki nem írhatja át — különben a superadmin
+                          // egy félrekattintással kizárná magát a jóváhagyásból.
+                          <span className="inline-flex items-center gap-1.5 text-slate-400">
+                            <Lucide.Lock size={13} /> {REG_ROLE_LABEL[r.role] || r.role}
+                          </span>
+                        ) : r.role === 'SUPERADMIN' ? (
+                          <span className="inline-flex items-center gap-1.5 text-primary font-bold">
+                            <Lucide.ShieldCheck size={13} /> Superadmin
+                          </span>
+                        ) : (
+                          <select
+                            value={r.role || 'STUDENT'}
+                            disabled={busy}
+                            onChange={e => changeRole(r, e.target.value)}
+                            className="text-[13px] font-semibold bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50"
+                          >
+                            {REG_ASSIGNABLE_ROLES.map(role => (
+                              <option key={role} value={role}>{REG_ROLE_LABEL[role]}</option>
+                            ))}
+                          </select>
+                        )
+                      ) : (
+                        REG_ROLE_LABEL[r.requested_role || r.role] || r.requested_role || r.role || '—'
+                      )}
                     </td>
                     <td className="px-5 py-4 text-[13px] text-slate-500">{REG_fmtDate(r.created_at)}</td>
                     <td className="px-5 py-4">
@@ -203,12 +262,13 @@ function RegistrationsView({ user, onCountChange }) {
                               Mégis jóváhagyom
                             </button>
                           )}
-                          {r.approval_status === 'approved' && (
+                          {r.approval_status === 'approved' && !isSelf && r.role !== 'SUPERADMIN' && (
                             <button disabled={busy} onClick={() => decide(r, 'pending')}
                               className="px-3 py-2 rounded-xl text-[13px] font-bold text-slate-500 bg-slate-50 hover:bg-slate-100 disabled:opacity-50 transition-colors">
                               Hozzáférés visszavonása
                             </button>
                           )}
+                          {busy && <Lucide.Loader2 size={15} className="animate-spin text-slate-400" />}
                         </div>
                       )}
                     </td>
