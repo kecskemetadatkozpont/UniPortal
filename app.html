@@ -99,7 +99,7 @@
         let src = await (await fetch('app.jsx')).text();
         // New feature modules are concatenated into app.jsx's module (shared
         // scope) at the /*__FEATURES__*/ marker, just before the App component.
-        const FEATURE_FILES = ['features/data-layer.jsx', 'features/knowledge-base.jsx', 'features/feed.jsx', 'features/programs.jsx', 'features/assistant.jsx', 'features/registrations.jsx'];
+        const FEATURE_FILES = ['features/data-layer.jsx', 'features/echo.jsx', 'features/knowledge-base.jsx', 'features/feed.jsx', 'features/programs.jsx', 'features/assistant.jsx', 'features/registrations.jsx'];
         try {
           const parts = await Promise.all(FEATURE_FILES.map(f => fetch(f).then(r => r.ok ? r.text() : '')));
           const featureCode = parts.join('\n\n');

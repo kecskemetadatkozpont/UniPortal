@@ -44,6 +44,12 @@ const AppView = {
   TRAININGS: 'trainings',
   ASSISTANT: 'assistant',
   REGISTRATIONS: 'registrations',
+  // ECHO (OMHV) — oktatoi munka hallgatoi velemenyezese, 28/2023.
+  ECHO_STUDENT: 'echo_student',
+  ECHO_ADMIN: 'echo_admin',
+  // Oktatoi eredmenynezet. A szerkeszto es a moderalas NEM kap sajat nezetet:
+  // az ECHO_ADMIN-on belul fulek (features/echo.jsx, 13. szakasz).
+  ECHO_TEACHER: 'echo_teacher',
 };
 
 const MENU_ITEMS = [
@@ -65,6 +71,10 @@ const MENU_ITEMS = [
   { id: AppView.SYSTEM_ADMIN, label: 'Rendszerkezelés', icon: <Lucide.Settings size={20} /> },
   // Superadmin-only; the sidebar filter hides it from every other role.
   { id: AppView.REGISTRATIONS, label: 'Regisztrációk', icon: <Lucide.UserCheck size={20} /> },
+  // ECHO: a kitöltő minden szerepkörnek látszik, a kampánykezelés csak SUPERADMIN/ADMIN-nak.
+  { id: AppView.ECHO_STUDENT, label: 'Kurzusértékelés', icon: <Lucide.ClipboardList size={20} /> },
+  { id: AppView.ECHO_ADMIN, label: 'ECHO kampányok', icon: <Lucide.ClipboardCheck size={20} /> },
+  { id: AppView.ECHO_TEACHER, label: 'Oktatói eredmények', icon: <Lucide.BarChart2 size={20} /> },
 ];
 
 /* ============ In-memory database (mirrors server.ts) ============ */
@@ -9610,6 +9620,25 @@ const App: React.FC = () => {
   const filteredMenuItems = MENU_ITEMS.filter(item => {
     // Approving registrations is the superadmin's alone — not even ADMIN.
     if (item.id === AppView.REGISTRATIONS) return currentUser.role === 'SUPERADMIN';
+    // Az ECHO kampánykezelés a REGISTRATIONS mintájára a fail-open ág ELŐTT dönt,
+    // különben a lenti 'SUPERADMIN || ADMIN → true' után minden ügyintéző látná.
+    if (item.id === AppView.ECHO_ADMIN) return currentUser.role === 'SUPERADMIN' || currentUser.role === 'ADMIN';
+    // A kitöltő a belső szerepköröknek és a hallgatóknak jár. A külsős AGENT
+    // (partnerügynökség) nem hallgató, ezért nem véleményez oktatót — a
+    // 15_echo_core.sql 11.7 seedje sem veszi fel a kurzusokra.
+    if (item.id === AppView.ECHO_STUDENT) return currentUser.role !== 'AGENT';
+    // Az oktatoi eredmenynezet egyelore az ugyintezoi szerepkoroknek es az
+    // adminnak. Az OKTATO az ECHO SAJAT szerepkor-dimenziojaval jon kesobb
+    // (ECHO_ADMIN / ECHO_MIR / ECHO_DEKAN / OKTATO): ma az echo.teacher.profile_id
+    // minden soron NULL, tehat echo.my_teacher_id() NULL-t ad, es oktatokent
+    // belepve a szerver ECHO_FORBIDDEN-t dob. Amig ez igy van, a menupont a
+    // belso szerepkoroknek szol; a hallgato es a kulsos ugynok nem latja.
+    // MERVE: az echo_campaigns() es az echo_rate() torzse is_admin()-t kovetel,
+    // ezert ADMISSIONS / FINANCE eseten a kampany- es kurzusvalaszto ures marad
+    // — a nezet ezt kimondja, nem uresen hallgat.
+    if (item.id === AppView.ECHO_TEACHER) {
+      return ['SUPERADMIN', 'ADMIN', 'ADMISSIONS', 'FINANCE'].includes(currentUser.role);
+    }
     if (currentUser.role === 'SUPERADMIN' || currentUser.role === 'ADMIN') return true;
     if (currentUser.role === 'AGENT') return [AppView.FEED, AppView.PROGRAMS, AppView.ASSISTANT, AppView.AGENT_PORTAL, AppView.INTERVIEWS].includes(item.id);
     if (currentUser.role === 'FINANCE') return [AppView.FEED, AppView.ASSISTANT, AppView.FINANCE, AppView.AGENT_PORTAL, AppView.INTERVIEWS, AppView.REPORTS].includes(item.id);
@@ -9639,6 +9668,15 @@ const App: React.FC = () => {
       case AppView.REGISTRATIONS:
         return currentUser.role === 'SUPERADMIN'
           ? <RegistrationsView user={currentUser} />
+          : <FeedView user={currentUser} onNavigate={setActiveView} />;
+      case AppView.ECHO_STUDENT: return <ECHO_StudentView user={currentUser} />;
+      case AppView.ECHO_ADMIN:
+        return (currentUser.role === 'SUPERADMIN' || currentUser.role === 'ADMIN')
+          ? <ECHO_AdminView user={currentUser} />
+          : <FeedView user={currentUser} onNavigate={setActiveView} />;
+      case AppView.ECHO_TEACHER:
+        return ['SUPERADMIN', 'ADMIN', 'ADMISSIONS', 'FINANCE'].includes(currentUser.role)
+          ? <ECHO_TeacherView user={currentUser} />
           : <FeedView user={currentUser} onNavigate={setActiveView} />;
       default: return <FeedView user={currentUser} onNavigate={setActiveView} />;
     }
@@ -9714,7 +9752,7 @@ if (__boot) __boot.remove();
    ============================================================ */
 const HU_EN = {
   // menü / nav
-  'Ügynök és partner portál':'Agent & Partner Portal','Jelentkezés és Felvételi':'Applications & Admissions','Kommunikáció és CRM':'Communication & CRM','Pénzügyek':'Finance','Vízum és Compliance':'Visa & Compliance','Felvételi Bírálat':'Admissions Review','Interjú Foglalás':'Interview Booking','Marketing és Lead kezelés':'Marketing & Lead Management','Hallgatói Portál':'Student Portal','Riportok':'Reports','Rendszerkezelés':'System Administration','Regisztrációk':'Registrations','Intelligence':'Intelligence','Hírfolyam':'Feed','Programok':'Programs','Képzések':'Degrees','AI Asszisztens':'AI Assistant','Neumann János Egyetem':'John von Neumann University',
+  'Ügynök és partner portál':'Agent & Partner Portal','Jelentkezés és Felvételi':'Applications & Admissions','Kommunikáció és CRM':'Communication & CRM','Pénzügyek':'Finance','Vízum és Compliance':'Visa & Compliance','Felvételi Bírálat':'Admissions Review','Interjú Foglalás':'Interview Booking','Marketing és Lead kezelés':'Marketing & Lead Management','Hallgatói Portál':'Student Portal','Riportok':'Reports','Rendszerkezelés':'System Administration','Regisztrációk':'Registrations','Kurzusértékelés':'Course evaluation','ECHO kampányok':'ECHO campaigns','Oktatói eredmények':'Teaching results','Intelligence':'Intelligence','Hírfolyam':'Feed','Programok':'Programs','Képzések':'Degrees','AI Asszisztens':'AI Assistant','Neumann János Egyetem':'John von Neumann University',
   // fejléc
   'Globális keresés a tesztadatok között...':'Global search across demo data...','Profil megnyitása':'Open profile','Profilom':'My profile','Vissza':'Back','Mentés':'Save','Mentés…':'Saving…','Elmentve':'Saved','Bezárás':'Close','Összes':'View all',
   // profil
@@ -9751,6 +9789,14 @@ const HU_EN_PHRASES = [
 (function setupI18n(){
   if ((localStorage.getItem('nje_lang') || 'hu') !== 'en') return;
   const SKIP = { INPUT:1, TEXTAREA:1, SCRIPT:1, STYLE:1, OPTION:1 };
+  /* Az ECHO kérdőív tartalma ADATBÓL jön (template_version.compiled) és a
+     szenátus hagyta jóvá (28/2023.) — kérdésszöveget, válaszopciót, kurzus- és
+     oktatónevet gépi HU→EN regex NEM írhat át, mert az már nem a jóváhagyott
+     kérdőív lenne. A features/echo.jsx minden ilyen szöveget egy
+     [data-echo-noi18n] elembe csomagol (ECHO_Src); itt az egész részfát
+     kihagyjuk — a körülötte lévő felületi feliratok viszont fordulnak. */
+  const NO_I18N = (el) => { try { return !!(el && el.closest && el.closest('[data-echo-noi18n]')); } catch (e) { return false; } };
+  const skipNode = (n) => !!(n && n.parentNode && (SKIP[n.parentNode.nodeName] || NO_I18N(n.parentNode)));
   const translateText = (s) => {
     const trimmed = s.trim();
     if (!trimmed) return s;
@@ -9759,14 +9805,15 @@ const HU_EN_PHRASES = [
     for (const [re, rep] of HU_EN_PHRASES) { const n = out.replace(re, rep); if (n !== out) { out = n; changed = true; } }
     return changed ? out : s;
   };
-  const translateOne = (n) => { if (!n || n.nodeType !== 3) return; if (n.parentNode && SKIP[n.parentNode.nodeName]) return; const t = translateText(n.nodeValue); if (t !== n.nodeValue) n.nodeValue = t; };
+  const translateOne = (n) => { if (!n || n.nodeType !== 3) return; if (skipNode(n)) return; const t = translateText(n.nodeValue); if (t !== n.nodeValue) n.nodeValue = t; };
   const attrs = (root) => {
     if (!root || root.nodeType !== 1) return;
+    if (NO_I18N(root)) return;
     if (root.hasAttribute && root.hasAttribute('placeholder')) { const k = (root.getAttribute('placeholder')||'').trim(); if (HU_EN[k]) root.setAttribute('placeholder', HU_EN[k]); }
     if (root.hasAttribute && root.hasAttribute('title')) { const k = (root.getAttribute('title')||'').trim(); if (HU_EN[k]) root.setAttribute('title', HU_EN[k]); }
     if (root.querySelectorAll) {
-      root.querySelectorAll('[placeholder]').forEach(el => { const k = (el.getAttribute('placeholder')||'').trim(); if (HU_EN[k]) el.setAttribute('placeholder', HU_EN[k]); });
-      root.querySelectorAll('[title]').forEach(el => { const k = (el.getAttribute('title')||'').trim(); if (HU_EN[k]) el.setAttribute('title', HU_EN[k]); });
+      root.querySelectorAll('[placeholder]').forEach(el => { if (NO_I18N(el)) return; const k = (el.getAttribute('placeholder')||'').trim(); if (HU_EN[k]) el.setAttribute('placeholder', HU_EN[k]); });
+      root.querySelectorAll('[title]').forEach(el => { if (NO_I18N(el)) return; const k = (el.getAttribute('title')||'').trim(); if (HU_EN[k]) el.setAttribute('title', HU_EN[k]); });
     }
   };
   const walk = (root) => {
@@ -9774,7 +9821,7 @@ const HU_EN_PHRASES = [
     if (root.nodeType === 3) { translateOne(root); return; }
     if (root.nodeType !== 1 && root.nodeType !== 9 && root.nodeType !== 11) return;
     const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-      acceptNode: (n) => (n.parentNode && SKIP[n.parentNode.nodeName]) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT
+      acceptNode: (n) => skipNode(n) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT
     });
     const nodes = []; while (w.nextNode()) nodes.push(w.currentNode);
     nodes.forEach(n => { const t = translateText(n.nodeValue); if (t !== n.nodeValue) n.nodeValue = t; });

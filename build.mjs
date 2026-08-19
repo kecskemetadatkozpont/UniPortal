@@ -30,6 +30,7 @@ const root = dirname(fileURLToPath(import.meta.url));
 
 const FEATURE_FILES = [
   'features/data-layer.jsx',
+  'features/echo.jsx',
   'features/knowledge-base.jsx',
   'features/feed.jsx',
   'features/programs.jsx',
