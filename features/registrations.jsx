@@ -121,7 +121,7 @@ function RegistrationsView({ user, onCountChange }) {
   const list = tab === 'pending' ? pending : tab === 'users' ? active : rejected;
 
   return (
-    <div className="p-8 max-w-6xl">
+    <div className="p-4 sm:p-6 lg:p-8 max-w-6xl 2xl:max-w-[1500px]">
       <div className="flex items-start justify-between gap-6 flex-wrap">
         <div>
           <p className="text-[11px] font-black text-primary uppercase tracking-widest">Hozzáférés-kezelés</p>
@@ -171,7 +171,7 @@ function RegistrationsView({ user, onCountChange }) {
           </p>
         </div>
       ) : (
-        <div className="mt-6 bg-white rounded-3xl border border-slate-100 overflow-hidden">
+        <div className="mt-6 bg-white rounded-3xl border border-slate-100 overflow-hidden overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">
@@ -281,8 +281,8 @@ function RegistrationsView({ user, onCountChange }) {
       )}
 
       {rejecting && (
-        <div className="fixed inset-0 z-[80] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-6" onClick={() => setRejecting(null)}>
-          <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full p-7" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 z-[80] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6" onClick={() => setRejecting(null)}>
+          <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full p-5 sm:p-7 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <h3 className="text-lg font-black text-slate-900">Regisztráció elutasítása</h3>
             <p className="text-sm text-slate-500 mt-1.5">{rejecting.email}</p>
             <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mt-6 mb-2">Indoklás (opcionális)</label>

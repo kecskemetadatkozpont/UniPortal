@@ -36,6 +36,11 @@ const FEATURE_FILES = [
   'features/programs.jsx',
   'features/assistant.jsx',
   'features/registrations.jsx',
+  // Kollégiumi modul (26_dorm.sql). A SORREND KÖTÖTT: a dorm.jsx viszi a közös
+  // réteget (DORM_rpc, DORM_api, DORM_Tabs, DORM_Stat, DORM_Empty, DORM_Hidden)
+  // és a Kollégium nézetet, a dorm-views.jsx pedig erre épül.
+  'features/dorm.jsx',
+  'features/dorm-views.jsx',
 ];
 
 // `motion` is only referenced by the shim at the top of app.jsx, which renders

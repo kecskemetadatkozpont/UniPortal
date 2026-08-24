@@ -197,12 +197,12 @@ const AssistantView = ({ user }) => {
   const [tab, setTab] = useState('chat');
   const admin = isAdmin(user);
   return (
-    <div className="max-w-4xl mx-auto px-6 sm:px-8 py-8 animate-in fade-in duration-500">
+    <div className="max-w-4xl 2xl:max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 animate-in fade-in duration-500">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-6">
         <div>
           <p className="text-primary font-black text-xs uppercase tracking-widest mb-1">AI Asszisztens</p>
           <h1 className="text-3xl font-black text-slate-900 tracking-tight">Kérdezd az NJE-t</h1>
-          <p className="text-slate-400 mt-1 font-medium">Kérdéseid a Neumann János Egyetemen való tanulásról — hivatalos információk alapján megválaszolva.</p>
+          <p className="text-slate-400 mt-1 font-medium max-w-[75ch]">Kérdéseid a Neumann János Egyetemen való tanulásról — hivatalos információk alapján megválaszolva.</p>
         </div>
         {admin && (
           <div className="flex items-center gap-1 bg-white border border-slate-100 rounded-2xl p-1">
@@ -219,12 +219,58 @@ const AssistantView = ({ user }) => {
 };
 
 /* ---------- floating widget (mounted globally) ---------- */
+
+/**
+ * Mekkora sávot foglal el a képernyő alján egy másik, fixen odarögzített
+ * akciósáv (ma: az ECHO kitöltő alsó gombsora, `fixed bottom-0 ... z-40`).
+ *
+ * MIÉRT KELL: a lebegő asszisztens-gomb `fixed bottom-6 right-6 z-[95]`, tehát
+ * mindig az ECHO sávja FÖLÖTT ül. Mérve 1216 px alatt pontosan a "Következő"
+ * gombra takart rá. Ahelyett, hogy az app.jsx-ben rejtenénk el a widgetet
+ * (az a keret dolga), itt kitérünk előle: a gomb annyival feljebb csúszik,
+ * amennyi az alsó sáv magassága.
+ *
+ * A mérés olcsó: egyetlen querySelector, rAF-fel összevonva, és csak akkor
+ * fut újra, ha a DOM vagy az ablakméret változik.
+ */
+const useBottomBarInset = () => {
+  const [inset, setInset] = useState(0);
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    let raf = 0;
+    const measure = () => {
+      raf = 0;
+      let h = 0;
+      const vh = window.innerHeight;
+      document.querySelectorAll('[class*="fixed"][class*="bottom-0"]').forEach((el) => {
+        if (el.hasAttribute('data-assistant-widget')) return;
+        const cs = window.getComputedStyle(el);
+        if (cs.position !== 'fixed' || cs.display === 'none' || cs.visibility === 'hidden') return;
+        const r = el.getBoundingClientRect();
+        // csak az valódi alsó sáv: a képernyő aljához ér, és nem teljes képernyős overlay
+        if (r.height > 0 && r.height < 160 && Math.abs(r.bottom - vh) < 2) h = Math.max(h, r.height);
+      });
+      setInset((prev) => (prev === h ? prev : h));
+    };
+    const schedule = () => { if (!raf) raf = window.requestAnimationFrame(measure); };
+    measure();
+    const mo = new MutationObserver(schedule);
+    mo.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style'] });
+    window.addEventListener('resize', schedule);
+    return () => { mo.disconnect(); window.removeEventListener('resize', schedule); if (raf) window.cancelAnimationFrame(raf); };
+  }, []);
+  return inset;
+};
+
 const AssistantWidget = ({ user }) => {
   const [open, setOpen] = useState(false);
+  const inset = useBottomBarInset();            // px, 0 ha nincs alsó akciósáv
+  const btnBottom = inset + 24;                 // bottom-6 = 24px
+  const panelBottom = btnBottom + 56 + 16;      // a gomb (h-14) fölé, 16px hézaggal
   return (
     <>
       {open && (
-        <div className="fixed bottom-24 right-6 z-[95] w-[min(400px,calc(100vw-3rem))] bg-white rounded-3xl shadow-2xl border border-slate-100 flex flex-col overflow-hidden animate-in slide-in-from-bottom-4 fade-in duration-200">
+        <div data-assistant-widget style={{ bottom: panelBottom }} className="fixed right-4 sm:right-6 z-[95] w-[min(400px,calc(100vw-2rem))] max-h-[min(70vh,560px)] bg-white rounded-3xl shadow-2xl border border-slate-100 flex flex-col overflow-hidden animate-in slide-in-from-bottom-4 fade-in duration-200">
           <div className="flex items-center justify-between px-4 py-3 bg-primary text-white">
             <div className="flex items-center gap-2 font-black"><Lucide.Sparkles size={18} /> NJE Asszisztens</div>
             <button onClick={() => setOpen(false)} className="w-8 h-8 rounded-lg hover:bg-white/20 flex items-center justify-center"><Lucide.X size={17} /></button>
@@ -232,7 +278,7 @@ const AssistantWidget = ({ user }) => {
           <div className="p-4"><ASSIST_Chat user={user} compact={true} /></div>
         </div>
       )}
-      <button onClick={() => setOpen(o => !o)} className="fixed bottom-6 right-6 z-[95] w-14 h-14 rounded-2xl bg-primary text-white shadow-2xl shadow-primary/30 flex items-center justify-center hover:bg-primary/90 transition-all active:scale-95" title="Kérdezd az NJE Asszisztenst">
+      <button data-assistant-widget onClick={() => setOpen(o => !o)} style={{ bottom: btnBottom }} className="fixed right-4 sm:right-6 z-[95] w-14 h-14 rounded-2xl bg-primary text-white shadow-2xl shadow-primary/30 flex items-center justify-center hover:bg-primary/90 transition-all active:scale-95" aria-label="Kérdezd az NJE Asszisztenst" aria-expanded={open} title="Kérdezd az NJE Asszisztenst">
         {open ? <Lucide.ChevronDown size={24} /> : <Lucide.Sparkles size={24} />}
       </button>
     </>

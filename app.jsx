@@ -59,6 +59,11 @@ const AppView = {
   // Oktatoi eredmenynezet. A szerkeszto es a moderalas NEM kap sajat nezetet:
   // az ECHO_ADMIN-on belul fulek (features/echo.jsx, 13. szakasz).
   ECHO_TEACHER: 'echo_teacher',
+  // Kollégiumi modul (26_dorm.sql). Három nézet, három közönség:
+  // az üzemeltetés, a karbantartás és maga a lakó.
+  DORM_OPS: 'dorm_ops',
+  DORM_MAINTENANCE: 'dorm_maintenance',
+  DORM_STUDENT: 'dorm_student',
 };
 
 const MENU_ITEMS = [
@@ -84,6 +89,11 @@ const MENU_ITEMS = [
   { id: AppView.ECHO_STUDENT, label: 'Kurzusértékelés', icon: <Lucide.ClipboardList size={20} /> },
   { id: AppView.ECHO_ADMIN, label: 'ECHO kampányok', icon: <Lucide.ClipboardCheck size={20} /> },
   { id: AppView.ECHO_TEACHER, label: 'Oktatói eredmények', icon: <Lucide.BarChart2 size={20} /> },
+  // Kollégium: az üzemeltetés és a karbantartás a dorm_my_roles() grantjaihoz
+  // kötött, a „Szállásom” viszont minden hallgatónak jár (AGENT kivételével).
+  { id: AppView.DORM_OPS, label: 'Kollégium', icon: <Lucide.Building2 size={20} /> },
+  { id: AppView.DORM_MAINTENANCE, label: 'Karbantartás', icon: <Lucide.Wrench size={20} /> },
+  { id: AppView.DORM_STUDENT, label: 'Szállásom', icon: <Lucide.BedDouble size={20} /> },
 ];
 
 
@@ -834,7 +844,10 @@ function SkeletonBar({ w = '100%', h = 12, className = '' }) {
 }
 
 // `cols` is an array of widths, one per table column.
-function SkeletonRows({ rows = 5, cols }) {
+// A `cols` ALAPÉRTÉKE KELL: enélkül egy `cols` nélküli hívás a `cols.map`-en
+// TypeError-t dob, ami a React fát a gyökérig lebontja (fehér lap). A meglévő
+// hívók mind adnak `cols`-t, nekik ez betűre semmit nem változtat.
+function SkeletonRows({ rows = 5, cols = ['60%', '40%', '30%'] }) {
   return (
     <>
       {Array.from({ length: rows }).map((_, r) => (
@@ -1204,6 +1217,112 @@ const VideoInterviewSystem: React.FC<VideoInterviewSystemProps> = ({ onComplete 
 return VideoInterviewSystem;
 })();
 
+/* ===== Reszponzív keret — az oldalsáv állapota =====
+   Három üzemmód, matchMedia-val figyelve (NEM resize-eseménnyel: az minden
+   egyes pixelnyi húzáskor újrarajzoltatná a teljes shellt):
+
+     < 768 px    mobil    — a sáv rejtve, hamburgerrel beúszó fiók
+     768–1279 px tablet   — a sáv alapból ÖSSZECSUKVA (ikonsáv)
+     >= 1280 px  asztali  — a sáv alapból KINYITVA
+
+   A felhasználó választása (localStorage: 'nje_sidebar') FELÜLÍRJA a
+   töréspont-alapértelmezést, amíg vissza nem állítja. A mobil fiók állapota
+   szándékosan NEM perzisztál — az mindig zárva nyílik. */
+const NJE_SIDEBAR_KEY = 'nje_sidebar';
+const NJE_MQ_MOBILE = '(max-width: 767px)';
+const NJE_MQ_DESKTOP = '(min-width: 1280px)';
+
+const njeMatch = (q) => {
+  try { return typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia(q).matches; }
+  catch (e) { return false; }
+};
+/* Privát ablakban a localStorage elérése is dobhat, ezért minden hívás try/catch. */
+const njeReadSidebarPref = () => {
+  try {
+    const v = localStorage.getItem(NJE_SIDEBAR_KEY);
+    return (v === 'expanded' || v === 'collapsed') ? v : null;
+  } catch (e) { return null; }
+};
+const njeWriteSidebarPref = (v) => { try { localStorage.setItem(NJE_SIDEBAR_KEY, v); } catch (e) { /* privát ablak */ } };
+
+const useSidebarLayout = () => {
+  const [isMobile, setIsMobile] = useState(() => njeMatch(NJE_MQ_MOBILE));
+  const [isDesktop, setIsDesktop] = useState(() => njeMatch(NJE_MQ_DESKTOP));
+  const [pref, setPref] = useState(njeReadSidebarPref);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  // A töréspontok figyelése. A régebbi Safari csak addListener-t ismer, ezért
+  // mindkét API-t kezeljük — és leszereléskor takarítunk.
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return;
+    const bind = (query, cb) => {
+      const mq = window.matchMedia(query);
+      const handler = (e) => cb(e.matches);
+      if (mq.addEventListener) mq.addEventListener('change', handler);
+      else mq.addListener(handler);
+      cb(mq.matches); // a kezdőállapot is a médialekérdezésből jön
+      return () => {
+        if (mq.removeEventListener) mq.removeEventListener('change', handler);
+        else mq.removeListener(handler);
+      };
+    };
+    const offMobile = bind(NJE_MQ_MOBILE, setIsMobile);
+    const offDesktop = bind(NJE_MQ_DESKTOP, setIsDesktop);
+    return () => { offMobile(); offDesktop(); };
+  }, []);
+
+  // Az érvényes állapot. Mobilon a sáv fiókként viselkedik — ott nincs
+  // „összecsukva” állapot, a fiók mindig a teljes, feliratos alakot mutatja.
+  const collapsed = isMobile ? false : (pref ? pref === 'collapsed' : !isDesktop);
+  const mode = isMobile ? 'hidden' : (collapsed ? 'collapsed' : 'expanded');
+
+  const toggle = () => {
+    const next = collapsed ? 'expanded' : 'collapsed';
+    setPref(next);
+    njeWriteSidebarPref(next);
+  };
+
+  // Mobilról kilépve a fiók ne maradjon „nyitva” a háttérben.
+  useEffect(() => { if (!isMobile) setDrawerOpen(false); }, [isMobile]);
+
+  // Nyitott fiók: az Esc zárja, és a mögötte lévő oldal ne görögjön.
+  //
+  // A FÓKUSZ VISSZAADÁSA. MÉRVE (Playwright, 390 px): a fiók megnyitása után
+  // a fókusz a lap törzsében maradt — 10 Tab sem vitte be a menübe, mert az
+  // oldalsáv a DOM-ban ELŐBB áll, mint a tartalom, tehát előrefelé tabolva
+  // sosem érhető el. Ezért nyitáskor bevisszük a fókuszt a fiókba (ezt a
+  // Sidebar végzi a bezáró gombra), záráskor pedig ODA adjuk vissza, ahonnan
+  // jött — a hamburger gombra. Enélkül a fókusz a <body>-ra esne vissza, és a
+  // billentyűzetes felhasználó elveszítené a helyét.
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const opener = (typeof document !== 'undefined') ? document.activeElement : null;
+    const onKey = (e) => { if (e.key === 'Escape') setDrawerOpen(false); };
+    document.addEventListener('keydown', onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+      // Csak akkor adjuk vissza, ha a nyitó gomb még a lapon van.
+      try {
+        if (opener && opener.focus && document.contains(opener)) opener.focus();
+      } catch (e) { /* a gomb közben eltűnt */ }
+    };
+  }, [drawerOpen]);
+
+  // A sáv állapotát a <body> is hordozza (data-sidebar). Így tud hozzá igazodni
+  // az a néhány fixen pozicionált elem, amit nem React-propon keresztül
+  // mozgatunk — mindenekelőtt az ECHO kitöltő alsó akciósávja
+  // (features/echo.jsx: `fixed bottom-0 left-72`). A szabályok: app.html.
+  useEffect(() => {
+    document.body.setAttribute('data-sidebar', mode);
+    return () => { document.body.removeAttribute('data-sidebar'); };
+  }, [mode]);
+
+  return { isMobile, collapsed, mode, drawerOpen, setDrawerOpen, toggle };
+};
+
 /* ===== Sidebar ===== */
 const Sidebar = (() => {
 interface SidebarProps {
@@ -1212,6 +1331,11 @@ interface SidebarProps {
   currentUser: User;
   onLogout: () => void;
   menuItems: any[];
+  isMobile: boolean;
+  collapsed: boolean;
+  drawerOpen: boolean;
+  onToggle: () => void;
+  onCloseDrawer: () => void;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ 
@@ -1220,68 +1344,208 @@ const Sidebar: React.FC<SidebarProps> = ({
   currentUser, 
   onLogout,
   onOpenProfile,
-  menuItems 
+  menuItems,
+  isMobile,
+  collapsed,
+  drawerOpen,
+  onToggle,
+  onCloseDrawer
 }) => {
-  return (
-    <aside className="w-72 h-screen bg-primary flex flex-col fixed left-0 top-0 z-[60] shadow-2xl">
-      <div className="p-8 border-b border-white/10">
-        <div className="flex flex-col gap-3">
-          <div className="flex items-center gap-2.5">
-            <span className="font-black text-2xl text-white tracking-tight leading-none">UniPortal</span>
-            <span className="text-[10px] font-black tracking-[0.15em] text-primary bg-white px-1.5 py-1 rounded">PRO</span>
+  // Egy menüsor közös alakja. Összecsukva: csak ikon, középre igazítva,
+  // a felirat tooltipként (a title-t az i18n réteg is lefordítja).
+  const itemClass = (active) => [
+    'relative w-full flex items-center rounded-xl transition-all duration-200 group',
+    'focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80',
+    collapsed ? 'justify-center px-0 py-3' : 'gap-3 px-4 py-3',
+    active
+      ? (collapsed ? 'bg-white/25 text-white shadow-sm ring-1 ring-white/40' : 'bg-white/20 text-white shadow-sm')
+      : 'text-white/70 hover:bg-white/10 hover:text-white',
+  ].join(' ');
+
+  // Az aktív menüpont bal oldali jelölőcsíkja — összecsukva ez teszi
+  // egyértelművé, hol állunk, amikor a felirat nem látszik.
+  const activeMark = (active) => (active
+    ? <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-white rounded-r-full" aria-hidden="true" />
+    : null);
+
+  // A mobil fiók fókuszkezelése. Nyitáskor a bezáró gombra visszük a fókuszt,
+  // és amíg nyitva van, a Tab NEM szökhet ki mögé: a fiók fölött lévő
+  // sötétítő háttér miatt a mögötte lévő lap úgyis inaktív, tehát a
+  // billentyűzetes fókusznak is a fiókban a helye (ez a szokásos
+  // párbeszédablak-viselkedés). A visszaadást a useSidebarLayout intézi.
+  const asideRef = useRef(null);
+  const closeBtnRef = useRef(null);
+  useEffect(() => {
+    if (!isMobile || !drawerOpen) return;
+    // Az animáció alatt még visibility:hidden, ezért a következő képkockán.
+    const id = window.setTimeout(() => {
+      try { if (closeBtnRef.current) closeBtnRef.current.focus(); } catch (e) { /* nincs mit fókuszálni */ }
+    }, 50);
+    const onKeyDown = (e) => {
+      if (e.key !== 'Tab' || !asideRef.current) return;
+      const items = asideRef.current.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+      if (!items.length) return;
+      const first = items[0], last = items[items.length - 1];
+      // Kifelé lépnénk? Akkor körbe.
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      else if (!asideRef.current.contains(document.activeElement)) { e.preventDefault(); first.focus(); }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => { window.clearTimeout(id); document.removeEventListener('keydown', onKeyDown); };
+  }, [isMobile, drawerOpen]);
+
+  const aside = (
+    <aside
+      ref={asideRef}
+      className={`nje-sidebar h-screen bg-primary flex flex-col fixed left-0 top-0 z-[60] shadow-2xl ${
+        isMobile
+          ? `w-72 max-w-[85vw] ${drawerOpen ? 'translate-x-0' : '-translate-x-full'}`
+          : (collapsed ? 'w-20' : 'w-72')
+      }`}
+      data-hidden={isMobile && !drawerOpen ? 'true' : 'false'}
+      aria-hidden={isMobile && !drawerOpen ? 'true' : undefined}
+      /* Nyitott mobil fiók: párbeszédablakként viselkedik (sötétítő háttér,
+         Esc-zárás, fókuszcsapda), ezért a képernyőolvasónak is így jelezzük. */
+      role={isMobile && drawerOpen ? 'dialog' : undefined}
+      aria-modal={isMobile && drawerOpen ? 'true' : undefined}
+      aria-label={isMobile && drawerOpen ? 'Főmenü' : undefined}
+    >
+      {/* Fejléc — összecsukva rövidített (monogram) alak. */}
+      <div className={`border-b border-white/10 ${collapsed ? 'px-3 py-6' : 'p-8'}`}>
+        {collapsed ? (
+          <div className="flex justify-center">
+            <span
+              className="w-11 h-11 rounded-xl bg-white text-primary font-black text-sm flex items-center justify-center tracking-tight"
+              title="UniPortal Pro — Neumann János Egyetem"
+            >UP</span>
           </div>
-          <div>
-            <p className="text-[10px] text-white/80 font-black uppercase tracking-widest">Neumann János Egyetem</p>
+        ) : (
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center gap-2.5">
+              <span className="font-black text-2xl text-white tracking-tight leading-none">UniPortal</span>
+              <span className="text-[10px] font-black tracking-[0.15em] text-primary bg-white px-1.5 py-1 rounded">PRO</span>
+            </div>
+            <div>
+              <p className="text-[10px] text-white/80 font-black uppercase tracking-widest">Neumann János Egyetem</p>
+            </div>
           </div>
-        </div>
+        )}
+        {/* Mobil fiók: bezárás a fejlécből is (az Esc és a háttér mellett). */}
+        {isMobile && (
+          <button
+            ref={closeBtnRef}
+            onClick={onCloseDrawer}
+            aria-label="Menü bezárása"
+            title="Menü bezárása"
+            className="absolute top-4 right-4 w-10 h-10 rounded-xl flex items-center justify-center text-white/70 hover:text-white hover:bg-white/10 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
+          >
+            <ICONS.X size={20} />
+          </button>
+        )}
       </div>
 
-      <nav className="flex-1 p-4 mt-4 space-y-1 overflow-y-auto custom-scrollbar">
+      <nav className={`flex-1 mt-4 space-y-1 overflow-y-auto overflow-x-hidden custom-scrollbar ${collapsed ? 'px-2' : 'p-4'}`}>
         {menuItems.map((item) => (
           <button
             key={item.id}
             onClick={() => setActiveView(item.id)}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group ${
-              activeView === item.id
-                ? 'bg-white/20 text-white shadow-sm'
-                : 'text-white/70 hover:bg-white/10 hover:text-white'
-            }`}
+            className={itemClass(activeView === item.id)}
+            title={collapsed ? item.label : undefined}
+            aria-current={activeView === item.id ? 'page' : undefined}
           >
+            {activeMark(activeView === item.id)}
             <span className={`${activeView === item.id ? 'text-white' : 'text-white/50 group-hover:text-white'}`}>
               {item.icon}
             </span>
-            <span className="font-bold text-xs uppercase tracking-tight">{item.label}</span>
+            {!collapsed && <span className="font-bold text-xs uppercase tracking-tight text-left">{item.label}</span>}
           </button>
         ))}
         <button
           onClick={onOpenProfile}
-          className="w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group text-white/70 hover:bg-white/10 hover:text-white"
+          className={itemClass(false)}
+          title={collapsed ? 'Profilom' : undefined}
         >
           <span className="text-white/50 group-hover:text-white"><ICONS.UserCircle size={20} /></span>
-          <span className="font-bold text-xs uppercase tracking-tight">Profilom</span>
+          {!collapsed && <span className="font-bold text-xs uppercase tracking-tight">Profilom</span>}
         </button>
       </nav>
 
-      <div className="p-6 border-t border-white/10">
-        <div className="flex items-center gap-3 p-3 rounded-2xl bg-white/10 border border-white/5">
-          <button onClick={onOpenProfile} className="flex items-center gap-3 flex-1 min-w-0 text-left hover:opacity-90 transition-opacity" title="Profilom megnyitása">
-            <div className="w-10 h-10 rounded-xl bg-white/20 overflow-hidden shadow-sm flex-none">
-              <img src={currentUser.avatar} alt="Avatar" className="w-full h-full object-cover" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-black text-white truncate">{currentUser.name}</p>
-              <p className="text-[10px] text-white/60 truncate font-bold uppercase tracking-tighter">{currentUser.role}</p>
-            </div>
-          </button>
-          <button 
-            onClick={onLogout}
-            className="text-white/40 hover:text-white transition-colors p-1"
-          >
-            <ICONS.LogOut size={16} />
-          </button>
-        </div>
+      <div className={`border-t border-white/10 ${collapsed ? 'p-3' : 'p-6'}`}>
+        {collapsed ? (
+          /* Összecsukott profilblokk: avatar + kijelentkezés, egymás alatt. */
+          <div className="flex flex-col items-center gap-2">
+            <button
+              onClick={onOpenProfile}
+              title={currentUser.name}
+              aria-label="Profilom"
+              className="w-11 h-11 rounded-xl bg-white/20 overflow-hidden shadow-sm hover:opacity-90 transition-opacity focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
+            >
+              <img src={currentUser.avatar} alt="" className="w-full h-full object-cover" />
+            </button>
+            <button
+              onClick={onLogout}
+              title="Kijelentkezés"
+              aria-label="Kijelentkezés"
+              className="w-9 h-9 rounded-lg flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
+            >
+              <ICONS.LogOut size={16} />
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-3 p-3 rounded-2xl bg-white/10 border border-white/5">
+            <button onClick={onOpenProfile} className="flex items-center gap-3 flex-1 min-w-0 text-left hover:opacity-90 transition-opacity" title="Profilom megnyitása">
+              <div className="w-10 h-10 rounded-xl bg-white/20 overflow-hidden shadow-sm flex-none">
+                <img src={currentUser.avatar} alt="Avatar" className="w-full h-full object-cover" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-black text-white truncate">{currentUser.name}</p>
+                <p className="text-[10px] text-white/60 truncate font-bold uppercase tracking-tighter">{currentUser.role}</p>
+              </div>
+            </button>
+            <button 
+              onClick={onLogout}
+              className="text-white/40 hover:text-white transition-colors p-1"
+              title="Kijelentkezés"
+              aria-label="Kijelentkezés"
+            >
+              <ICONS.LogOut size={16} />
+            </button>
+          </div>
+        )}
       </div>
+
+      {/* Az össze-/kinyitó gomb: kerek, a sáv JOBB SZÉLÉN, függőlegesen
+          KÖZÉPEN, félig rálógva — hogy összecsukott állapotban is jól
+          látható és kattintható legyen (érintési célpont 40x40 px).
+          Mobilon nincs értelme: ott a hamburger a felső sávban él. */}
+      {!isMobile && (
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-label={collapsed ? 'Menü kinyitása' : 'Menü összecsukása'}
+          aria-expanded={!collapsed}
+          title={collapsed ? 'Menü kinyitása' : 'Menü összecsukása'}
+          className="nje-sidebar-toggle absolute top-1/2 -right-5 -translate-y-1/2 w-10 h-10 rounded-full bg-white text-primary shadow-lg ring-1 ring-slate-900/10 flex items-center justify-center hover:bg-primary hover:text-white transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+        >
+          {collapsed ? <ICONS.ChevronRight size={18} /> : <ICONS.ChevronLeft size={18} />}
+        </button>
+      )}
     </aside>
+  );
+
+  // Mobilon a fiók mögé sötétítő háttér kerül; rákattintva bezárul.
+  return (
+    <>
+      {isMobile && (
+        <div
+          className={`nje-sidebar-backdrop fixed inset-0 z-[55] bg-slate-900/50 ${drawerOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+          onClick={onCloseDrawer}
+          aria-hidden="true"
+        />
+      )}
+      {aside}
+    </>
   );
 };
 return Sidebar;
@@ -1449,7 +1713,7 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
 
   const renderOverview = () => (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
           <p className="text-slate-400 text-sm font-medium uppercase tracking-wider mb-2">Összes Diák</p>
           <div className="flex items-end justify-between">
@@ -1477,7 +1741,7 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-          <div className="flex items-center justify-between mb-6">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
             <h4 className="font-bold text-slate-800 text-lg">Legutóbbi Jelentkezők</h4>
             <button 
               onClick={() => setActiveTab('students')}
@@ -1721,8 +1985,8 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
 
     return (
       <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-        <div className="bg-indigo-900 rounded-3xl p-8 text-white relative overflow-hidden shadow-2xl shadow-indigo-200">
-          <div className="absolute top-0 right-0 p-12 opacity-10">
+        <div className="bg-indigo-900 rounded-3xl p-5 sm:p-8 text-white relative overflow-hidden shadow-2xl shadow-indigo-200">
+          <div className="absolute top-0 right-0 p-6 sm:p-12 opacity-10">
             <ICONS.Wallet size={180} />
           </div>
           <div className="relative z-10">
@@ -1748,6 +2012,7 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
           <div className="p-6 border-b border-slate-50">
             <h3 className="font-bold text-slate-800 text-lg">Jutalék Előzmények (Ügynökségi Kulcsok Alapján)</h3>
           </div>
+          <div className="overflow-x-auto">
           <table className="w-full text-left">
             <thead className="bg-slate-50 text-slate-400 text-[10px] font-bold uppercase tracking-wider">
               <tr>
@@ -1784,6 +2049,7 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
               })}
             </tbody>
           </table>
+          </div>
         </div>
       </div>
     );
@@ -1803,7 +2069,7 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
 
       {isAddingAgency && (
         <div className="bg-white p-6 rounded-2xl border border-indigo-100 shadow-md animate-in zoom-in-95 duration-200">
-          <form onSubmit={handleAddAgency} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <form onSubmit={handleAddAgency} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4">
             <div>
               <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Név</label>
               <input 
@@ -1861,7 +2127,7 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4 sm:gap-6">
         {agencies.map(agency => (
           <div key={agency.id} className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
             {editingAgencyId === agency.id ? (
@@ -1950,7 +2216,7 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
   );
 
   const renderResources = () => (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4 sm:gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
       {mockResources.map(resource => (
         <div key={resource.id} className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all group">
           <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center text-slate-400 mb-4 group-hover:bg-indigo-50 group-hover:text-indigo-500 transition-colors">
@@ -1980,14 +2246,14 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
   }
 
   return (
-    <div className="max-w-7xl mx-auto p-8 space-y-8">
+    <div className="max-w-7xl xl:max-w-[1440px] 2xl:max-w-[1720px] mx-auto p-4 sm:p-6 lg:p-8 space-y-6 lg:space-y-8">
       {/* Portal Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-8">
         <div>
           <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight">
             {isAgent ? `Ügynöki Portál: ${myAgency?.name || 'Betöltés...'}` : 'Ügynök és partner portál'}
           </h2>
-          <p className="text-slate-500 mt-1">
+          <p className="text-slate-500 mt-1 max-w-[75ch]">
             {isAgent 
               ? `Üdvözöljük, ${user.name}! Kövesse nyomon ügynöksége teljesítményét és diákjait.` 
               : 'Üdvözöljük a Global Study Ügynökség központi vezérlőpultján.'}
@@ -2059,7 +2325,7 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
                 <h3 className="font-bold text-slate-800 text-lg">Ügynökségi Hierarchia és Teljesítmény</h3>
               </div>
               <div className="p-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4 sm:gap-6">
                   {agencies.map(agency => {
                     const agencyStudents = students.filter(s => s.agencyId === agency.id);
                     const paidCount = agencyStudents.filter(s => s.status === 'Accepted').length;
@@ -2067,7 +2333,7 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
                     
                     return (
                       <div key={agency.id} className="p-5 border border-slate-100 rounded-2xl hover:border-indigo-200 transition-colors">
-                        <div className="flex items-center justify-between mb-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
                           <div className="flex items-center gap-3">
                             <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center font-bold">
                               {agency.name.charAt(0)}
@@ -2395,7 +2661,7 @@ const AdmissionsCore = ({ user }) => {
                   <div>
                     <div className="flex items-center justify-between mb-2"><span className="text-sm font-bold text-slate-700">{verifiedReq} / {reqDocs.length} kötelező hitelesítve</span>{missingReq.length > 0 && <span className="text-[11px] font-bold text-amber-600">{missingReq.length} hiányzik</span>}</div>
                     <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden mb-3"><div className="h-full bg-emerald-500 rounded-full transition-all" style={{ width: (reqDocs.length ? Math.round(verifiedReq / reqDocs.length * 100) : 0) + '%' }}></div></div>
-                    <p className="text-xs text-slate-500">Hitelesítsd a dokumentumokat egyesével a bal oldali listában a „Jóváhagyás” gombbal. Ha minden kötelező dokumentum hitelesítve, a folyamat automatikusan továbblép.</p>
+                    <p className="text-xs text-slate-500 max-w-[75ch]">Hitelesítsd a dokumentumokat egyesével a bal oldali listában a „Jóváhagyás” gombbal. Ha minden kötelező dokumentum hitelesítve, a folyamat automatikusan továbblép.</p>
                   </div>
                 )}
               </div>
@@ -2458,7 +2724,7 @@ const AdmissionsCore = ({ user }) => {
           </div>
           {previewDoc && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm" onClick={() => setPreviewDoc(null)}>
-              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()}>
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
                 <div className="p-4 border-b border-slate-100 flex items-center justify-between"><div className="font-bold text-slate-800 text-sm flex items-center gap-2"><previewDoc.d.Icon size={16} className="text-primary" /> {previewDoc.d.label}</div><button onClick={() => setPreviewDoc(null)} className="text-slate-400 hover:text-slate-700"><Lucide.X size={18} /></button></div>
                 <div className="p-4 bg-slate-50">
                   {(() => { const e = (previewDoc.p.data && previewDoc.p.data.docs && previewDoc.p.data.docs[previewDoc.d.id]) || {}; return (e.path || e.dataUrl) ? <DocViewer entry={e} fileName={previewDoc.fileName} /> : (
@@ -2482,7 +2748,7 @@ const AdmissionsCore = ({ user }) => {
                     <button onClick={() => setAiReport(null)} className="text-slate-400 hover:text-slate-700"><Lucide.X size={20} /></button>
                   </div>
                   {aiReport.loading ? (
-                    <div className="p-10 text-center"><Lucide.Loader2 size={28} className="text-primary animate-spin mx-auto mb-3" /><div className="font-bold text-slate-700">AI elemzés folyamatban…</div><div className="text-xs text-slate-400 mt-1">A dokumentum beolvasása és valódiság-ellenőrzése.</div></div>
+                    <div className="p-6 sm:p-10 text-center"><Lucide.Loader2 size={28} className="text-primary animate-spin mx-auto mb-3" /><div className="font-bold text-slate-700">AI elemzés folyamatban…</div><div className="text-xs text-slate-400 mt-1">A dokumentum beolvasása és valódiság-ellenőrzése.</div></div>
                   ) : aiReport.error ? (
                     <div className="p-8 text-center"><Lucide.AlertTriangle size={28} className="text-red-500 mx-auto mb-3" /><div className="font-bold text-red-600">{aiReport.error}</div><button onClick={() => runAiCheck(d, ap)} className="mt-4 bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-bold inline-flex items-center gap-1.5"><Lucide.RefreshCw size={14} /> Újrafuttatás</button></div>
                   ) : (
@@ -2789,7 +3055,7 @@ const AdmissionsCore = ({ user }) => {
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div className="lg:col-span-2 space-y-6">
         <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-          <div className="flex items-center justify-between mb-8">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 sm:mb-8">
             <h3 className="font-bold text-slate-800 text-lg">Jelentkezési Lap Szerkesztő</h3>
             <button className="bg-slate-900 text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2">
               <ICONS.PlusCircle size={16} /> Új mező hozzáadása
@@ -2861,7 +3127,7 @@ const AdmissionsCore = ({ user }) => {
   const renderReview = () => (
     <div className="flex flex-col lg:flex-row gap-8 h-[calc(100vh-280px)] animate-in fade-in zoom-in-95 duration-500">
       {/* Student Selection Sidebar (Internal) */}
-      <div className="lg:w-64 flex flex-col gap-2 overflow-y-auto border-r border-slate-100 pr-4">
+      <div className="w-full lg:w-64 shrink-0 flex flex-col gap-2 overflow-y-auto border-b lg:border-b-0 lg:border-r border-slate-100 pb-4 lg:pb-0 lg:pr-4">
         <h3 className="font-bold text-slate-800 text-xs uppercase tracking-wider mb-2">Jelentkezők</h3>
         {students.map(s => (
           <div 
@@ -2876,7 +3142,7 @@ const AdmissionsCore = ({ user }) => {
       </div>
 
       {/* File Sidebar */}
-      <div className="lg:w-72 flex flex-col gap-4 overflow-y-auto pr-2">
+      <div className="w-full lg:w-72 shrink-0 flex flex-col gap-4 overflow-y-auto lg:pr-2">
         <div className="mb-4">
           <h3 className="font-bold text-slate-800 text-lg">{selectedStudent?.name || 'Válasszon diákot'}</h3>
           <p className="text-xs text-slate-400">{selectedStudent?.email}</p>
@@ -2935,9 +3201,9 @@ const AdmissionsCore = ({ user }) => {
           </button>
         </div>
         
-        <div className="flex-1 bg-slate-100 p-8 flex items-center justify-center relative overflow-hidden">
+        <div className="flex-1 bg-slate-100 p-4 sm:p-8 flex items-center justify-center relative overflow-hidden">
           {/* Mock Document */}
-          <div className="w-[500px] h-[700px] bg-white shadow-2xl rounded-sm p-12 relative">
+          <div className="w-full max-w-[500px] h-[700px] max-h-full bg-white shadow-2xl rounded-sm p-6 sm:p-12 relative">
              {isScanning && (
                <div className="absolute top-0 left-0 w-full h-1 bg-indigo-500 shadow-[0_0_15px_rgba(99,102,241,0.5)] animate-scan z-20"></div>
              )}
@@ -2955,7 +3221,7 @@ const AdmissionsCore = ({ user }) => {
           </div>
 
           {/* AI Result Box */}
-          <div className={`absolute bottom-8 right-8 w-80 bg-white/95 backdrop-blur shadow-2xl rounded-2xl p-6 border border-indigo-100 transition-all transform ${isScanning ? 'translate-y-10 opacity-0' : 'translate-y-0 opacity-100'}`}>
+          <div className={`absolute bottom-4 right-4 sm:bottom-8 sm:right-8 w-[min(20rem,calc(100%-2rem))] bg-white/95 backdrop-blur shadow-2xl rounded-2xl p-5 sm:p-6 border border-indigo-100 transition-all transform ${isScanning ? 'translate-y-10 opacity-0' : 'translate-y-0 opacity-100'}`}>
             <div className="flex items-center gap-2 mb-4">
               <div className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center">
                 <ICONS.CheckCircle size={18} />
@@ -2982,7 +3248,7 @@ const AdmissionsCore = ({ user }) => {
   );
 
   const renderOffers = () => (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4 sm:gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
       {/* C1: a státuszhiba-sáv itt is kell. A 'Küldés' gomb a students.status-t
           írja, amit a 25_status_model.sql állapotgépe elutasíthat; a hibaüzenet
           eddig csak a 'Jelentkezések' alnézetben jelent meg, így ezen a fülön
@@ -3033,17 +3299,24 @@ const AdmissionsCore = ({ user }) => {
   );
 
   return (
-    <div className="max-w-7xl mx-auto p-8 space-y-8">
+    <div className="max-w-7xl xl:max-w-[1440px] 2xl:max-w-[1720px] mx-auto p-4 sm:p-6 lg:p-8 space-y-6 lg:space-y-8">
       {/* Module Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-8">
-        <div>
+      {/* MÉRVE: 768 px-es viewporton, KINYITOTT oldalsávval a tartalomsáv csak
+          432 px — a `md:` töréspont viszont a VIEWPORT-ot nézi, ezért itt már
+          egy sorba rendezte a címsort és a keresőt. A cím elvitte a helyet, a
+          mező 0-ra zsugorodott, és a bal/jobb belső margója (56 px) 802 px-re
+          tolta a lapot. A `flex-wrap` ezt megoldja: ha a kettő nem fér egy
+          sorba, a kereső ÚJ SORBA kerül ahelyett, hogy összenyomódna. Tágabb
+          kijelzőn semmi nem változik — ott továbbra is egy sorban ülnek. */}
+      <div className="flex flex-col md:flex-row md:flex-wrap md:items-center justify-between gap-4 border-b border-slate-200 pb-8">
+        <div className="min-w-0">
           <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight">Jelentkezés és Felvételi</h2>
-          <p className="text-slate-500 mt-1">Az Admissions Core modul központosított bírálati felülete.</p>
+          <p className="text-slate-500 mt-1 max-w-[75ch]">Az Admissions Core modul központosított bírálati felülete.</p>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="relative">
+        <div className="flex items-center gap-3 w-full md:w-56 md:flex-none">
+          <div className="relative flex-1 min-w-0">
             <ICONS.Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-            <input type="text" placeholder="ID szerinti keresés..." className="pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20" />
+            <input type="text" placeholder="ID szerinti keresés..." className="w-full pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20" />
           </div>
         </div>
       </div>
@@ -3294,9 +3567,9 @@ const EngagementCRM: React.FC = ({ user }) => {
   }, [waId]);
 
   const renderInbox = () => (
-    <div className="flex bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden h-[calc(100vh-280px)] animate-in fade-in slide-in-from-bottom-4 duration-500">
+    <div className="flex flex-col lg:flex-row bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden h-[calc(100vh-280px)] animate-in fade-in slide-in-from-bottom-4 duration-500">
       {/* Inbox Sidebar */}
-      <div className="w-80 border-r border-slate-50 flex flex-col">
+      <div className="w-full lg:w-80 shrink-0 border-b lg:border-b-0 lg:border-r border-slate-50 flex flex-col max-h-[40%] lg:max-h-none">
         <div className="p-4 border-b border-slate-50">
           <div className="relative">
             <ICONS.Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
@@ -3404,9 +3677,9 @@ const EngagementCRM: React.FC = ({ user }) => {
   );
 
   const renderWhatsApp = () => (
-    <div className="flex bg-white rounded-3xl border border-slate-100 shadow-xl overflow-hidden h-[calc(100vh-280px)] animate-in fade-in zoom-in-95 duration-500">
+    <div className="flex flex-col lg:flex-row bg-white rounded-3xl border border-slate-100 shadow-xl overflow-hidden h-[calc(100vh-280px)] animate-in fade-in zoom-in-95 duration-500">
       {/* Messenger Sidebar */}
-      <div className="w-96 border-r border-slate-100 flex flex-col bg-white">
+      <div className="w-full lg:w-96 shrink-0 border-b lg:border-b-0 lg:border-r border-slate-100 flex flex-col bg-white max-h-[40%] lg:max-h-none">
         <div className="p-6 space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-2xl font-black text-slate-900 tracking-tight">Csevegések</h3>
@@ -3604,7 +3877,7 @@ const EngagementCRM: React.FC = ({ user }) => {
           </div>
         </div>
       ) : (
-        <div className="flex-1 flex flex-col items-center justify-center bg-white p-12 text-center">
+        <div className="flex-1 flex flex-col items-center justify-center bg-white p-6 sm:p-12 text-center">
           <div className="w-24 h-24 bg-indigo-50 rounded-full flex items-center justify-center text-indigo-200 mb-6">
             <ICONS.MessageCircle size={48} />
           </div>
@@ -3629,7 +3902,7 @@ const EngagementCRM: React.FC = ({ user }) => {
           <ICONS.PlusCircle size={18} /> Új Tömeges Küldés
         </button>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4 sm:gap-6">
         {campaigns?.map(camp => (
           <div key={camp.id} className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
             <div className="flex justify-between items-start mb-4">
@@ -3739,7 +4012,7 @@ const EngagementCRM: React.FC = ({ user }) => {
       <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
           <h4 className="font-bold text-slate-800 mb-2">Videoüzenet előnyei</h4>
-          <p className="text-sm text-slate-500 leading-relaxed">A személyre szabott videóüzenetek akár 40%-kal növelik a beiratkozási kedvet a Z-generációs diákok körében.</p>
+          <p className="text-sm text-slate-500 leading-relaxed max-w-[70ch]">A személyre szabott videóüzenetek akár 40%-kal növelik a beiratkozási kedvet a Z-generációs diákok körében.</p>
         </div>
         <div className="bg-indigo-50 p-6 rounded-2xl border border-indigo-100">
           <h4 className="font-bold text-indigo-900 mb-2">Használati Tipp</h4>
@@ -3751,7 +4024,7 @@ const EngagementCRM: React.FC = ({ user }) => {
 
   const renderBulkSend = () => (
     <div className="max-w-4xl mx-auto space-y-8 animate-in zoom-in-95 duration-500">
-      <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm space-y-8">
+      <div className="bg-white p-5 sm:p-8 rounded-3xl border border-slate-100 shadow-sm space-y-8">
         <div className="flex items-center gap-4">
           <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center">
             <ICONS.Send size={24} />
@@ -3945,7 +4218,7 @@ const EngagementCRM: React.FC = ({ user }) => {
                 </div>
               </div>
               
-              <div className="flex-1 p-12 overflow-y-auto bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:20px_20px]">
+              <div className="flex-1 p-6 sm:p-12 overflow-y-auto bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:20px_20px]">
                 <div className="flex flex-col items-center space-y-8">
                   {mockWorkflows.find(w => w.id === selectedWorkflowId)?.steps.map((step, idx, arr) => {
                     const Icon = ICONS[step.icon];
@@ -3988,7 +4261,7 @@ const EngagementCRM: React.FC = ({ user }) => {
               </div>
             </>
           ) : (
-            <div className="flex-1 flex flex-col items-center justify-center p-12 text-center">
+            <div className="flex-1 flex flex-col items-center justify-center p-6 sm:p-12 text-center">
               <div className="w-20 h-20 bg-slate-50 rounded-3xl flex items-center justify-center text-slate-200 mb-6">
                 <ICONS.GitBranch size={40} />
               </div>
@@ -4002,12 +4275,12 @@ const EngagementCRM: React.FC = ({ user }) => {
   );
 
   return (
-    <div className="max-w-7xl mx-auto p-8 space-y-8">
+    <div className="max-w-7xl xl:max-w-[1440px] 2xl:max-w-[1720px] mx-auto p-4 sm:p-6 lg:p-8 space-y-6 lg:space-y-8">
       {/* Module Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-8">
         <div>
           <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight">Kommunikáció és CRM</h2>
-          <p className="text-slate-500 mt-1">Az Engagement modul az egyetemi kapcsolattartás központja.</p>
+          <p className="text-slate-500 mt-1 max-w-[75ch]">Az Engagement modul az egyetemi kapcsolattartás központja.</p>
         </div>
         <div className="flex items-center gap-3">
           <button className="flex items-center gap-2 bg-slate-900 text-white px-5 py-2.5 rounded-xl text-sm font-bold hover:bg-black transition-all">
@@ -4179,7 +4452,7 @@ const Finance: React.FC = () => {
     const pendingAmount = invoices?.filter(i => i.status !== 'Paid').reduce((sum, i) => sum + i.amount, 0) || 0;
 
     return (
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 lg:gap-6 mb-8">
         <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
           <div className="flex items-center gap-4 mb-4">
             <div className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center">
@@ -4350,7 +4623,7 @@ const Finance: React.FC = () => {
         </div>
 
         <div className="space-y-6">
-          <div className="bg-indigo-900 rounded-3xl p-8 text-white shadow-xl">
+          <div className="bg-indigo-900 rounded-3xl p-5 sm:p-8 text-white shadow-xl">
             <h4 className="font-bold text-xl mb-4">Automatizáció</h4>
             <div className="space-y-4">
               <div className="flex items-center gap-3 p-3 bg-white/10 rounded-xl border border-white/10">
@@ -4373,9 +4646,9 @@ const Finance: React.FC = () => {
   );
 
   const renderCurrencies = () => (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4 sm:gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
       {['EUR', 'USD', 'HUF'].map((cur) => (
-        <div key={cur} className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm relative overflow-hidden group">
+        <div key={cur} className="bg-white p-5 sm:p-8 rounded-3xl border border-slate-100 shadow-sm relative overflow-hidden group">
           <div className="absolute -right-4 -top-4 w-24 h-24 bg-slate-50 rounded-full flex items-center justify-center text-slate-100 font-black text-5xl group-hover:text-indigo-50 transition-colors">
             {cur.charAt(0)}
           </div>
@@ -4417,7 +4690,7 @@ const Finance: React.FC = () => {
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4 sm:gap-6">
         {scholarships?.map(sch => (
           <div key={sch.id} className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm hover:border-indigo-200 transition-all">
             <div className="flex justify-between items-start mb-4">
@@ -4452,7 +4725,7 @@ const Finance: React.FC = () => {
         <p className="text-sm text-slate-400 mt-1">Kapcsolja össze az UniPortal Pro-t fizetési kapukkal és számlázó rendszerekkel.</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 lg:gap-8">
         {/* Payment Gateways */}
         <div className="space-y-4">
           <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest">Fizetési Kapuk</h4>
@@ -4519,7 +4792,7 @@ const Finance: React.FC = () => {
       </div>
 
       {/* API Key Instructions */}
-      <div className="bg-slate-900 rounded-3xl p-8 text-white">
+      <div className="bg-slate-900 rounded-3xl p-5 sm:p-8 text-white">
         <div className="flex items-start gap-6">
           <div className="w-12 h-12 bg-white/10 rounded-2xl flex items-center justify-center text-indigo-400">
             <ICONS.Key size={24} />
@@ -4533,11 +4806,11 @@ const Finance: React.FC = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="bg-white/5 p-4 rounded-xl border border-white/10">
                 <p className="text-[10px] font-bold text-indigo-400 uppercase mb-1">Stripe Integration</p>
-                <code className="text-xs text-slate-300">VITE_STRIPE_PUBLIC_KEY=pk_live_...</code>
+                <code className="text-xs text-slate-300 break-all">VITE_STRIPE_PUBLIC_KEY=pk_live_...</code>
               </div>
               <div className="bg-white/5 p-4 rounded-xl border border-white/10">
                 <p className="text-[10px] font-bold text-indigo-400 uppercase mb-1">Billingo API</p>
-                <code className="text-xs text-slate-300">BILLINGO_API_KEY=bg_...</code>
+                <code className="text-xs text-slate-300 break-all">BILLINGO_API_KEY=bg_...</code>
               </div>
             </div>
           </div>
@@ -4555,7 +4828,7 @@ const Finance: React.FC = () => {
 
     return (
       <div className="max-w-4xl mx-auto space-y-8 animate-in zoom-in-95 duration-500">
-        <div className="bg-indigo-900 rounded-3xl p-8 text-white shadow-2xl relative overflow-hidden">
+        <div className="bg-indigo-900 rounded-3xl p-5 sm:p-8 text-white shadow-2xl relative overflow-hidden">
           <div className="absolute top-0 right-0 p-8 opacity-10">
             <ICONS.CreditCard size={120} />
           </div>
@@ -4569,7 +4842,7 @@ const Finance: React.FC = () => {
         </div>
 
         {pendingStudents.length === 0 ? (
-          <div className="bg-white p-12 rounded-3xl border border-slate-100 shadow-sm text-center">
+          <div className="bg-white p-6 sm:p-12 rounded-3xl border border-slate-100 shadow-sm text-center">
             <div className="w-16 h-16 bg-slate-50 text-slate-300 rounded-full flex items-center justify-center mx-auto mb-4">
               <ICONS.CheckCircle size={32} />
             </div>
@@ -4582,7 +4855,7 @@ const Finance: React.FC = () => {
               const method = paymentMethod[student.id] || 'card';
               
               return (
-                <div key={student.id} className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm space-y-8">
+                <div key={student.id} className="bg-white p-5 sm:p-8 rounded-3xl border border-slate-100 shadow-sm space-y-8">
                   <div className="flex flex-col md:flex-row items-center justify-between gap-8">
                     <div className="flex items-center gap-6">
                       <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center font-bold text-xl">
@@ -4690,12 +4963,12 @@ const Finance: React.FC = () => {
   };
 
   return (
-    <div className="max-w-7xl mx-auto p-8 space-y-8">
+    <div className="max-w-7xl xl:max-w-[1440px] 2xl:max-w-[1720px] mx-auto p-4 sm:p-6 lg:p-8 space-y-6 lg:space-y-8">
       {/* Module Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-8">
         <div>
           <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight">Pénzügyek</h2>
-          <p className="text-slate-500 mt-1">Bevételek, jelentkezési díjak és tandíj előlegek központi kezelése.</p>
+          <p className="text-slate-500 mt-1 max-w-[75ch]">Bevételek, jelentkezési díjak és tandíj előlegek központi kezelése.</p>
         </div>
         <div className="flex items-center gap-3">
           <button 
@@ -4709,8 +4982,8 @@ const Finance: React.FC = () => {
 
       {/* Record Payment Modal */}
       {showRecordModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-6 animate-in fade-in duration-300">
-          <div className="bg-white w-full max-w-lg rounded-[32px] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-300">
+          <div className="bg-white w-full max-w-lg rounded-[32px] shadow-2xl overflow-hidden max-h-[90vh] overflow-y-auto animate-in zoom-in-95 duration-300">
             <div className="p-8 border-b border-slate-50 flex justify-between items-center bg-slate-50/50">
               <div>
                 <h3 className="text-xl font-black text-slate-900 tracking-tight">Kifizetés Rögzítése</h3>
@@ -4931,7 +5204,7 @@ const ImmigrationCompliance: React.FC = () => {
   };
 
   const renderStudentSidebar = () => (
-    <div className="w-80 bg-white border-r border-slate-100 h-[calc(100vh-120px)] overflow-y-auto">
+    <div className="w-full lg:w-80 shrink-0 bg-white border-b lg:border-b-0 lg:border-r border-slate-100 max-h-[45vh] lg:max-h-none lg:h-[calc(100vh-120px)] overflow-y-auto">
       <div className="p-6 border-b border-slate-50">
         <div className="relative">
           <ICONS.Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
@@ -4978,7 +5251,7 @@ const ImmigrationCompliance: React.FC = () => {
     return (
       <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
         {selectedStudent.visaApplication && (
-          <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm">
+          <div className="bg-white p-5 sm:p-8 rounded-3xl border border-slate-100 shadow-sm">
             <div className="flex justify-between items-start mb-6">
               <div>
                 <h4 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-1">Vízum Kérelem Állapota</h4>
@@ -5010,7 +5283,7 @@ const ImmigrationCompliance: React.FC = () => {
               </div>
             </div>
             
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-6 pt-6 border-t border-slate-50">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 lg:gap-6 pt-6 border-t border-slate-50">
               <div>
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Beadás dátuma</p>
                 <p className="text-sm font-bold text-slate-800">{selectedStudent.visaApplication.submissionDate || '---'}</p>
@@ -5031,7 +5304,7 @@ const ImmigrationCompliance: React.FC = () => {
           </div>
         )}
 
-        <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm">
+        <div className="bg-white p-5 sm:p-8 rounded-3xl border border-slate-100 shadow-sm">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
             <div>
               <h3 className="text-xl font-bold text-slate-800">Vízum Dokumentumok Bírálata</h3>
@@ -5048,7 +5321,7 @@ const ImmigrationCompliance: React.FC = () => {
           </div>
 
           {checklist.length === 0 ? (
-            <div className="p-12 text-center border-2 border-dashed border-slate-100 rounded-3xl">
+            <div className="p-6 sm:p-12 text-center border-2 border-dashed border-slate-100 rounded-3xl">
               <ICONS.FileText size={48} className="mx-auto text-slate-200 mb-4" />
               <p className="text-slate-400 text-sm">Ehhez a jelentkezőhöz még nincs generálva checklist.</p>
               <button className="mt-4 bg-indigo-600 text-white px-6 py-2 rounded-xl text-xs font-bold">Checklist Generálása</button>
@@ -5111,7 +5384,7 @@ const ImmigrationCompliance: React.FC = () => {
   const renderInterviewPrep = () => (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div className="space-y-6">
-        <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm h-full">
+        <div className="bg-white p-5 sm:p-8 rounded-3xl border border-slate-100 shadow-sm h-full">
           <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center mb-6">
             <ICONS.Mic size={24} />
           </div>
@@ -5140,8 +5413,8 @@ const ImmigrationCompliance: React.FC = () => {
       </div>
 
       <div className="space-y-6">
-        <div className="bg-slate-900 rounded-3xl p-8 text-white relative overflow-hidden h-full">
-          <div className="absolute top-0 right-0 p-12 opacity-10">
+        <div className="bg-slate-900 rounded-3xl p-5 sm:p-8 text-white relative overflow-hidden h-full">
+          <div className="absolute top-0 right-0 p-6 sm:p-12 opacity-10">
             <ICONS.Video size={120} />
           </div>
           <div className="relative z-10 flex flex-col h-full">
@@ -5182,7 +5455,7 @@ const ImmigrationCompliance: React.FC = () => {
     return (
       <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          <div className="lg:col-span-1 bg-white p-8 rounded-3xl border border-slate-100 shadow-sm flex flex-col items-center text-center">
+          <div className="lg:col-span-1 bg-white p-5 sm:p-8 rounded-3xl border border-slate-100 shadow-sm flex flex-col items-center text-center">
             <h3 className="font-bold text-slate-800 text-lg mb-8 uppercase tracking-widest text-[10px] text-slate-400">Kockázati pontozás</h3>
             <div className="relative w-48 h-48 flex items-center justify-center mb-8">
                {/* Simple SVG Gauge */}
@@ -5203,7 +5476,7 @@ const ImmigrationCompliance: React.FC = () => {
           </div>
 
           <div className="lg:col-span-2 space-y-6">
-            <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm">
+            <div className="bg-white p-5 sm:p-8 rounded-3xl border border-slate-100 shadow-sm">
               <h4 className="font-bold text-slate-800 mb-6">Kockázati Tényezők (Risk Factors)</h4>
               <div className="space-y-4">
                 {riskFactors.map((factor, i) => (
@@ -5248,16 +5521,16 @@ const ImmigrationCompliance: React.FC = () => {
 };
 
   return (
-    <div className="flex h-[calc(100vh-64px)] overflow-hidden">
+    <div className="flex flex-col lg:flex-row lg:h-[calc(100vh-64px)] lg:overflow-hidden">
       {renderStudentSidebar()}
       
       <div className="flex-1 overflow-y-auto bg-slate-50/30">
-        <div className="max-w-5xl mx-auto p-8 space-y-8">
+        <div className="max-w-5xl 2xl:max-w-6xl mx-auto p-4 sm:p-6 lg:p-8 space-y-6 lg:space-y-8">
           {/* Module Header */}
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-8">
             <div>
               <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight">Vízum és Compliance</h2>
-              <p className="text-slate-500 mt-1">Nemzetközi jelentkezők vízumügyintézésének támogatása és bírálata.</p>
+              <p className="text-slate-500 mt-1 max-w-[75ch]">Nemzetközi jelentkezők vízumügyintézésének támogatása és bírálata.</p>
             </div>
             <div className="flex items-center gap-3">
               <button className="flex items-center gap-2 bg-slate-900 text-white px-6 py-2.5 rounded-xl text-sm font-bold shadow-lg shadow-slate-200 hover:bg-black transition-all">
@@ -5387,7 +5660,7 @@ const Evaluation: React.FC = () => {
   const renderScorecard = () => (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div className="lg:col-span-2 space-y-6">
-        <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm">
+        <div className="bg-white p-5 sm:p-8 rounded-3xl border border-slate-100 shadow-sm">
           <h3 className="text-xl font-bold text-slate-800 mb-6 flex items-center gap-2">
             <ICONS.BarChart2 size={24} className="text-indigo-600" />
             Jelentkező Pontozótáblája
@@ -5419,7 +5692,7 @@ const Evaluation: React.FC = () => {
       </div>
 
       <div className="space-y-6">
-        <div className="bg-indigo-900 rounded-3xl p-8 text-white shadow-xl shadow-indigo-100">
+        <div className="bg-indigo-900 rounded-3xl p-5 sm:p-8 text-white shadow-xl shadow-indigo-100">
           <p className="text-indigo-300 text-[10px] font-bold uppercase tracking-widest mb-2">Összesített Értékelés</p>
           <div className="flex items-baseline gap-2 mb-6">
             <h2 className="text-5xl font-black">{percentage}%</h2>
@@ -5472,7 +5745,7 @@ const Evaluation: React.FC = () => {
              <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest ml-4 italic">3 bíráló online</span>
           </div>
         </div>
-        <div className="flex-1 p-12 overflow-y-auto">
+        <div className="flex-1 p-6 sm:p-12 overflow-y-auto">
           <div className="max-w-2xl mx-auto space-y-8 font-serif leading-relaxed text-slate-800">
             <h2 className="text-3xl font-bold border-b pb-4 mb-12">Motivációs Levél</h2>
             <p className="relative group">
@@ -5609,7 +5882,7 @@ const Evaluation: React.FC = () => {
             <ICONS.AlertCircle className="text-amber-600 flex-shrink-0" size={20} />
             <div>
               <p className="text-sm font-bold text-amber-900">Bírálói Segédlet</p>
-              <p className="text-xs text-amber-700 leading-relaxed mt-1">A videóinterjú során figyeljen a diák kommunikációs készségére és a válaszok strukturáltságára. Ez a pontozótábla "Kommunikáció" szekciójába tartozik.</p>
+              <p className="text-xs text-amber-700 leading-relaxed mt-1 max-w-[75ch]">A videóinterjú során figyeljen a diák kommunikációs készségére és a válaszok strukturáltságára. Ez a pontozótábla "Kommunikáció" szekciójába tartozik.</p>
             </div>
           </div>
         </div>
@@ -5619,7 +5892,7 @@ const Evaluation: React.FC = () => {
 
   const renderRecommendations = () => (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm">
+      <div className="bg-white p-5 sm:p-8 rounded-3xl border border-slate-100 shadow-sm">
         <h3 className="text-xl font-bold text-slate-800 mb-6 flex items-center gap-2">
           <ICONS.FileCheck size={24} className="text-indigo-600" />
           Beérkezett Ajánlólevelek
@@ -5674,12 +5947,12 @@ const Evaluation: React.FC = () => {
   );
 
   return (
-    <div className="max-w-7xl mx-auto p-8 space-y-8">
+    <div className="max-w-7xl xl:max-w-[1440px] 2xl:max-w-[1720px] mx-auto p-4 sm:p-6 lg:p-8 space-y-6 lg:space-y-8">
       {/* Module Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-8">
         <div>
           <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight">Felvételi Bírálat</h2>
-          <p className="text-slate-500 mt-1">Szakmai bírálati felület, pontozás és bizottsági döntéshozatal.</p>
+          <p className="text-slate-500 mt-1 max-w-[75ch]">Szakmai bírálati felület, pontozás és bizottsági döntéshozatal.</p>
         </div>
       <div className="flex items-center gap-3">
         <div className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl flex items-center gap-3">
@@ -5824,8 +6097,8 @@ const SystemAdmin: React.FC = () => {
         </button>
       </div>
 
-      <div className="lg:col-span-3 bg-white p-8 rounded-3xl border border-slate-100 shadow-sm">
-        <div className="flex items-center justify-between mb-8">
+      <div className="lg:col-span-3 bg-white p-5 sm:p-8 rounded-3xl border border-slate-100 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 sm:mb-8">
           <div>
             <h3 className="text-xl font-bold text-slate-800">Jogosultság Mátrix</h3>
             <p className="text-sm text-slate-400 mt-1">Szerkeszthető jogosultságok a kiválasztott szerepkörhöz.</p>
@@ -5862,7 +6135,7 @@ const SystemAdmin: React.FC = () => {
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         {/* API Section */}
-        <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm">
+        <div className="bg-white p-5 sm:p-8 rounded-3xl border border-slate-100 shadow-sm">
           <div className="flex items-center gap-3 mb-6">
             <div className="w-12 h-12 bg-amber-50 text-amber-600 rounded-2xl flex items-center justify-center">
               <ICONS.Key size={24} />
@@ -5887,7 +6160,7 @@ const SystemAdmin: React.FC = () => {
         </div>
 
         {/* Webhook Section */}
-        <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm">
+        <div className="bg-white p-5 sm:p-8 rounded-3xl border border-slate-100 shadow-sm">
           <div className="flex items-center gap-3 mb-6">
             <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center">
               <ICONS.Webhook size={24} />
@@ -5904,7 +6177,7 @@ const SystemAdmin: React.FC = () => {
                       {hook.status}
                     </span>
                   </div>
-                  <p className="text-[10px] font-mono text-slate-400 truncate max-w-[200px]">{hook.url}</p>
+                  <p className="text-[10px] font-mono text-slate-400 truncate max-w-[200px] xl:max-w-[420px] 2xl:max-w-[640px]">{hook.url}</p>
                 </div>
                 <div className="flex gap-2">
                    <button className="p-2 text-slate-400 hover:text-indigo-600"><ICONS.Settings size={16} /></button>
@@ -5920,8 +6193,8 @@ const SystemAdmin: React.FC = () => {
       </div>
 
       {/* Teams Integration Section */}
-      <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm">
-        <div className="flex items-center justify-between mb-8">
+      <div className="bg-white p-5 sm:p-8 rounded-3xl border border-slate-100 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 sm:mb-8">
           <div className="flex items-center gap-4">
             <div className="w-14 h-14 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center">
               <ICONS.Video size={28} />
@@ -5931,12 +6204,12 @@ const SystemAdmin: React.FC = () => {
               <p className="text-sm text-slate-400 mt-1">Kapcsolja össze a rendszert a Microsoft 365 naptárral az automatikus interjú szervezéshez.</p>
             </div>
           </div>
-          <button className="flex items-center gap-2 bg-indigo-600 text-white px-6 py-3 rounded-2xl text-sm font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100">
+          <button className="flex items-center justify-center gap-2 bg-indigo-600 text-white px-6 py-3 rounded-2xl text-sm font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 w-full sm:w-auto shrink-0">
             <ICONS.Zap size={18} /> Microsoft Fiók Összekapcsolása
           </button>
         </div>
         
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
           <div className="p-6 bg-slate-50 rounded-2xl border border-slate-100">
             <p className="text-[10px] font-black text-indigo-600 uppercase tracking-widest mb-2">Státusz</p>
             <p className="text-sm font-bold text-slate-400 italic">Nincs csatlakoztatva</p>
@@ -5953,7 +6226,7 @@ const SystemAdmin: React.FC = () => {
       </div>
 
       {/* Integration Card */}
-      <div className="bg-slate-900 rounded-3xl p-8 text-white flex flex-col md:flex-row items-center gap-8 relative overflow-hidden">
+      <div className="bg-slate-900 rounded-3xl p-5 sm:p-8 text-white flex flex-col md:flex-row items-center gap-8 relative overflow-hidden">
         <div className="absolute bottom-0 right-0 opacity-10 -mb-8 -mr-8">
            <ICONS.Terminal size={180} />
         </div>
@@ -5987,12 +6260,12 @@ const SystemAdmin: React.FC = () => {
   );
 
   return (
-    <div className="max-w-7xl mx-auto p-8 space-y-8">
+    <div className="max-w-7xl xl:max-w-[1440px] 2xl:max-w-[1720px] mx-auto p-4 sm:p-6 lg:p-8 space-y-6 lg:space-y-8">
       {/* Module Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-8">
         <div>
           <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight">Rendszerkezelés & Backend</h2>
-          <p className="text-slate-500 mt-1">Audit logok, jogosultságkezelés és API integrációk központja.</p>
+          <p className="text-slate-500 mt-1 max-w-[75ch]">Audit logok, jogosultságkezelés és API integrációk központja.</p>
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 text-emerald-600 rounded-lg border border-emerald-100">
@@ -6078,11 +6351,11 @@ const InterviewScheduler: React.FC<InterviewSchedulerProps> = ({ user }) => {
   const availableSlots = slots?.filter(s => s.status === 'Available') || [];
 
   return (
-    <div className="max-w-7xl mx-auto p-8 space-y-8">
+    <div className="max-w-7xl xl:max-w-[1440px] 2xl:max-w-[1720px] mx-auto p-4 sm:p-6 lg:p-8 space-y-6 lg:space-y-8">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-8">
         <div>
           <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight">Interjú Időpont Foglalás</h2>
-          <p className="text-slate-500 mt-1">Válassz egy szabad időpontot a felvételi interjúhoz.</p>
+          <p className="text-slate-500 mt-1 max-w-[75ch]">Válassz egy szabad időpontot a felvételi interjúhoz.</p>
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 px-3 py-1.5 bg-indigo-50 text-indigo-600 rounded-lg border border-indigo-100">
@@ -6131,7 +6404,7 @@ const InterviewScheduler: React.FC<InterviewSchedulerProps> = ({ user }) => {
                 </div>
               ))}
               {availableSlots.length === 0 && (
-                <div className="col-span-full p-12 bg-slate-50 rounded-3xl border border-dashed border-slate-200 text-center">
+                <div className="col-span-full p-6 sm:p-12 bg-slate-50 rounded-3xl border border-dashed border-slate-200 text-center">
                   <ICONS.CalendarOff size={48} className="mx-auto text-slate-300 mb-4" />
                   <p className="text-slate-500 font-medium">Jelenleg nincs szabad időpont.</p>
                 </div>
@@ -6141,7 +6414,7 @@ const InterviewScheduler: React.FC<InterviewSchedulerProps> = ({ user }) => {
         </div>
 
         <div className="space-y-6">
-          <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm sticky top-8">
+          <div className="bg-white p-5 sm:p-8 rounded-3xl border border-slate-100 shadow-sm sticky top-8">
             <h3 className="text-xl font-bold text-slate-800 mb-6">Foglalás Összegzése</h3>
             
             {selectedSlot ? (
@@ -6218,7 +6491,7 @@ const InterviewScheduler: React.FC<InterviewSchedulerProps> = ({ user }) => {
           </div>
 
           {/* Teams Integration Preview */}
-          <div className="bg-slate-900 rounded-3xl p-8 text-white relative overflow-hidden">
+          <div className="bg-slate-900 rounded-3xl p-5 sm:p-8 text-white relative overflow-hidden">
             <div className="absolute top-0 right-0 p-8 opacity-10">
               <ICONS.Video size={80} />
             </div>
@@ -6538,7 +6811,7 @@ const AdmissionsHub = (() => {
 
     if (done && !reviewing) {
       return (
-        <div className="bg-white p-12 rounded-3xl border border-slate-100 shadow-sm text-center max-w-xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
+        <div className="bg-white p-6 sm:p-12 rounded-3xl border border-slate-100 shadow-sm text-center max-w-xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
           <div className="w-16 h-16 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto mb-5"><Lucide.CheckCheck size={32} /></div>
           <h3 className="text-2xl font-black text-slate-800">Jelentkezés lezárva</h3>
           <p className="text-slate-500 mt-2">A feltételes felvételi levelet kiállítottuk és iktattuk. Az interjú a Teams-ben létrejött.</p>
@@ -6580,7 +6853,7 @@ const AdmissionsHub = (() => {
       if (id === 'register') {
         const upd = (k, v) => set({ account: { ...acc, [k]: v } });
         return (
-          <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm max-w-2xl">
+          <div className="bg-white p-5 sm:p-8 rounded-3xl border border-slate-100 shadow-sm max-w-2xl">
             <h3 className="text-xl font-black text-slate-800 mb-1">Adatok megadása</h3>
             <p className="text-slate-500 text-sm mb-6">A megadott adatokat később az útlevél-ellenőrzés is felülírhatja.</p>
             <div className="grid sm:grid-cols-2 gap-5">
@@ -6745,7 +7018,7 @@ const AdmissionsHub = (() => {
             <div>
               {ex ? (
                 <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
-                  <div className="flex items-center justify-between mb-4"><div className="flex items-center gap-2 font-bold text-slate-800"><Lucide.Sparkles size={18} className="text-primary" /> Kinyert adatok</div><span className="text-[10px] font-bold px-2 py-1 rounded-full bg-emerald-50 text-emerald-700">{ex.confidence}% biztos</span></div>
+                  <div className="flex flex-wrap items-center justify-between gap-3 mb-4"><div className="flex items-center gap-2 font-bold text-slate-800"><Lucide.Sparkles size={18} className="text-primary" /> Kinyert adatok</div><span className="text-[10px] font-bold px-2 py-1 rounded-full bg-emerald-50 text-emerald-700">{ex.confidence}% biztos</span></div>
                   <p className="text-xs text-slate-400 mb-4">Az útlevélből automatikusan kinyert mezők — ellenőrizhető és javítható.</p>
                   <div className="space-y-3">
                     <div><label className={labelCls}>Név (útlevél szerint)</label><input className={inputCls} value={ex.name || ''} disabled={readOnly} onChange={e => setEx('name', e.target.value)} /></div>
@@ -6755,7 +7028,7 @@ const AdmissionsHub = (() => {
                   </div>
                 </div>
               ) : (
-                <div className="bg-white p-8 rounded-2xl border border-dashed border-slate-200 flex flex-col items-center justify-center text-center h-full min-h-[220px]">
+                <div className="bg-white p-5 sm:p-8 rounded-2xl border border-dashed border-slate-200 flex flex-col items-center justify-center text-center h-full min-h-[220px]">
                   <Lucide.ScanLine size={32} className="text-slate-300 mb-3" />
                   <div className="font-bold text-slate-500">AI adatkinyerés</div>
                   <p className="text-xs text-slate-400 mt-1 max-w-xs">Töltse fel az útlevelet — a rendszer kiolvassa a nevet, útlevélszámot és állampolgárságot.</p>
@@ -6876,7 +7149,7 @@ const AdmissionsHub = (() => {
               <span className="text-[11px] font-bold px-3 py-1.5 rounded-full bg-primary/10 text-primary inline-flex items-center gap-1"><Lucide.Hash size={12} />{L.fileNumber}</span>
             </div>
             <div className="bg-white border border-slate-200 rounded-2xl shadow-sm mx-auto max-w-3xl">
-              <div className="p-10 text-slate-800" style={{ fontFamily: 'Georgia, serif' }}>
+              <div className="p-6 sm:p-10 text-slate-800" style={{ fontFamily: 'Georgia, serif' }}>
                 <div className="flex items-start justify-between pb-5 border-b-2 border-slate-900">
                   <div><div className="font-black text-slate-900">John von Neumann University</div><div className="text-xs text-slate-500">Neumann János Egyetem · Kecskemét, Hungary</div></div>
                   <div className="text-right text-xs text-slate-500"><div className="font-bold text-slate-700">Iktatószám</div><div className="font-mono">{L.fileNumber}</div></div>
@@ -6888,12 +7161,12 @@ const AdmissionsHub = (() => {
                 <div className="my-4 pl-4 border-l-2 border-primary text-[15px] space-y-1"><p><strong>Academic program:</strong> [{prog.code}] {prog.name}</p><p><strong>Tuition fee:</strong> EUR {prog.tuition.toLocaleString()} / semester</p><p><strong>Length:</strong> {prog.semesters} semesters ({prog.ects} ECTS)</p></div>
                 <p className="text-[15px]">You have submitted all necessary documents and met all stated requirements. We confirm that you are <strong>CONDITIONALLY ADMITTED</strong> to the program starting in September 2026. The Final Letter of Admission will be issued once your documents meet the legal requirements.</p>
                 <p className="mt-4 font-bold text-[15px]">To receive the Final Letter of Admission, please transfer the following fees:</p>
-                <table className="w-full text-[15px] my-3" style={{ fontFamily: 'Inter, sans-serif' }}><tbody>
+                <div className="overflow-x-auto"><table className="w-full text-[15px] my-3" style={{ fontFamily: 'Inter, sans-serif' }}><tbody>
                   <tr className="border-b border-slate-100"><td className="py-1.5">Application fee</td><td className="py-1.5 text-right font-semibold">EUR {FEES.application.toLocaleString()}</td></tr>
                   <tr className="border-b border-slate-100"><td className="py-1.5">Tuition fee — first two semesters</td><td className="py-1.5 text-right font-semibold">EUR {firstTwo.toLocaleString()}</td></tr>
                   <tr className="border-b border-slate-100"><td className="py-1.5">Dormitory fee — one semester</td><td className="py-1.5 text-right font-semibold">EUR {FEES.dormitorySemester.toLocaleString()}</td></tr>
                   <tr><td className="py-2 font-black">Altogether</td><td className="py-2 text-right font-black text-primary">EUR {total.toLocaleString()}</td></tr>
-                </tbody></table>
+                </tbody></table></div>
                 <p className="text-[15px]">Final payment deadline: <strong>15th July 2026</strong>. A dormitory deposit of EUR {FEES.dormitoryDeposit} is payable after arrival.</p>
                 <div className="mt-4 rounded-xl bg-slate-50 p-4 text-[13px]" style={{ fontFamily: 'Inter, sans-serif' }}><div className="font-bold text-slate-700 mb-1">Bank details</div><div>Bank: {FEES.bank.name} · 1056 Budapest, Váci street 38., Hungary</div><div>Account holder: Neumann János Egyetem</div><div>IBAN: <span className="font-mono">{FEES.bank.iban}</span> · SWIFT: <span className="font-mono">{FEES.bank.swift}</span></div></div>
                 <p className="mt-5 text-[15px]">Yours sincerely,</p>
@@ -6955,7 +7228,7 @@ const AdmissionsHub = (() => {
     return (
       <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
         <button onClick={onExit} className="text-sm text-slate-400 hover:text-slate-600 mb-4 inline-flex items-center gap-1.5"><Lucide.ChevronLeft size={15} /> Folyamatok áttekintése</button>
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <div>
             <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-1">Felvételi folyamat · {step + 1} / {STEP_DEFS.length}</p>
             <h3 className="text-2xl font-black text-slate-800">{STEP_DEFS[step].label === 'Adatok' ? 'Jelentkezői adatok' : STEP_DEFS[step].id === 'check' ? 'Dokumentum-ellenőrzés' : STEP_DEFS[step].id === 'math' ? 'Matematika szintfelmérő' : STEP_DEFS[step].id === 'letter' ? 'Conditional Acceptance Letter' : STEP_DEFS[step].id === 'documents' ? 'Dokumentumok feltöltése' : STEP_DEFS[step].id === 'programs' ? 'Szakválasztás' : 'Online interjú foglalása'}</h3>
@@ -7000,7 +7273,7 @@ const AdmissionsHub = (() => {
         })()}
         {previewDoc && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm" onClick={() => setPreviewDoc(null)}>
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
               <div className="p-4 border-b border-slate-100 flex items-center justify-between"><div className="font-bold text-slate-800 text-sm flex items-center gap-2"><previewDoc.d.Icon size={16} className="text-primary" /> {previewDoc.d.label}</div><button onClick={() => setPreviewDoc(null)} className="text-slate-400 hover:text-slate-700"><Lucide.X size={18} /></button></div>
               <div className="p-4 bg-slate-50">
                 {previewDoc.entry && (previewDoc.entry.path || previewDoc.entry.dataUrl) ? (
@@ -7103,7 +7376,7 @@ const AdmissionsHub = (() => {
 
     return (
       <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
           <div>
             <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-1">Felvételi folyamatok</p>
             <h3 className="text-2xl font-black text-slate-800 flex items-center gap-3">
@@ -7337,7 +7610,7 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
 
   if (!student) {
     return (
-      <div className="max-w-7xl mx-auto p-4 sm:p-8">
+      <div className="max-w-7xl xl:max-w-[1440px] 2xl:max-w-[1720px] mx-auto p-4 sm:p-6 lg:p-8">
         <AdmissionsHub user={user} />
       </div>
     );
@@ -7359,7 +7632,7 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
     ];
     return (
       <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
           {tiles.map((t, i) => (
             <div key={i} className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
               <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${t.tone}`}><t.Icon size={20} /></div>
@@ -7375,7 +7648,7 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
               <button onClick={() => setActiveTab('journey')} className="text-sm font-bold text-primary hover:underline inline-flex items-center gap-1">Összes <Lucide.ChevronRight size={15} /></button>
             </div>
             {journeyProcs.length === 0 && (
-              <div className="bg-white p-8 rounded-2xl border border-dashed border-slate-200 text-center text-slate-400">Még nincs felvételi folyamat. <button onClick={() => setActiveTab('journey')} className="text-primary font-bold">Indíts egyet</button>.</div>
+              <div className="bg-white p-5 sm:p-8 rounded-2xl border border-dashed border-slate-200 text-center text-slate-400">Még nincs felvételi folyamat. <button onClick={() => setActiveTab('journey')} className="text-primary font-bold">Indíts egyet</button>.</div>
             )}
             <div className="grid sm:grid-cols-2 gap-4">
               {journeyProcs.map(p => {
@@ -7434,7 +7707,7 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
 
   const renderApplication = () => (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm">
+      <div className="bg-white p-5 sm:p-8 rounded-3xl border border-slate-100 shadow-sm">
         <div className="flex justify-between items-center mb-8">
           <h3 className="text-xl font-bold text-slate-800">Jelentkezési Adatok</h3>
           <span className="px-4 py-1 bg-slate-100 text-slate-600 rounded-lg text-[10px] font-bold uppercase tracking-wider">
@@ -7442,7 +7715,7 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
           </span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-12">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8 lg:gap-12">
           <div className="space-y-6">
             <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest">Személyes Adatok</h4>
             <div className="space-y-4">
@@ -7500,7 +7773,7 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm">
+        <div className="bg-white p-5 sm:p-8 rounded-3xl border border-slate-100 shadow-sm">
           <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-6">Tanulmányi Előzmények</h4>
           <div className="space-y-6">
             {student.educationHistory?.map((edu, idx) => (
@@ -7518,7 +7791,7 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
           </div>
         </div>
 
-        <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm">
+        <div className="bg-white p-5 sm:p-8 rounded-3xl border border-slate-100 shadow-sm">
           <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-6">Nyelvtudás</h4>
           <div className="space-y-6">
             {student.languageSkills?.map((lang, idx) => (
@@ -7541,7 +7814,7 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
         </div>
       </div>
 
-      <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm">
+      <div className="bg-white p-5 sm:p-8 rounded-3xl border border-slate-100 shadow-sm">
         <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">Motivációs Levél</h4>
         <p className="text-sm text-slate-600 leading-relaxed italic">
           "{student.personalStatement}"
@@ -7552,7 +7825,7 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
 
   const renderRecommendations = () => (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm">
+      <div className="bg-white p-5 sm:p-8 rounded-3xl border border-slate-100 shadow-sm">
         <div className="flex justify-between items-center mb-8">
           <div>
             <h3 className="text-xl font-bold text-slate-800">Ajánlólevelek</h3>
@@ -7607,7 +7880,7 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
         </div>
       </div>
 
-      <div className="bg-indigo-50 p-8 rounded-3xl border border-indigo-100 flex items-start gap-6">
+      <div className="bg-indigo-50 p-5 sm:p-8 rounded-3xl border border-indigo-100 flex items-start gap-6">
         <div className="w-12 h-12 bg-indigo-100 text-indigo-600 rounded-2xl flex items-center justify-center shrink-0">
           <ICONS.Info size={24} />
         </div>
@@ -7626,7 +7899,7 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
   const renderVisa = () => (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
       {student.visaApplication ? (
-        <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm">
+        <div className="bg-white p-5 sm:p-8 rounded-3xl border border-slate-100 shadow-sm">
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-8">
             <div>
               <h3 className="text-xl font-bold text-slate-800">Vízum Kérelem Folyamata</h3>
@@ -7641,7 +7914,7 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-12">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8 mb-12">
             <div className="p-6 bg-slate-50 rounded-2xl border border-slate-100">
               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Típus</p>
               <p className="text-lg font-bold text-slate-800">{student.visaApplication.type}</p>
@@ -7680,7 +7953,7 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
           </div>
         </div>
       ) : (
-        <div className="bg-white p-12 rounded-3xl border border-slate-100 shadow-sm text-center">
+        <div className="bg-white p-6 sm:p-12 rounded-3xl border border-slate-100 shadow-sm text-center">
           <ICONS.Flag size={64} className="mx-auto text-slate-200 mb-6" />
           <h3 className="text-xl font-bold text-slate-800 mb-2">Vízumügyintézés hamarosan</h3>
           <p className="text-slate-500 max-w-md mx-auto">
@@ -7689,8 +7962,8 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        <div className="bg-indigo-600 p-8 rounded-3xl text-white shadow-xl shadow-indigo-100">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 lg:gap-8">
+        <div className="bg-indigo-600 p-5 sm:p-8 rounded-3xl text-white shadow-xl shadow-indigo-100">
           <ICONS.Mic size={32} className="mb-6 opacity-50" />
           <h4 className="text-xl font-bold mb-2">Interjú Felkészülés</h4>
           <p className="text-indigo-100 text-sm leading-relaxed mb-6">
@@ -7701,7 +7974,7 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
           </button>
         </div>
         
-        <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm">
+        <div className="bg-white p-5 sm:p-8 rounded-3xl border border-slate-100 shadow-sm">
           <ICONS.Info size={32} className="mb-6 text-slate-300" />
           <h4 className="text-xl font-bold text-slate-800 mb-2">Fontos Tudnivalók</h4>
           <ul className="space-y-3">
@@ -7723,7 +7996,7 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
 
   const renderDocuments = () => (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm">
+      <div className="bg-white p-5 sm:p-8 rounded-3xl border border-slate-100 shadow-sm">
         <h3 className="text-xl font-bold text-slate-800 mb-6">Szükséges Dokumentumok</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {student.visaChecklist?.map((item) => (
@@ -7783,7 +8056,7 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
           <div className="lg:col-span-2 space-y-6">
             {/* Pending Items Section */}
             {pendingInvoices.length > 0 && (
-              <div className="bg-white p-8 rounded-3xl border-2 border-amber-100 shadow-sm">
+              <div className="bg-white p-5 sm:p-8 rounded-3xl border-2 border-amber-100 shadow-sm">
                 <div className="flex items-center gap-3 mb-6">
                   <div className="w-10 h-10 bg-amber-50 text-amber-600 rounded-xl flex items-center justify-center">
                     <ICONS.AlertCircle size={20} />
@@ -7821,7 +8094,7 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
               </div>
             )}
 
-            <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm">
+            <div className="bg-white p-5 sm:p-8 rounded-3xl border border-slate-100 shadow-sm">
               <h3 className="text-xl font-bold text-slate-800 mb-6">Pénzügyi Áttekintés</h3>
             <div className="space-y-4">
               <div className="p-6 bg-slate-50 rounded-2xl flex items-center justify-between">
@@ -7851,7 +8124,7 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
             </div>
           </div>
 
-          <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm">
+          <div className="bg-white p-5 sm:p-8 rounded-3xl border border-slate-100 shadow-sm">
             <h3 className="text-lg font-bold text-slate-800 mb-6">Tranzakciós Előzmények</h3>
             <div className="space-y-4">
               {payments.length > 0 ? payments.map(payment => (
@@ -7928,7 +8201,7 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
         <>
           {/* A VALÓDI felvételi interjú áll elöl: ez az egyetlen, ami beleszámít
               a bírálatba. Az AI-gyakorlás csak utána, másodlagos hangsúllyal. */}
-          <div className="bg-white p-8 rounded-3xl border-2 border-primary/20 shadow-sm">
+          <div className="bg-white p-5 sm:p-8 rounded-3xl border-2 border-primary/20 shadow-sm">
             <div className="flex items-start gap-4 mb-2">
               <span className="w-12 h-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
                 <ICONS.CalendarCheck size={24} />
@@ -7938,12 +8211,12 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
                   <h3 className="text-xl font-bold text-slate-800">Valódi felvételi interjú — időpontfoglalás</h3>
                   <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/10 text-primary uppercase tracking-wide">Ez számít a bírálatba</span>
                 </div>
-                <p className="text-sm text-slate-500 mt-1">Válassz egy számodra megfelelő időpontot a felvételi beszélgetéshez (Teams/Zoom). A felvételi döntés kizárólag ezen az interjún alapul.</p>
+                <p className="text-sm text-slate-500 mt-1 max-w-[70ch]">Válassz egy számodra megfelelő időpontot a felvételi beszélgetéshez (Teams/Zoom). A felvételi döntés kizárólag ezen az interjún alapul.</p>
               </div>
             </div>
             <div className="mb-8" />
             
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4">
               {interviewSlots.filter(s => s.status === 'Available').map((slot) => (
                 <div key={slot.id} className="p-6 border border-slate-100 rounded-2xl hover:border-primary/30 transition-all group">
                   <div className="flex items-center gap-3 mb-4">
@@ -7970,7 +8243,7 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
           {/* AI interjú — GYAKORLÁSI mód. Visszaélési kockázat miatt nem
               helyettesíti a valódi interjút: a felvétel nálad marad, nem
               küldjük be, és a bírálatba sem számít bele. */}
-          <div className="bg-slate-50 p-8 rounded-3xl border border-slate-200">
+          <div className="bg-slate-50 p-5 sm:p-8 rounded-3xl border border-slate-200">
             <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
               <div className="space-y-3 max-w-xl">
                 <div className="flex items-center gap-2 flex-wrap">
@@ -8024,7 +8297,7 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
             {unreadCount > 0 && <button onClick={markAllRead} className="text-xs font-bold text-primary hover:underline whitespace-nowrap">Összes megjelölése olvasottként</button>}
           </div>
           <div className="divide-y divide-slate-50">
-            {sorted.length === 0 && <div className="p-10 text-center text-slate-400 text-sm">Nincs üzenet.</div>}
+            {sorted.length === 0 && <div className="p-6 sm:p-10 text-center text-slate-400 text-sm">Nincs üzenet.</div>}
             {sorted.map(m => {
               const proc = m.processId ? procOf(m.processId) : null;
               const stLabel = proc ? (proc.done ? 'Felvéve' : (SD[proc.step] ? SD[proc.step].label : '—')) : null;
@@ -8056,7 +8329,7 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
 
   const renderProfile = () => (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm">
+      <div className="bg-white p-5 sm:p-8 rounded-3xl border border-slate-100 shadow-sm">
         <div className="flex items-center gap-8 mb-12">
           <div className="relative">
             <div className="w-24 h-24 bg-slate-100 rounded-3xl flex items-center justify-center text-slate-400 text-3xl font-black">
@@ -8076,7 +8349,7 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 lg:gap-8">
           <div className="space-y-4">
             <label className="text-xs font-bold text-slate-400 uppercase tracking-widest block">Teljes Név</label>
             <input 
@@ -8123,12 +8396,12 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
   );
 
   return (
-    <div className="max-w-7xl mx-auto p-8 space-y-8">
+    <div className="max-w-7xl xl:max-w-[1440px] 2xl:max-w-[1720px] mx-auto p-4 sm:p-6 lg:p-8 space-y-6 lg:space-y-8">
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-8">
         <div>
           <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight">Hallgatói Portál</h2>
-          <p className="text-slate-500 mt-1">Üdvözlünk, {user.name}! Kövesd nyomon a jelentkezésed folyamatát.</p>
+          <p className="text-slate-500 mt-1 max-w-[75ch]">Üdvözlünk, {user.name}! Kövesd nyomon a jelentkezésed folyamatát.</p>
         </div>
         <div className="flex items-center gap-3">
           <div className="px-4 py-2 bg-primary/10 text-primary rounded-xl text-xs font-bold uppercase tracking-widest">
@@ -8310,7 +8583,7 @@ const MarketingLeads: React.FC = () => {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         {/* Source Analysis */}
-        <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm">
+        <div className="bg-white p-5 sm:p-8 rounded-3xl border border-slate-100 shadow-sm">
           <h4 className="font-bold text-slate-800 mb-6">Lead Források Eloszlása</h4>
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
@@ -8336,7 +8609,7 @@ const MarketingLeads: React.FC = () => {
         </div>
 
         {/* Campaign Performance */}
-        <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm">
+        <div className="bg-white p-5 sm:p-8 rounded-3xl border border-slate-100 shadow-sm">
           <h4 className="font-bold text-slate-800 mb-6">Kampány Teljesítmény (Lead vs Konverzió)</h4>
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
@@ -8426,10 +8699,10 @@ const MarketingLeads: React.FC = () => {
   );
 
   const renderCampaigns = () => (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4 sm:gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
       {campaigns.map((campaign) => (
-        <div key={campaign.id} className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm hover:border-primary/20 transition-all group">
-          <div className="flex items-center justify-between mb-6">
+        <div key={campaign.id} className="bg-white p-5 sm:p-8 rounded-3xl border border-slate-100 shadow-sm hover:border-primary/20 transition-all group">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
             <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${
               campaign.platform === 'Google Ads' ? 'bg-blue-50 text-blue-600' :
               campaign.platform === 'Facebook' ? 'bg-indigo-50 text-indigo-600' : 'bg-slate-50 text-slate-600'
@@ -8470,7 +8743,7 @@ const MarketingLeads: React.FC = () => {
           </div>
         </div>
       ))}
-      <button className="border-2 border-dashed border-slate-200 rounded-3xl p-8 flex flex-col items-center justify-center gap-4 text-slate-400 hover:border-primary/30 hover:text-primary transition-all group">
+      <button className="border-2 border-dashed border-slate-200 rounded-3xl p-5 sm:p-8 flex flex-col items-center justify-center gap-4 text-slate-400 hover:border-primary/30 hover:text-primary transition-all group">
         <div className="w-12 h-12 rounded-full border-2 border-dashed border-slate-200 group-hover:border-primary/30 flex items-center justify-center">
           <ICONS.Plus size={24} />
         </div>
@@ -8480,12 +8753,12 @@ const MarketingLeads: React.FC = () => {
   );
 
   return (
-    <div className="max-w-7xl mx-auto p-8 space-y-8">
+    <div className="max-w-7xl xl:max-w-[1440px] 2xl:max-w-[1720px] mx-auto p-4 sm:p-6 lg:p-8 space-y-6 lg:space-y-8">
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-8">
         <div>
           <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight">Marketing & Lead Kezelés</h2>
-          <p className="text-slate-500 mt-1">Kampány teljesítmény és lead konverzió elemzése.</p>
+          <p className="text-slate-500 mt-1 max-w-[75ch]">Kampány teljesítmény és lead konverzió elemzése.</p>
         </div>
         <div className="flex items-center gap-3">
           <button className="px-6 py-3 bg-white border border-slate-200 rounded-2xl text-sm font-bold text-slate-700 hover:bg-slate-50 transition-all flex items-center gap-2 shadow-sm">
@@ -8495,7 +8768,7 @@ const MarketingLeads: React.FC = () => {
       </div>
 
       {/* Tabs */}
-      <div className="flex items-center gap-1 p-1 bg-white border border-slate-100 rounded-2xl w-fit shadow-sm">
+      <div className="flex items-center gap-1 p-1 bg-white border border-slate-100 rounded-2xl w-fit shadow-sm overflow-x-auto max-w-full">
         <button 
           onClick={() => setActiveTab('overview')}
           className={`px-6 py-3 rounded-xl text-sm font-bold transition-all ${activeTab === 'overview' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
@@ -8583,7 +8856,7 @@ const Reports: React.FC = () => {
             <button className="flex items-center gap-2 bg-slate-100 text-slate-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-200 transition-all w-fit">
               <ICONS.Download size={16} /> Exportálás
             </button>
-            <div className="bg-white rounded-xl border border-slate-100 overflow-hidden">
+            <div className="bg-white rounded-xl border border-slate-100 overflow-hidden overflow-x-auto">
               <table className="w-full text-left">
                 <thead className="bg-slate-50 text-slate-400 text-[10px] font-bold uppercase tracking-wider">
                   <tr>
@@ -8633,7 +8906,7 @@ const Reports: React.FC = () => {
             <button className="flex items-center gap-2 bg-slate-100 text-slate-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-200 transition-all w-fit">
               <ICONS.Download size={16} /> Exportálás
             </button>
-            <div className="bg-white rounded-xl border border-slate-100 overflow-hidden">
+            <div className="bg-white rounded-xl border border-slate-100 overflow-hidden overflow-x-auto">
               <table className="w-full text-left">
                 <thead className="bg-slate-50 text-slate-400 text-[10px] font-bold uppercase tracking-wider">
                   <tr>
@@ -8683,7 +8956,7 @@ const Reports: React.FC = () => {
             <button className="flex items-center gap-2 bg-slate-100 text-slate-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-200 transition-all w-fit">
               <ICONS.Download size={16} /> Exportálás
             </button>
-            <div className="bg-white rounded-xl border border-slate-100 overflow-hidden">
+            <div className="bg-white rounded-xl border border-slate-100 overflow-hidden overflow-x-auto">
               <table className="w-full text-left">
                 <thead className="bg-slate-50 text-slate-400 text-[10px] font-bold uppercase tracking-wider">
                   <tr>
@@ -8733,7 +9006,7 @@ const Reports: React.FC = () => {
             <button className="flex items-center gap-2 bg-slate-100 text-slate-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-200 transition-all w-fit">
               <ICONS.Download size={16} /> Exportálás
             </button>
-            <div className="bg-white rounded-xl border border-slate-100 overflow-hidden">
+            <div className="bg-white rounded-xl border border-slate-100 overflow-hidden overflow-x-auto">
               <table className="w-full text-left">
                 <thead className="bg-slate-50 text-slate-400 text-[10px] font-bold uppercase tracking-wider">
                   <tr>
@@ -8787,7 +9060,7 @@ const Reports: React.FC = () => {
             <button className="flex items-center gap-2 bg-slate-100 text-slate-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-200 transition-all w-fit">
               <ICONS.Download size={16} /> Exportálás
             </button>
-            <div className="bg-white rounded-xl border border-slate-100 overflow-hidden">
+            <div className="bg-white rounded-xl border border-slate-100 overflow-hidden overflow-x-auto">
               <table className="w-full text-left">
                 <thead className="bg-slate-50 text-slate-400 text-[10px] font-bold uppercase tracking-wider">
                   <tr>
@@ -8837,7 +9110,7 @@ const Reports: React.FC = () => {
             <button className="flex items-center gap-2 bg-slate-100 text-slate-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-200 transition-all w-fit">
               <ICONS.Download size={16} /> Exportálás
             </button>
-            <div className="bg-white rounded-xl border border-slate-100 overflow-hidden">
+            <div className="bg-white rounded-xl border border-slate-100 overflow-hidden overflow-x-auto">
               <table className="w-full text-left">
                 <thead className="bg-slate-50 text-slate-400 text-[10px] font-bold uppercase tracking-wider">
                   <tr>
@@ -8891,7 +9164,7 @@ const Reports: React.FC = () => {
             <button className="flex items-center gap-2 bg-slate-100 text-slate-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-200 transition-all w-fit">
               <ICONS.Download size={16} /> Exportálás
             </button>
-            <div className="bg-white rounded-xl border border-slate-100 overflow-hidden">
+            <div className="bg-white rounded-xl border border-slate-100 overflow-hidden overflow-x-auto">
               <table className="w-full text-left">
                 <thead className="bg-slate-50 text-slate-400 text-[10px] font-bold uppercase tracking-wider">
                   <tr>
@@ -9190,7 +9463,7 @@ const Reports: React.FC = () => {
               </div>
             </div>
 
-            <div className="bg-white rounded-xl border border-slate-100 overflow-hidden">
+            <div className="bg-white rounded-xl border border-slate-100 overflow-hidden overflow-x-auto">
               <table className="w-full text-left">
                 <thead className="bg-slate-50 text-slate-400 text-[10px] font-bold uppercase tracking-wider">
                   <tr>
@@ -9354,7 +9627,7 @@ const Reports: React.FC = () => {
             <button className="flex items-center gap-2 bg-slate-100 text-slate-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-200 transition-all w-fit">
               <ICONS.Download size={16} /> Exportálás
             </button>
-            <div className="bg-white p-12 rounded-xl border border-slate-100 text-center text-slate-400 italic">
+            <div className="bg-white p-6 sm:p-12 rounded-xl border border-slate-100 text-center text-slate-400 italic">
               The report contained no data
             </div>
           </div>
@@ -9622,7 +9895,7 @@ const Reports: React.FC = () => {
         );
       default:
         return (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4 sm:gap-6">
             {reports.map((report) => (
               <button
                 key={report.id}
@@ -9642,7 +9915,7 @@ const Reports: React.FC = () => {
   };
 
   return (
-    <div className="max-w-7xl mx-auto p-8 space-y-8">
+    <div className="max-w-7xl xl:max-w-[1440px] 2xl:max-w-[1720px] mx-auto p-4 sm:p-6 lg:p-8 space-y-6 lg:space-y-8">
       <div className="flex items-center justify-between border-b border-slate-200 pb-8">
         <div>
           {selectedReport ? (
@@ -9656,7 +9929,7 @@ const Reports: React.FC = () => {
           <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight">
             {selectedReport || 'Riportok'}
           </h2>
-          <p className="text-slate-500 mt-1">
+          <p className="text-slate-500 mt-1 max-w-[75ch]">
             {selectedReport ? reports.find(r => r.id === selectedReport)?.description : 'Válasszon egy riportot az adatok megtekintéséhez.'}
           </p>
         </div>
@@ -9798,7 +10071,7 @@ const Intelligence: React.FC = () => {
           <h3 className="font-bold text-slate-800 text-lg">Adat-keresztellenőrzés</h3>
           <p className="text-xs text-slate-400">Ellentmondásos adatok keresése a jelentkezési lap és a dokumentumok között.</p>
         </div>
-        <div className="p-12 text-center">
+        <div className="p-6 sm:p-12 text-center">
           <div className="w-16 h-16 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-4">
             <ICONS.CheckCircle size={32} />
           </div>
@@ -9854,11 +10127,11 @@ const Intelligence: React.FC = () => {
   );
 
   return (
-    <div className="max-w-7xl mx-auto p-8 space-y-8">
+    <div className="max-w-7xl xl:max-w-[1440px] 2xl:max-w-[1720px] mx-auto p-4 sm:p-6 lg:p-8 space-y-6 lg:space-y-8">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-8">
         <div>
           <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight">Intelligence</h2>
-          <p className="text-slate-500 mt-1">Adatminőség, biztonság és csalásmegelőzési eszközök.</p>
+          <p className="text-slate-500 mt-1 max-w-[75ch]">Adatminőség, biztonság és csalásmegelőzési eszközök.</p>
         </div>
       </div>
 
@@ -10140,6 +10413,10 @@ const App: React.FC = () => {
   const [authBusy, setAuthBusy] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [showAccount, setShowAccount] = useState(false);
+  // A keret reszponzív állapota: az oldalsáv kinyitva / összecsukva, illetve
+  // mobilon a beúszó fiók. (A hook a Sidebar fölött, feltétel nélkül hívódik —
+  // a lenti korai `return`-ök előtt, hogy a hook-sorrend stabil maradjon.)
+  const sidebar = useSidebarLayout();
   const updateCurrentUser = (patch) => setCurrentUser(u => u ? { ...u, ...patch } : u);
 
   // Default landing view per role.
@@ -10187,6 +10464,27 @@ const App: React.FC = () => {
       }
     } catch (e) { /* a 19-es migráció még nem futott le — a menü marad a régi */ }
 
+    // --- Kollégiumi modul HATÓKÖRÖS szerepkörei (26_dorm.sql) ---
+    // Ugyanaz a minta, mint az ECHO-nál, és ugyanabból az okból: a menüszűrő
+    // utolsó ága `return false`, ezért egy ÚJ profiles.role érték (GONDNOK,
+    // KARBANTARTO, …) nulla menüpontot adna. A UniPortal-szerepkör tehát marad,
+    // ami volt, és mellé jön nulla vagy több dorm-grant.
+    //
+    // DEFENZÍV: a 26-os migráció lefutása ELŐTT a dorm_my_roles() RPC nem
+    // létezik. A supabase-js ilyenkor hibát ad VISSZA (nem dob), de a hálózati
+    // hiba dobhat is — ezért a try/catch ÉS az `error` vizsgálata is kell.
+    // Üres tömb esetén a menü betűre úgy viselkedik, ahogy a modul előtt.
+    let dormRoles = [];
+    let dormResident = false;
+    try {
+      const { data: dr, error: drErr } = await sb.rpc('dorm_my_roles');
+      if (!drErr && dr) {
+        dormRoles = Array.isArray(dr.szerepkorok) ? dr.szerepkorok : [];
+        // Az adatbázis ékezetes kulcsot ad vissza; mindkét írásmódot elfogadjuk.
+        dormResident = !!dr['lakó'] || !!dr.lako;
+      }
+    } catch (e) { /* a 26-os migráció még nem futott le — a menü marad a régi */ }
+
     setCurrentUser({
       id: (profile && profile.id) || authUser.id,
       name: ov.name || (profile && profile.name) || meta.name || authUser.email,
@@ -10201,6 +10499,9 @@ const App: React.FC = () => {
       // Az ECHO-grantok NEM keverednek a UniPortal szerepkörrel: külön mezők.
       echoRoles,
       echoTeacherId,
+      // A kollégiumi grantok sem keverednek a UniPortal szerepkörrel.
+      dormRoles,
+      dormResident,
       avatar: (profile && profile.avatar_url) || ov.avatar || 'https://i.pravatar.cc/150?u=' + encodeURIComponent(authUser.email),
     });
     // Land the superadmin on the approvals queue when something is waiting;
@@ -10267,7 +10568,7 @@ const App: React.FC = () => {
   if (!currentUser) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6 font-sans">
-        <div className="max-w-md w-full bg-white rounded-3xl shadow-2xl overflow-hidden p-10 animate-in zoom-in-95 duration-500">
+        <div className="max-w-md w-full bg-white rounded-3xl shadow-2xl overflow-hidden p-6 sm:p-10 animate-in zoom-in-95 duration-500">
           <div className="flex flex-col items-center mb-10">
             <img 
               src={NJE_LOGO} 
@@ -10364,6 +10665,25 @@ const App: React.FC = () => {
       if (['SUPERADMIN', 'ADMIN', 'ADMISSIONS', 'FINANCE'].includes(currentUser.role)) return true;
       return (currentUser.echoRoles || []).indexOf('OKTATO') >= 0;
     }
+    // --- Kollégiumi modul (26_dorm.sql) ---
+    // A REGISTRATIONS / ECHO_ADMIN mintájára a fail-open ág ELŐTT döntünk.
+    // A „Kollégium” az üzemeltetésé: SUPERADMIN/ADMIN, vagy élő grant.
+    if (item.id === AppView.DORM_OPS) {
+      if (['SUPERADMIN', 'ADMIN'].includes(currentUser.role)) return true;
+      return (currentUser.dormRoles || [])
+        .some(r => ['GONDNOK', 'KOLI_ADMIN', 'INGATLAN', 'KOLI_SYSADMIN'].includes(r));
+    }
+    // A „Karbantartás” a hibákat kezelőké. A KARBANTARTO a szobát és a hibát
+    // látja, a lakó nevét NEM — ezt az adatbázis kényszeríti ki, nem a menü.
+    if (item.id === AppView.DORM_MAINTENANCE) {
+      if (['SUPERADMIN', 'ADMIN'].includes(currentUser.role)) return true;
+      return (currentUser.dormRoles || [])
+        .some(r => ['KARBANTARTO', 'GONDNOK', 'KOLI_ADMIN', 'KOLI_SYSADMIN'].includes(r));
+    }
+    // A „Szállásom” mindenkinek jár az AGENT kivételével: a külsős partner-
+    // ügynökség nem lakhat kollégiumban. Aki nem lakó, annak a nézet maga
+    // mondja meg, hogy nincs elhelyezése — nem a menüből tűnik el.
+    if (item.id === AppView.DORM_STUDENT) return currentUser.role !== 'AGENT';
     if (currentUser.role === 'SUPERADMIN' || currentUser.role === 'ADMIN') return true;
     if (currentUser.role === 'AGENT') return [AppView.FEED, AppView.PROGRAMS, AppView.ASSISTANT, AppView.AGENT_PORTAL, AppView.INTERVIEWS].includes(item.id);
     if (currentUser.role === 'FINANCE') return [AppView.FEED, AppView.ASSISTANT, AppView.FINANCE, AppView.AGENT_PORTAL, AppView.INTERVIEWS, AppView.REPORTS].includes(item.id);
@@ -10406,24 +10726,63 @@ const App: React.FC = () => {
                 || (currentUser.echoRoles || []).indexOf('OKTATO') >= 0)
           ? <ECHO_TeacherView user={currentUser} />
           : <FeedView user={currentUser} onNavigate={setActiveView} />;
+      // --- Kollégiumi modul (26_dorm.sql) ---
+      // A feltételek BETŰRE ugyanazok, mint a menüszűrésben; különben egy
+      // gondnok látná a menüpontot, és a Hírfolyam jönne fel helyette.
+      case AppView.DORM_OPS:
+        return (['SUPERADMIN', 'ADMIN'].includes(currentUser.role)
+                || (currentUser.dormRoles || []).some(r => ['GONDNOK', 'KOLI_ADMIN', 'INGATLAN', 'KOLI_SYSADMIN'].includes(r)))
+          ? <DORM_OpsView user={currentUser} />
+          : <FeedView user={currentUser} onNavigate={setActiveView} />;
+      case AppView.DORM_MAINTENANCE:
+        return (['SUPERADMIN', 'ADMIN'].includes(currentUser.role)
+                || (currentUser.dormRoles || []).some(r => ['KARBANTARTO', 'GONDNOK', 'KOLI_ADMIN', 'KOLI_SYSADMIN'].includes(r)))
+          ? <DORM_MaintenanceView user={currentUser} />
+          : <FeedView user={currentUser} onNavigate={setActiveView} />;
+      case AppView.DORM_STUDENT:
+        return currentUser.role !== 'AGENT'
+          ? <DORM_StudentView user={currentUser} />
+          : <FeedView user={currentUser} onNavigate={setActiveView} />;
       default: return <FeedView user={currentUser} onNavigate={setActiveView} />;
     }
   };
 
   return (
     <div className="min-h-screen bg-slate-50 flex">
-      <Sidebar 
-        activeView={activeView} 
-        setActiveView={(v) => { setShowAccount(false); setActiveView(v); }} 
+      <Sidebar
+        activeView={activeView}
+        setActiveView={(v) => { setShowAccount(false); setActiveView(v); sidebar.setDrawerOpen(false); }}
         currentUser={currentUser}
         onLogout={handleLogout}
-        onOpenProfile={() => setShowAccount(true)}
+        onOpenProfile={() => { setShowAccount(true); sidebar.setDrawerOpen(false); }}
         menuItems={filteredMenuItems}
+        isMobile={sidebar.isMobile}
+        collapsed={sidebar.collapsed}
+        drawerOpen={sidebar.drawerOpen}
+        onToggle={sidebar.toggle}
+        onCloseDrawer={() => sidebar.setDrawerOpen(false)}
       />
-      
-      <main className="flex-1 ml-72">
-        <header className="h-20 bg-white border-b border-slate-200 px-8 flex items-center justify-between sticky top-0 z-50">
-          <div className="relative flex-1 max-w-xl">
+
+      {/* A fő tartalom bal margója KÖVETI a sáv állapotát — így a felszabaduló
+          helyet tényleg a tartalom kapja meg. Az átmenetet (és a
+          prefers-reduced-motion kivételt) a .nje-shell-main osztály hozza
+          (app.html), a `min-w-0` pedig azt engedi, hogy a széles táblázatok
+          és rácsok valóban zsugorodni tudjanak a flex-elrendezésben. */}
+      <main className={`nje-shell-main flex-1 min-w-0 ${sidebar.isMobile ? 'ml-0' : (sidebar.collapsed ? 'ml-20' : 'ml-72')}`}>
+        <header className="h-16 sm:h-20 bg-white border-b border-slate-200 px-3 sm:px-6 lg:px-8 flex items-center gap-2 sm:gap-4 justify-between sticky top-0 z-50">
+          {/* Mobilon a sáv rejtve van — innen nyílik a beúszó fiók. */}
+          {sidebar.isMobile && (
+            <button
+              onClick={() => sidebar.setDrawerOpen(true)}
+              aria-label="Menü megnyitása"
+              aria-expanded={sidebar.drawerOpen}
+              title="Menü megnyitása"
+              className="w-10 h-10 flex-none flex items-center justify-center rounded-xl text-slate-600 hover:bg-slate-50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            >
+              <ICONS.Menu size={22} />
+            </button>
+          )}
+          <div className="relative flex-1 min-w-0 max-w-xl">
             <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">
               <ICONS.Search size={18} />
             </span>
@@ -10434,8 +10793,10 @@ const App: React.FC = () => {
             />
           </div>
           
-          <div className="flex items-center gap-4">
-            <div className="px-3 py-1 bg-primary/10 text-primary rounded-full text-[10px] font-black uppercase tracking-widest">
+          <div className="flex items-center gap-1 sm:gap-3 lg:gap-4 flex-none">
+            {/* A szerepkör-jelvény keskeny kijelzőn feleslegesen fogyasztja a
+                helyet a valódi vezérlők elől — 1024 px alatt elrejtjük. */}
+            <div className="hidden lg:block px-3 py-1 bg-primary/10 text-primary rounded-full text-[10px] font-black uppercase tracking-widest">
               {currentUser.role} Mód
             </div>
             <button onClick={() => { const cur = (localStorage.getItem('nje_lang') || 'hu'); localStorage.setItem('nje_lang', cur === 'hu' ? 'en' : 'hu'); window.location.reload(); }} className="h-10 px-2.5 flex items-center gap-1.5 rounded-xl hover:bg-slate-50 transition-colors text-slate-500" title="Language / Nyelv">
@@ -10457,7 +10818,14 @@ const App: React.FC = () => {
           {showAccount ? <AccountPage user={currentUser} onUpdate={updateCurrentUser} onClose={() => setShowAccount(false)} /> : renderContent()}
         </div>
       </main>
-      {['STUDENT', 'AGENT'].includes(currentUser.role) && activeView !== AppView.ASSISTANT && !showAccount && <AssistantWidget user={currentUser} />}
+      {/* A lebegő asszisztens-gomb. A `contents` miatt a burkoló doboz nem hoz
+          létre saját dobozt (nulla elrendezési hatás), de horgonyt ad a CSS-nek:
+          ha az ECHO kitöltő alsó akciósávja jelen van, a gomb és a panel
+          fölé emelkedik — így nem takarja a Vissza / Tovább gombokat.
+          Lásd app.html: body:has(.fixed.bottom-0.left-72) .nje-assistant-slot. */}
+      <div className="nje-assistant-slot contents">
+        {['STUDENT', 'AGENT'].includes(currentUser.role) && activeView !== AppView.ASSISTANT && !showAccount && <AssistantWidget user={currentUser} />}
+      </div>
     </div>
   );
 };
@@ -10480,7 +10848,9 @@ if (__boot) __boot.remove();
    ============================================================ */
 const HU_EN = {
   // menü / nav
-  'Ügynök és partner portál':'Agent & Partner Portal','Jelentkezés és Felvételi':'Applications & Admissions','Kommunikáció és CRM':'Communication & CRM','Pénzügyek':'Finance','Vízum és Compliance':'Visa & Compliance','Felvételi Bírálat':'Admissions Review','Interjú Foglalás':'Interview Booking','Marketing és Lead kezelés':'Marketing & Lead Management','Hallgatói Portál':'Student Portal','Riportok':'Reports','Rendszerkezelés':'System Administration','Regisztrációk':'Registrations','Kurzusértékelés':'Course evaluation','ECHO kampányok':'ECHO campaigns','Oktatói eredmények':'Teaching results','Intelligence':'Intelligence','Hírfolyam':'Feed','Programok':'Programs','Képzések':'Degrees','AI Asszisztens':'AI Assistant','Neumann János Egyetem':'John von Neumann University',
+  'Ügynök és partner portál':'Agent & Partner Portal','Jelentkezés és Felvételi':'Applications & Admissions','Kommunikáció és CRM':'Communication & CRM','Pénzügyek':'Finance','Vízum és Compliance':'Visa & Compliance','Felvételi Bírálat':'Admissions Review','Interjú Foglalás':'Interview Booking','Marketing és Lead kezelés':'Marketing & Lead Management','Hallgatói Portál':'Student Portal','Riportok':'Reports','Rendszerkezelés':'System Administration','Regisztrációk':'Registrations','Kurzusértékelés':'Course evaluation','ECHO kampányok':'ECHO campaigns','Oktatói eredmények':'Teaching results','Kollégium':'Dormitory','Karbantartás':'Maintenance','Szállásom':'My accommodation','Intelligence':'Intelligence','Hírfolyam':'Feed','Programok':'Programs','Képzések':'Degrees','AI Asszisztens':'AI Assistant','Neumann János Egyetem':'John von Neumann University',
+  // keret / oldalsáv (reszponzív shell)
+  'Főmenü':'Main menu','Menü összecsukása':'Collapse menu','Menü kinyitása':'Expand menu','Menü megnyitása':'Open menu','Menü bezárása':'Close menu','Kijelentkezés':'Sign out','UniPortal Pro — Neumann János Egyetem':'UniPortal Pro — John von Neumann University',
   // fejléc
   'Globális keresés a tesztadatok között...':'Global search across demo data...','Profil megnyitása':'Open profile','Profilom':'My profile','Vissza':'Back','Mentés':'Save','Mentés…':'Saving…','Elmentve':'Saved','Bezárás':'Close','Összes':'View all',
   // profil
@@ -10740,9 +11110,16 @@ HU_EN_PHRASES.push(
     if (NO_I18N(root)) return;
     if (root.hasAttribute && root.hasAttribute('placeholder')) { const k = (root.getAttribute('placeholder')||'').trim(); if (HU_EN[k]) root.setAttribute('placeholder', HU_EN[k]); }
     if (root.hasAttribute && root.hasAttribute('title')) { const k = (root.getAttribute('title')||'').trim(); if (HU_EN[k]) root.setAttribute('title', HU_EN[k]); }
+    /* Az aria-label MÉRVE magyar maradt angol módban: az oldalsáv össze-
+       csukó gombja, a hamburger és a fiók bezárása csak ezen az attribútumon
+       közli a nevét. A képernyőolvasó az aria-labelt ELŐNYBEN RÉSZESÍTI a
+       title-lel szemben, tehát a title fordítása önmagában nem elég — a
+       vak felhasználó angol módban is magyarul hallotta volna a gombot. */
+    if (root.hasAttribute && root.hasAttribute('aria-label')) { const k = (root.getAttribute('aria-label')||'').trim(); if (HU_EN[k]) root.setAttribute('aria-label', HU_EN[k]); }
     if (root.querySelectorAll) {
       root.querySelectorAll('[placeholder]').forEach(el => { if (NO_I18N(el)) return; const k = (el.getAttribute('placeholder')||'').trim(); if (HU_EN[k]) el.setAttribute('placeholder', HU_EN[k]); });
       root.querySelectorAll('[title]').forEach(el => { if (NO_I18N(el)) return; const k = (el.getAttribute('title')||'').trim(); if (HU_EN[k]) el.setAttribute('title', HU_EN[k]); });
+      root.querySelectorAll('[aria-label]').forEach(el => { if (NO_I18N(el)) return; const k = (el.getAttribute('aria-label')||'').trim(); if (HU_EN[k]) el.setAttribute('aria-label', HU_EN[k]); });
     }
   };
   /* A legördülő (<select>) értékei. Az OPTION szándékosan a SKIP-ben marad:

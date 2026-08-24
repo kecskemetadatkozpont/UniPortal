@@ -36,6 +36,108 @@
     .custom-scrollbar::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.05); }
     .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 10px; }
     .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.3); }
+    /* ============================================================
+       Reszponzív tartalom — érintési célpontok kis kijelzőn
+       ------------------------------------------------------------
+       Mérés (Playwright, 390 px széles tartalomsáv, 49 nézet/fül): 301 gomb
+       volt 44 px-nél alacsonyabb (a 602 láthatóból). Ezt egyesével nem
+       érdemes osztályozni, ezért egy szabály emeli meg őket a mobil
+       töréspont alatt. A hatókör a <main>: a benne ülő felső fejléc gombjai
+       is beleesnek (ott ez kívánatos), az oldalsáv ikonsávja viszont nem.
+
+       Az input/textarea/select 16 px-es betűje szándékos: ez alatt az iOS
+       Safari ráközelít a mezőre fókuszkor, és a felhasználó kizoomolva
+       marad. Csak mobilon aktív, asztali nézetben nincs hatása.
+       ============================================================ */
+    @media (max-width: 767px) {
+      main button,
+      main [role="button"],
+      main summary { min-height: 44px; }
+      main input:not([type="checkbox"]):not([type="radio"]),
+      main select,
+      main textarea { min-height: 44px; font-size: 16px; }
+      /* A hosszú, tördelhetetlen azonosítók (API-kulcs, URL) ne feszítsék szét a lapot. */
+      main code, main pre { overflow-wrap: anywhere; }
+    }
+    /* ============================================================
+       Rács- és flex-elemek zsugorodása kis kijelzőn
+       ------------------------------------------------------------
+       MÉRVE (Playwright, 390 px, ECHO KAMPÁNYOK nézet): a lap TÖRZSE
+       vízszintesen görgött — document.scrollingElement.scrollWidth 462 px
+       volt 390 px-es viewportnál.
+
+       Az ok NEM az ECHO hibája: a táblázatait rendesen `overflow-x-auto`
+       burkolja. A rács- és flex-elemek CSS-alapértelmezett
+       `min-width: auto` értéke a bűnös — ez megtiltja, hogy egy elem a
+       tartalma minimális szélessége ALÁ zsugorodjon. A mért lánc:
+
+         .flex.items-baseline > span.truncate   min-content = 289 px
+           -> a flex sor                        min-content = 396 px
+           -> .lg:col-span-2 (rács-elem)        min-content = 446 px
+           -> a rács sávja 446 px lett egy 358 px-es dobozban -> lapgörgetés
+
+       A `min-width: 0` visszaadja a zsugorodás jogát, és ilyenkor a már
+       meglévő `truncate` / `overflow-x-auto` végre érvényre is jut.
+       A `flex-none` (flex-shrink: 0) elemeket ez NEM érinti — az ikonok és
+       a rögzített szélességű vezérlők a helyükön maradnak.
+
+       Hatókör: 1024 px alatt. Efölött MÉRÉS SZERINT egyetlen nézet sem
+       lógott túl, ezért ott nem nyúlunk az elrendezésbe.
+       ============================================================ */
+    @media (max-width: 1023px) {
+      main .grid > *,
+      main .flex > * { min-width: 0; }
+    }
+    /* ============================================================
+       Hosszú, tördelhetetlen szavak
+       ------------------------------------------------------------
+       MÉRVE (1024 px, KINYITOTT oldalsáv, Riportok nézet): a lap törzse
+       1043 px-re görgött. Ok: a `lg:grid-cols-3` rács ekkor 672 px-en
+       HÁROM oszlopot nyit, így egy kártya belső szélessége 158 px — a benne
+       ülő h4 leghosszabb szava viszont 209 px. A magyar összetett szavak
+       (pl. „nemzetköziesítés”) rendszeresen ilyen hosszúak.
+
+       A `break-word` csak azt a szót töri meg, amelyik MÁSKÉPP KILÓGNA;
+       a `white-space: nowrap` / `truncate` elemeket (táblázatfejlécek,
+       csonkolt sorok) nem érinti, tehát a meglévő tördelés érintetlen.
+       Nem szűkítjük töréspontra: ez a szabály minden szélességen helyes.
+       ============================================================ */
+    main { overflow-wrap: break-word; }
+    /* ============================================================
+       Reszponzív keret — az oldalsáv és a fő tartalom együttmozgása
+       ------------------------------------------------------------
+       Az állapotot a React teszi ki a <body data-sidebar="..."> attribútumra
+       (app.jsx: useSidebarLayout): 'expanded' | 'collapsed' | 'hidden'.
+       A React-en belüli elemek Tailwind-osztályt kapnak; ide az kerül, amit
+       osztállyal nem lehet megoldani: az átmenetek, a fókusz-kezelés és az a
+       néhány fixen pozicionált elem, ami NEM a mi fánkban él.
+       ============================================================ */
+    .nje-sidebar { transition: width .3s ease, transform .3s ease, visibility .3s; }
+    /* Csukott mobil fiók: a visibility kiveszi a TAB-sorrendből is, de csak az
+       animáció végén — így a kicsúszás látszik. */
+    .nje-sidebar[data-hidden="true"] { visibility: hidden; }
+    .nje-sidebar-backdrop { transition: opacity .3s ease; }
+    .nje-shell-main { transition: margin-left .3s ease; }
+    .nje-sidebar-toggle { transition: background-color .2s ease, color .2s ease; }
+
+    /* Az ECHO kitöltő alsó akciósávja (features/echo.jsx) fixen, `left-72`
+       értékkel pozicionál. Nem nyúlunk az ECHO-hoz: a sáv állapota szerint
+       innen igazítjuk, hogy összecsukott sávnál és mobilon se maradjon rés. */
+    .fixed.bottom-0.left-72 { transition: left .3s ease; }
+    body[data-sidebar="collapsed"] .fixed.bottom-0.left-72 { left: 5rem; }
+    body[data-sidebar="hidden"]    .fixed.bottom-0.left-72 { left: 0; }
+
+    /* Ugyanez a sáv takarásba kerülne a lebegő asszisztens-gombtól. Amíg a
+       kitöltő nyitva van, a gomb és a chat-panel fölé emelkedik. */
+    body:has(.fixed.bottom-0.left-72) .nje-assistant-slot > button { bottom: 5.75rem; }
+    body:has(.fixed.bottom-0.left-72) .nje-assistant-slot > div    { bottom: 11.5rem; }
+
+    /* Aki kevesebb mozgást kért, annak a keret ne animáljon. */
+    @media (prefers-reduced-motion: reduce) {
+      .nje-sidebar, .nje-sidebar-backdrop, .nje-shell-main,
+      .nje-sidebar-toggle, .fixed.bottom-0.left-72 { transition: none !important; }
+    }
+
     #__boot { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: #0f172a; color: #fff; font-family: 'Inter', sans-serif; z-index: 9999; }
     #__boot .s { width: 48px; height: 48px; border: 4px solid rgb(208,103,0); border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
@@ -99,7 +201,7 @@
         let src = await (await fetch('app.jsx')).text();
         // New feature modules are concatenated into app.jsx's module (shared
         // scope) at the /*__FEATURES__*/ marker, just before the App component.
-        const FEATURE_FILES = ['features/data-layer.jsx', 'features/echo.jsx', 'features/knowledge-base.jsx', 'features/feed.jsx', 'features/programs.jsx', 'features/assistant.jsx', 'features/registrations.jsx'];
+        const FEATURE_FILES = ['features/data-layer.jsx', 'features/echo.jsx', 'features/knowledge-base.jsx', 'features/feed.jsx', 'features/programs.jsx', 'features/assistant.jsx', 'features/registrations.jsx', 'features/dorm.jsx', 'features/dorm-views.jsx'];
         try {
           const parts = await Promise.all(FEATURE_FILES.map(f => fetch(f).then(r => r.ok ? r.text() : '')));
           const featureCode = parts.join('\n\n');

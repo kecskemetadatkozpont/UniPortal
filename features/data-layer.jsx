@@ -146,7 +146,7 @@ const UModal = ({ open, onClose, children, max = 'max-w-2xl', title, subtitle, i
     <div className="fixed inset-0 z-[100] flex items-start justify-center p-4 sm:p-8 overflow-y-auto bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200" onClick={onClose}>
       <div className={'w-full ' + max + ' bg-white rounded-3xl shadow-2xl my-auto animate-in zoom-in-95 duration-200'} onClick={e => e.stopPropagation()}>
         {(title || icon) && (
-          <div className="flex items-start justify-between gap-4 p-6 border-b border-slate-100">
+          <div className="flex items-start justify-between gap-4 p-5 sm:p-6 border-b border-slate-100">
             <div className="flex items-center gap-3 min-w-0">
               {icon && <div className="w-11 h-11 rounded-2xl bg-primary/10 text-primary flex items-center justify-center flex-none">{icon}</div>}
               <div className="min-w-0">
@@ -157,7 +157,7 @@ const UModal = ({ open, onClose, children, max = 'max-w-2xl', title, subtitle, i
             <button onClick={onClose} className="w-9 h-9 flex-none flex items-center justify-center rounded-xl hover:bg-slate-100 text-slate-400 transition-colors"><Lucide.X size={18} /></button>
           </div>
         )}
-        <div className="p-6">{children}</div>
+        <div className="p-5 sm:p-6">{children}</div>
       </div>
     </div>
   );

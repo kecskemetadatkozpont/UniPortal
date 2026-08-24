@@ -177,7 +177,7 @@ function FeedCard({ post, user, rsvps, tix, onChange, onDelete }) {
         </div>
 
         <h3 className="text-xl font-black text-slate-900 tracking-tight leading-snug">{post.title}</h3>
-        {post.body && <p className="text-sm text-slate-500 leading-relaxed mt-2 whitespace-pre-line">{post.body}</p>}
+        {post.body && <p className="text-sm text-slate-500 leading-relaxed mt-2 whitespace-pre-line max-w-[70ch]">{post.body}</p>}
 
         {/* meta strip */}
         {(post.event_date || post.event_location) && post.type !== 'deadline' && (
@@ -269,7 +269,7 @@ const FeedView = ({ user, onNavigate }) => {
   const chips = [['all', 'Összes'], ...Object.entries(FEED_TYPES).map(([k, m]) => [k, m.label])];
 
   return (
-    <div className="max-w-3xl mx-auto px-6 sm:px-8 py-8 animate-in fade-in duration-500">
+    <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 animate-in fade-in duration-500">
       {/* hero */}
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-6">
         <div>

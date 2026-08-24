@@ -259,7 +259,7 @@ function ProgramApply({ program, app, user, onExit, onSaved }) {
   const stepKey = steps[idx];
 
   return (
-    <div className="max-w-5xl mx-auto px-6 sm:px-8 py-8 animate-in fade-in duration-300">
+    <div className="max-w-5xl 2xl:max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 animate-in fade-in duration-300">
       <button onClick={onExit} className="flex items-center gap-2 text-sm font-bold text-slate-400 hover:text-primary mb-4 transition-colors"><Lucide.ArrowLeft size={16} /> Vissza a képzésekhez</button>
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <div>
@@ -491,7 +491,7 @@ function PROG_Catalog({ programs, myApps, onOpen, onContinue }) {
       <div className="flex items-center gap-2 overflow-x-auto pb-2 mb-5 custom-scrollbar">
         {chips.map(([k, label]) => <button key={k} onClick={() => setLevel(k)} className={'flex-none px-4 py-2 rounded-full text-[13px] font-bold transition-all ' + (level === k ? 'bg-slate-900 text-white' : 'bg-white border border-slate-100 text-slate-500 hover:border-slate-300')}>{label}</button>)}
       </div>
-      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4">
         {list.map(p => { const mine = myApps.find(a => a.program_id === p.id); const dleft = DL_daysLeft(p.deadline); return (
           <div key={p.id} className="group bg-white rounded-3xl border border-slate-100 shadow-sm flex flex-col overflow-hidden hover:shadow-md hover:border-slate-200 transition-all">
             <div className="relative h-32">
@@ -623,7 +623,7 @@ function PROG_Applicants({ programs, apps, onChange }) {
         <span className="text-sm font-bold text-slate-400">{rows.length + ' jelentkezés'}</span>
       </div>
       {rows.length === 0 ? <div className="bg-white rounded-3xl border border-slate-100"><UEmpty icon={<Lucide.Inbox size={24} />} title="Még nincs jelentkezés" subtitle="A hallgatói jelentkezések itt fognak megjelenni." /></div> : (
-        <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+        <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden overflow-x-auto">
           <table className="w-full text-sm">
             <thead><tr className="text-left text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100"><th className="px-5 py-3">Jelentkező</th><th className="px-5 py-3">Képzés</th><th className="px-5 py-3">Előrehaladás</th><th className="px-5 py-3">Beadva</th><th className="px-5 py-3">Státusz</th></tr></thead>
             <tbody>
@@ -665,7 +665,7 @@ const ProgramsView = ({ user, scope = 'programs' }) => {
     setDetail(null); setApplying({ program, app });
   };
 
-  if (programs === null) return <div className="max-w-6xl mx-auto px-8 py-8"><div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">{[0, 1, 2, 3, 4, 5].map(i => <div key={i} className="h-56 rounded-3xl bg-white border border-slate-100 animate-pulse" />)}</div></div>;
+  if (programs === null) return <div className="max-w-6xl xl:max-w-[1360px] 2xl:max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8"><div className="grid sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4">{[0, 1, 2, 3, 4, 5].map(i => <div key={i} className="h-56 rounded-3xl bg-white border border-slate-100 animate-pulse" />)}</div></div>;
 
   if (applying) {
     const fresh = apps.find(a => a.id === applying.app.id) || applying.app;
@@ -676,7 +676,7 @@ const ProgramsView = ({ user, scope = 'programs' }) => {
   const scopedPrograms = staff ? programs.filter(p => PROG_kind(p) === (isDeg ? 'degree' : 'program')) : programs;
   const scopedApps = apps.filter(a => scopedPrograms.some(p => p.id === a.program_id));
   return (
-    <div className="max-w-6xl mx-auto px-6 sm:px-8 py-8 animate-in fade-in duration-500">
+    <div className="max-w-6xl xl:max-w-[1360px] 2xl:max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 animate-in fade-in duration-500">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-6">
         <div>
           <p className="text-primary font-black text-xs uppercase tracking-widest mb-1">{staff ? (isDeg ? 'Képzések' : 'Programok') : 'Képzések'}</p>
@@ -713,7 +713,7 @@ const ProgramsView = ({ user, scope = 'programs' }) => {
         <div className="bg-white rounded-3xl border border-slate-100"><UEmpty icon={<Lucide.GraduationCap size={26} />} title={isDeg ? 'Még nincs képzés' : 'Még nincs program'} subtitle={isDeg ? 'Vedd fel az első képzést (BSc, MSc, MA, MBA vagy PhD).' : 'Vegyél fel egy előkészítő programot, rövid kurzust vagy tanulmányi kirándulást.'} action={<button className={U_btnPrimary} onClick={() => setEditor({ open: true, program: null })}><Lucide.Plus size={16} /> Új {isDeg ? 'képzés' : 'program'}</button>} /></div>
       )}
       {staff && tab === 'manage' && scopedPrograms.length > 0 && (
-        <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+        <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden overflow-x-auto">
           <table className="w-full text-sm">
             <thead><tr className="text-left text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100"><th className="px-5 py-3">{isDeg ? 'Képzés' : 'Program'}</th><th className="px-5 py-3">Szint</th><th className="px-5 py-3">Tandíj</th><th className="px-5 py-3">Folyamat</th><th className="px-5 py-3">Határidő</th><th className="px-5 py-3">Státusz</th><th className="px-5 py-3"></th></tr></thead>
             <tbody>
