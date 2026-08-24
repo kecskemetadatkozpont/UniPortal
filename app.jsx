@@ -24,6 +24,15 @@ const AnimatePresence = ({ children }) => React.createElement(React.Fragment, nu
    namespace is a superset, so it satisfies every component (incl. the ones
    that did `import * as ICONS from 'lucide-react'`). */
 const ICONS = Lucide;
+
+// A nem tárolt értékkészlete a students.gender oszlopét követi
+// ('Male' / 'Female' / 'Other'); a felületen magyar címkével jelenik meg.
+const GENDER_OPTIONS = [
+  { value: 'Male',   label: 'Férfi' },
+  { value: 'Female', label: 'Nő' },
+  { value: 'Other',  label: 'Egyéb' },
+];
+const genderLabel = (g) => { const o = GENDER_OPTIONS.find(x => x.value === g); return o ? o.label : ''; };
 const NJE_LOGO = "nje-logo.svg";
 
 const AppView = {
@@ -77,6 +86,358 @@ const MENU_ITEMS = [
   { id: AppView.ECHO_TEACHER, label: 'Oktatói eredmények', icon: <Lucide.BarChart2 size={20} /> },
 ];
 
+
+/* ============================================================================
+   STÁTUSZMODELL — EGYETLEN FORRÁS (C1 + C2)
+   ----------------------------------------------------------------------------
+   Ez a blokk a supabase/25_status_model.sql katalógusának a felületi párja.
+   Korábban a státuszok szét voltak szórva: minden lista a maga
+   `student.status === 'Paid' ? ... : student.status === 'Missing Info' ? ...`
+   láncával döntött a színről és a feliratról, ezért egy új állapot felvétele
+   tucatnyi helyen igényelt szerkesztést, és a színek is elcsúsztak egymástól.
+   Innentől MINDEN jelvény, legördülő és szűrő ebből dolgozik.
+
+   A KÓD az adatbázisban tárolt (angol) érték — azt küldjük a Supabase-nek.
+   A `hu` a felületi felirat; az angol változatot a lap alján lévő HU→EN
+   szótár adja (STATUS_I18N), hogy a nyelvváltó is helyesen fordítson.
+
+   A fő lánc (D1): Draft → Submitted → Documents checked → Nominated
+                    → { Failed | Conditionally accepted → Accepted }
+   A 'Failed' VÉGÁLLAPOT: csak explicit újranyitással (Failed → Nominated)
+   hagyható el, és azt a szerver is naplózza.
+   ============================================================================ */
+
+/* Tailwind-osztályok színkulcsonként. A kulcs megegyezik a
+   public.student_status.tone / public.student_track_state.tone értékével. */
+const TONE_BADGE = {
+  slate:   'bg-slate-100 text-slate-600',
+  indigo:  'bg-indigo-50 text-indigo-600',
+  sky:     'bg-sky-50 text-sky-600',
+  violet:  'bg-violet-50 text-violet-600',
+  amber:   'bg-amber-50 text-amber-600',
+  emerald: 'bg-emerald-50 text-emerald-600',
+  red:     'bg-red-50 text-red-600',
+};
+const TONE_DOT = {
+  slate: 'bg-slate-400', indigo: 'bg-indigo-500', sky: 'bg-sky-500',
+  violet: 'bg-violet-500', amber: 'bg-amber-500', emerald: 'bg-emerald-500', red: 'bg-red-500',
+};
+
+/* A fő lánc. A sorrend = a lánc sorrendje; a lista rendezéshez is használható. */
+const STUDENT_STATUSES = [
+  { code: 'Draft',                  hu: 'Piszkozat',                tone: 'slate',   icon: 'FilePen',      hint: 'Elkezdte, még nem adta be.' },
+  { code: 'Submitted',              hu: 'Beadva',                   tone: 'indigo',  icon: 'Inbox',        hint: 'Dokumentum-ellenőrzésre vár.' },
+  { code: 'Documents checked',      hu: 'Dokumentumok ellenőrizve', tone: 'sky',     icon: 'FileCheck',    hint: 'A dokumentumok rendben, mehet bírálatra.' },
+  { code: 'Nominated',              hu: 'Bírálatra jelölve',        tone: 'violet',  icon: 'UserCheck',    hint: 'A bírálat alatt. Innen ágazik el a döntés.' },
+  { code: 'Conditionally accepted', hu: 'Feltételesen felvéve',     tone: 'amber',   icon: 'FileSignature',hint: 'Feltételes felvételi levél kiállítva.' },
+  { code: 'Accepted',               hu: 'Felvéve',                  tone: 'emerald', icon: 'CheckCircle2', hint: 'Végleges felvétel. Innen indulnak a beiratkozás utáni sávok.' },
+  { code: 'Failed',                 hu: 'Elutasítva',               tone: 'red',     icon: 'XCircle',      hint: 'Végállapot — csak explicit újranyitással hagyható el.' },
+];
+const STATUS_BY_CODE = {};
+STUDENT_STATUSES.forEach((s, i) => { STATUS_BY_CODE[s.code] = { ...s, order: i }; });
+
+/* A megengedett átmenetek — betűre ugyanaz, mint a
+   public.student_status_transition tartalma. `back: true` = hibajavító
+   visszalépés: csak ügyintézőnek, és a szerver naplózza. */
+const STATUS_TRANSITIONS = {
+  'Draft':                  [{ to: 'Submitted' }],
+  'Submitted':              [{ to: 'Documents checked' }, { to: 'Draft', back: true }],
+  'Documents checked':      [{ to: 'Nominated' }, { to: 'Submitted', back: true }],
+  'Nominated':              [{ to: 'Conditionally accepted' }, { to: 'Failed' }, { to: 'Documents checked', back: true }],
+  'Conditionally accepted': [{ to: 'Accepted' }, { to: 'Failed' }, { to: 'Nominated', back: true }],
+  'Accepted':               [{ to: 'Conditionally accepted', back: true }],
+  'Failed':                 [{ to: 'Nominated', back: true }],
+};
+
+/* A napi munka legfontosabb kérdése: ki vár dokumentum-ellenőrzésre. */
+const STATUS_AWAITING_DOC_CHECK = 'Submitted';
+
+const statusMeta  = (code) => STATUS_BY_CODE[code] || { code, hu: code || '—', tone: 'slate', icon: 'Circle', order: 99 };
+const statusLabel = (code) => statusMeta(code).hu;
+const statusBadgeClass = (code) => TONE_BADGE[statusMeta(code).tone] || TONE_BADGE.slate;
+const statusDotClass   = (code) => TONE_DOT[statusMeta(code).tone] || TONE_DOT.slate;
+const statusNext  = (code) => STATUS_TRANSITIONS[code] || [];
+const statusOrder = (code) => statusMeta(code).order;
+
+/* ---------------------------------------------------------------------------
+   A2 · MÁSODLAGOS FELSOROLÁSOK MAGYAR FELIRATA
+   ---------------------------------------------------------------------------
+   A fő státuszt a fenti STUDENT_STATUSES kezeli. Rajta kívül még néhány kisebb
+   felsorolás jelenik meg nyers, ANGOL adatértékként a felületen (vízumkérelem,
+   fizetés, checklist-tétel). Ezek adatbázisértékek — NEM írjuk át őket —, csak
+   a MEGJELENÍTÉSKOR cseréljük magyar feliratra. Az angol változatot a lap alján
+   lévő HU→EN szótár adja vissza, így a nyelvváltó mindkét irányban helyes.
+   Ismeretlen érték esetén az eredetit adjuk vissza. -------------------------- */
+const ENUM_HU = {
+  // vízumkérelem
+  'Approved': 'Jóváhagyva', 'Rejected': 'Visszautasítva', 'In Progress': 'Folyamatban',
+  'Not Started': 'Nincs elkezdve',
+  // fizetés
+  'Paid': 'Fizetve', 'Pending': 'Függőben', 'Failed': 'Sikertelen',
+  // dokumentum-checklist
+  'Uploaded': 'Feltöltve', 'Verified': 'Hitelesítve', 'Missing': 'Hiányzik',
+};
+const enumLabel = (v) => (v && ENUM_HU[v]) || v || '—';
+
+/* ---------------------------------------------------------------------------
+   C2 · A BEIRATKOZÁS UTÁNI HÁROM SÁV (D2)
+   ---------------------------------------------------------------------------
+   NEM státuszlánc: három egymástól független mező a students soron. A fő
+   státusz közben végig 'Accepted' marad, mert egy hallgató kérhet halasztást
+   ÉS várhat visszatérítést egyszerre — ezt egyetlen státuszmezőben nem
+   lehetne ábrázolni.
+   A `null` / '' érték jelentése: a sáv még nem indult el. --------------------- */
+const POST_ENROLL_TRACKS = [
+  {
+    key: 'visa', field: 'visa_state', hu: 'Vízum', icon: 'Plane',
+    states: [
+      { code: 'waiting',  hu: 'Vízumra vár',      tone: 'amber'   },
+      { code: 'accepted', hu: 'Vízum megadva',    tone: 'emerald' },
+      { code: 'rejected', hu: 'Vízum elutasítva', tone: 'red'     },
+    ],
+    transitions: {
+      '':         [{ to: 'waiting' }],
+      'waiting':  [{ to: 'accepted' }, { to: 'rejected' }, { to: '', back: true }],
+      'accepted': [{ to: 'waiting', back: true }, { to: '', back: true }],
+      'rejected': [{ to: 'waiting', back: true }, { to: '', back: true }],
+    },
+  },
+  {
+    key: 'deferral', field: 'deferral_state', hu: 'Halasztás', icon: 'CalendarClock',
+    states: [
+      { code: 'requested',   hu: 'Halasztást kért',          tone: 'amber'   },
+      { code: 'letter_sent', hu: 'Halasztási levél kiküldve', tone: 'emerald' },
+    ],
+    transitions: {
+      '':            [{ to: 'requested' }],
+      'requested':   [{ to: 'letter_sent' }, { to: '', back: true }],
+      'letter_sent': [{ to: 'requested', back: true }, { to: '', back: true }],
+    },
+  },
+  {
+    key: 'refund', field: 'refund_state', hu: 'Visszatérítés', icon: 'Undo2',
+    states: [
+      { code: 'requested',             hu: 'Visszatérítést kért', tone: 'amber'   },
+      { code: 'bank_details_needed',   hu: 'Bankadat bekérve',    tone: 'amber'   },
+      { code: 'bank_details_provided', hu: 'Bankadat megadva',    tone: 'sky'     },
+      { code: 'forwarded_to_finance',  hu: 'Pénzügyre továbbítva', tone: 'violet' },
+      { code: 'processed',             hu: 'Kifizetve',           tone: 'emerald' },
+    ],
+    transitions: {
+      '':                      [{ to: 'requested' }],
+      'requested':             [{ to: 'bank_details_needed' }, { to: '', back: true }],
+      'bank_details_needed':   [{ to: 'bank_details_provided' }, { to: 'requested', back: true }, { to: '', back: true }],
+      'bank_details_provided': [{ to: 'forwarded_to_finance' }, { to: 'bank_details_needed', back: true }, { to: '', back: true }],
+      'forwarded_to_finance':  [{ to: 'processed' }, { to: 'bank_details_provided', back: true }, { to: '', back: true }],
+      'processed':             [{ to: 'forwarded_to_finance', back: true }, { to: '', back: true }],
+    },
+  },
+];
+const TRACK_BY_KEY = {};
+POST_ENROLL_TRACKS.forEach(t => {
+  t.byCode = {};
+  t.states.forEach((s, i) => { t.byCode[s.code] = { ...s, order: i }; });
+  TRACK_BY_KEY[t.key] = t;
+});
+const trackStateMeta  = (trackKey, code) => (TRACK_BY_KEY[trackKey] && TRACK_BY_KEY[trackKey].byCode[code]) || null;
+const trackStateLabel = (trackKey, code) => { const m = trackStateMeta(trackKey, code); return m ? m.hu : (code || '—'); };
+const trackBadgeClass = (trackKey, code) => { const m = trackStateMeta(trackKey, code); return TONE_BADGE[m ? m.tone : 'slate']; };
+const trackNext = (trackKey, code) => ((TRACK_BY_KEY[trackKey] || {}).transitions || {})[code || ''] || [];
+/* A soron aktív sávok — a listákban ez adja a kis jelvényeket. */
+const activeTracks = (student) => POST_ENROLL_TRACKS
+  .map(t => ({ track: t, state: (student && student[t.field]) || '' }))
+  .filter(x => !!x.state);
+
+/* ---------------------------------------------------------------------------
+   Közös felületi elemek
+   --------------------------------------------------------------------------- */
+const StatusBadge = ({ code, size = 'sm', showHint = false }) => {
+  const m = statusMeta(code);
+  const Icon = Lucide[m.icon] || Lucide.Circle;
+  const pad = size === 'lg' ? 'px-3 py-1.5 text-xs' : 'px-2 py-1 text-[10px]';
+  return (
+    <span className={`${pad} rounded-md font-bold uppercase tracking-wide inline-flex items-center gap-1 whitespace-nowrap ${statusBadgeClass(code)}`}
+          title={showHint ? m.hint : undefined}>
+      <Icon size={size === 'lg' ? 14 : 11} /> {m.hu}
+    </span>
+  );
+};
+
+/* A három sáv kis jelvényei a listákban (C2: „legyen látható, ha aktív"). */
+const TrackBadges = ({ student, compact = true }) => {
+  const act = activeTracks(student);
+  if (!act.length) return null;
+  return (
+    <span className="inline-flex flex-wrap gap-1 align-middle">
+      {act.map(({ track, state }) => {
+        const Icon = Lucide[track.icon] || Lucide.Circle;
+        return (
+          <span key={track.key}
+                title={track.hu + ': ' + trackStateLabel(track.key, state)}
+                className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase inline-flex items-center gap-1 ${trackBadgeClass(track.key, state)}`}>
+            <Icon size={10} />{compact ? track.hu : trackStateLabel(track.key, state)}
+          </span>
+        );
+      })}
+    </span>
+  );
+};
+
+/* Státusz-legördülő, ami CSAK a megengedett átmeneteket kínálja fel. A
+   szerver ugyanezt ellenőrzi (25_status_model.sql) — ez itt a barátságos
+   változat, hogy ne hibaüzenetből derüljön ki, mi engedett. */
+const StatusSelect = ({ value, onPick, disabled }) => {
+  const opts = statusNext(value);
+  return (
+    <select
+      value=""
+      disabled={disabled || !opts.length}
+      onChange={(e) => { if (e.target.value) onPick(e.target.value); e.target.value = ''; }}
+      className="text-[11px] bg-white border border-slate-200 rounded-lg px-2 py-1.5 font-bold text-slate-600 focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-40"
+      title={opts.length ? 'Következő állapot kiválasztása' : 'Végállapot — nincs megengedett továbblépés'}
+    >
+      <option value="">{opts.length ? 'Állapot módosítása…' : 'Végállapot'}</option>
+      {opts.map(o => (
+        <option key={o.to} value={o.to}>{(o.back ? '↩ ' : '→ ') + statusLabel(o.to)}</option>
+      ))}
+    </select>
+  );
+};
+
+/* A három sáv kezelőfelülete — csak 'Accepted' státusznál van értelme. */
+const TrackControls = ({ student, onChange, disabled }) => {
+  if (!student) return null;
+  return (
+    <div className="grid sm:grid-cols-3 gap-3">
+      {POST_ENROLL_TRACKS.map(t => {
+        const cur = student[t.field] || '';
+        const Icon = Lucide[t.icon] || Lucide.Circle;
+        const opts = trackNext(t.key, cur);
+        return (
+          <div key={t.key} className="rounded-xl border border-slate-100 p-3 bg-white">
+            <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wide flex items-center gap-1.5 mb-2">
+              <Icon size={13} /> {t.hu}
+            </div>
+            <div className="mb-2">
+              {cur
+                ? <span className={`px-2 py-1 rounded-md text-[10px] font-bold uppercase inline-flex items-center gap-1 ${trackBadgeClass(t.key, cur)}`}>{trackStateLabel(t.key, cur)}</span>
+                : <span className="text-[10px] font-bold uppercase text-slate-300">Nincs folyamatban</span>}
+            </div>
+            <select
+              value=""
+              disabled={disabled || !opts.length}
+              onChange={(e) => { const v = e.target.value; e.target.value = ''; if (v) onChange(t.field, v === '__clear__' ? null : v); }}
+              className="w-full text-[11px] bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 font-bold text-slate-600 focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-40"
+            >
+              <option value="">{cur ? 'Lépés…' : 'Sáv indítása…'}</option>
+              {opts.map(o => (
+                <option key={o.to || '__clear__'} value={o.to || '__clear__'}>
+                  {o.to ? ((o.back ? '↩ ' : '→ ') + trackStateLabel(t.key, o.to)) : '✕ Sáv törlése'}
+                </option>
+              ))}
+            </select>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+/* Státusz-szűrő sáv (B1). A darabszámot is kiírja, és külön gyorsgombot ad a
+   'Submitted'-re, mert a napi munka bemenete az, hogy ki vár
+   dokumentum-ellenőrzésre. */
+const StatusFilterBar = ({ students, value, onChange }) => {
+  const counts = {};
+  (students || []).forEach(s => { const c = s && s.status; counts[c] = (counts[c] || 0) + 1; });
+  const waiting = counts[STATUS_AWAITING_DOC_CHECK] || 0;
+  const btn = (active) => 'px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition-colors border ' +
+    (active ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50');
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <button onClick={() => onChange(STATUS_AWAITING_DOC_CHECK)}
+              title="Gyorsszűrő: akik dokumentum-ellenőrzésre várnak"
+              className={'px-3 py-1.5 rounded-lg text-[11px] font-bold inline-flex items-center gap-1.5 border transition-colors ' +
+                (value === STATUS_AWAITING_DOC_CHECK
+                  ? 'bg-indigo-600 text-white border-indigo-600'
+                  : 'bg-indigo-50 text-indigo-600 border-indigo-100 hover:bg-indigo-100')}>
+        <Lucide.Inbox size={13} /> Dokumentum-ellenőrzésre vár ({waiting})
+      </button>
+      <span className="w-px h-5 bg-slate-200" />
+      <button onClick={() => onChange('All')} className={btn(value === 'All')}>Összes ({(students || []).length})</button>
+      {STUDENT_STATUSES.map(s => (
+        <button key={s.code} onClick={() => onChange(s.code)} title={s.hint}
+                className={btn(value === s.code) + ' inline-flex items-center gap-1.5'}>
+          <span className={`w-1.5 h-1.5 rounded-full ${statusDotClass(s.code)}`} /> {s.hu} ({counts[s.code] || 0})
+        </button>
+      ))}
+    </div>
+  );
+};
+
+/* A HU→EN szótár státusz-része. Külön objektum, hogy a nagy HU_EN tábla
+   szerkesztésétől függetlenül karbantartható legyen; a HU_EN definíciója után
+   egy Object.assign fűzi hozzá. */
+const STATUS_I18N = {
+  'Piszkozat': 'Draft',
+  'Beadva': 'Submitted',
+  'Dokumentumok ellenőrizve': 'Documents checked',
+  'Bírálatra jelölve': 'Nominated',
+  'Feltételesen felvéve': 'Conditionally accepted',
+  'Felvéve': 'Admitted',
+  'Elutasítva': 'Failed',
+  'Állapot módosítása…': 'Change status…',
+  'Végállapot': 'Final state',
+  'Végállapot — nincs megengedett továbblépés': 'Final state — no forward transition allowed',
+  'Következő állapot kiválasztása': 'Pick the next state',
+  'Státusz szerinti szűrés': 'Filter by status',
+  'Dokumentum-ellenőrzésre vár': 'Awaiting document check',
+  'Gyorsszűrő: akik dokumentum-ellenőrzésre várnak': 'Quick filter: awaiting document check',
+  'Összes': 'All',
+  'Nincs a szűrésnek megfelelő jelentkező.': 'No applicant matches the filter.',
+  // C2 — a három sáv
+  'Beiratkozás utáni sávok': 'Post-enrolment tracks',
+  'A három sáv egymástól függetlenül halad; a fő státusz közben „Felvéve" marad.':
+    'The three tracks run independently; the main status stays "Admitted".',
+  'Vízum': 'Visa',
+  'Halasztás': 'Deferral',
+  'Visszatérítés': 'Refund',
+  'Vízumra vár': 'Waiting for visa',
+  'Vízum megadva': 'Visa accepted',
+  'Vízum elutasítva': 'Visa rejected',
+  'Halasztást kért': 'Deferral requested',
+  'Halasztási levél kiküldve': 'Deferral letter sent',
+  'Visszatérítést kért': 'Refund requested',
+  'Bankadat bekérve': 'Bank details requested',
+  'Bankadat megadva': 'Bank details provided',
+  'Pénzügyre továbbítva': 'Forwarded to finance',
+  'Kifizetve': 'Refund processed',
+  'Nincs folyamatban': 'Not started',
+  'Sáv indítása…': 'Start track…',
+  'Lépés…': 'Advance…',
+  '✕ Sáv törlése': '✕ Clear track',
+  'A beiratkozás utáni sávok a „Felvéve" státusztól érhetők el.': 'The post-enrolment tracks become available at "Admitted".',
+  // B2 — az „Action" oszlop
+  'Részletek megnyitása': 'Open details',
+  'A jelentkező adatlapja: státusz, szak, pénzügy és a beiratkozás utáni sávok.':
+    'The applicant record: status, programme, finances and the post-enrolment tracks.',
+  'Jelentkező adatlapja': 'Applicant record',
+  'Szak': 'Programme',
+  'Tandíj': 'Tuition fee',
+  'Ügynökség': 'Agency',
+  'Egyéni jelentkező': 'Individual applicant',
+  'Felvételi állapot': 'Admission status',
+  'A státuszt csak felvételi ügyintéző módosíthatja.': 'Only an admissions officer can change the status.',
+  'A státusz módosítása nem sikerült': 'Changing the status failed',
+  'A módosítás nem sikerült.': 'The change failed',
+  // C1 — a 'Felvételi levelek' fülön lévő gomb feltétele
+  'Csak „Bírálatra jelölve" állapotban küldhető feltételes felvételi levél.':
+    'A conditional admission letter can only be sent in the "Nominated" state.',
+  'Előbb válassz jelentkezőt.': 'Select an applicant first.',
+  // A jelentkezési lista dokumentum-oszlopának két állapota
+  'Ellenőrizve': 'Checked',
+  'Ellenőrzésre vár': 'Awaiting check',
+};
+
 /* ============ In-memory database (mirrors server.ts) ============ */
 const db = {
   users: [
@@ -107,7 +468,7 @@ const db = {
       ],
       visaApplication: { id: 'V-S0', studentId: 'S0', type: 'D-type', status: 'Approved', submissionDate: '2024.03.15', decisionDate: '2024.03.20', expiryDate: '2025.03.20', visaNumber: 'HUN123456789', consulate: 'Budapest', riskFactors: [] },
     },
-    { id: 'S1', name: 'Al-Farabi Ammar', email: 'ammar@test.com', phone: '+2348012345678', program: 'MSc Computer Science', status: 'Paid', appliedAt: '2024.03.01', tuitionFee: 5000, agentId: 'A1', country: 'Nigéria',
+    { id: 'S1', name: 'Al-Farabi Ammar', email: 'ammar@test.com', phone: '+2348012345678', program: 'MSc Computer Science', status: 'Accepted', appliedAt: '2024.03.01', tuitionFee: 5000, agentId: 'A1', country: 'Nigéria',
       visaChecklist: [
         { id: '1', label: 'Érvényes útlevél másolata', required: true, status: 'Verified' },
         { id: '2', label: 'Anyagi fedezet igazolása', required: true, status: 'Uploaded' },
@@ -144,10 +505,10 @@ const db = {
         comments: [{ id: 'C1', author: 'Dr. Kovács István', text: 'Nagyon erős elméleti tudás.', timestamp: '09:15' }],
         videos: [{ id: 'V1', question: 'Miért választotta ezt a szakot?', videoUrl: '#', duration: '02:10' }],
       } },
-    { id: 'S3', name: 'Elena Rodriguez', email: 'elena@test.com', program: 'MA Visual Arts', status: 'Missing Info', appliedAt: '2024.03.10', tuitionFee: 6000, agentId: 'A2', country: 'Brazília', visaChecklist: [{ id: '1', label: 'Érvényes útlevél másolata', required: true, status: 'Uploaded' }] },
+    { id: 'S3', name: 'Elena Rodriguez', email: 'elena@test.com', program: 'MA Visual Arts', status: 'Submitted', appliedAt: '2024.03.10', tuitionFee: 6000, agentId: 'A2', country: 'Brazília', visaChecklist: [{ id: '1', label: 'Érvényes útlevél másolata', required: true, status: 'Uploaded' }] },
     { id: 'S4', name: 'Lars Svensson', email: 'lars@test.com', program: 'MSc Computer Science', status: 'Accepted', appliedAt: '2024.02.20', tuitionFee: 5000, agentId: 'A1', country: 'Svédország', visaChecklist: [] },
     { id: 'S5', name: 'Yuki Tanaka', email: 'yuki@test.com', program: 'BSc Engineering', status: 'Draft', appliedAt: '2024.03.21', tuitionFee: 5500, agentId: 'A3', country: 'Japán', visaChecklist: [] },
-    { id: 'S6', name: 'Ahmed Hassan', email: 'ahmed@test.com', program: 'MSc Data Science', status: 'Paid', appliedAt: '2024.01.15', tuitionFee: 5200, agentId: 'A1', country: 'Egyiptom',
+    { id: 'S6', name: 'Ahmed Hassan', email: 'ahmed@test.com', program: 'MSc Data Science', status: 'Accepted', appliedAt: '2024.01.15', tuitionFee: 5200, agentId: 'A1', country: 'Egyiptom',
       visaChecklist: [
         { id: '1', label: 'Érvényes útlevél másolata', required: true, status: 'Verified' },
         { id: '2', label: 'Anyagi fedezet igazolása', required: true, status: 'Verified' },
@@ -155,8 +516,8 @@ const db = {
       visaApplication: { id: 'V-S6', studentId: 'S6', type: 'Residence Permit', status: 'Submitted', submissionDate: '2024.03.01', consulate: 'Cairo', riskFactors: [] } },
     { id: 'S7', name: 'Sofia Bianchi', email: 'sofia@test.com', program: 'MA Architecture', status: 'Submitted', appliedAt: '2024.03.19', tuitionFee: 5800, agentId: 'A2' },
     { id: 'S8', name: 'Igor Petrov', email: 'igor@test.com', program: 'BSc Physics', status: 'Accepted', appliedAt: '2024.02.28', tuitionFee: 4800, agentId: 'A3' },
-    { id: 'S9', name: 'Maria Garcia', email: 'maria@test.com', program: 'LLM International Law', status: 'Missing Info', appliedAt: '2024.03.05', tuitionFee: 6500, agentId: 'A2' },
-    { id: 'S10', name: 'John Smith', email: 'john@test.com', program: 'BSc Business Admin', status: 'Paid', appliedAt: '2023.12.10', tuitionFee: 4500, agentId: 'A1' },
+    { id: 'S9', name: 'Maria Garcia', email: 'maria@test.com', program: 'LLM International Law', status: 'Submitted', appliedAt: '2024.03.05', tuitionFee: 6500, agentId: 'A2' },
+    { id: 'S10', name: 'John Smith', email: 'john@test.com', program: 'BSc Business Admin', status: 'Accepted', appliedAt: '2023.12.10', tuitionFee: 4500, agentId: 'A1' },
   ],
   payments: [
     { id: 'P1', studentName: 'Al-Farabi Ammar', type: 'Tuition', amount: 5000, currency: 'EUR', status: 'Paid', date: '2024.03.20', method: 'Bank Transfer' },
@@ -281,14 +642,26 @@ const api = {
 
   updateStudent: (id, data) => sbUpdate('students', id, data),
   addStudent: (student) => sbInsert('students', { ...student, id: uid('S'), appliedAt: todayStr() }),
-  sendConditionalAdmission: (id) => sbUpdate('students', id, { status: 'Accepted', paymentLink: '/payment/' + id }),
+  // C1: a feltételes felvételi levél a 'Conditionally accepted' állapotot
+  // állítja be, nem az 'Accepted'-et — az a feltétel teljesülése utáni lépés.
+  sendConditionalAdmission: (id) => sbUpdate('students', id, { status: 'Conditionally accepted', paymentLink: '/payment/' + id }),
+  // C1: egy lépés a fő láncon. A megengedettséget a szerver
+  // (25_status_model.sql) is ellenőrzi, a felület csak a megengedett
+  // átmeneteket kínálja fel (StatusSelect).
+  setStudentStatus: (id, status) => sbUpdate('students', id, { status }),
+  // C2: a három beiratkozás utáni sáv egymástól függetlenül állítható.
+  setStudentTrack: (id, field, value) => sbUpdate('students', id, { [field]: value }),
   addAgency: (agency) => sbInsert('agencies', { ...agency, id: uid('AG') }),
   updateAgency: (id, data) => sbUpdate('agencies', id, data),
   bookInterviewSlot: (slotId, studentId, studentName) => sbUpdate('interviewSlots', slotId, { status: 'Booked', studentId, studentName, teamsMeetingUrl: 'https://teams.microsoft.com/l/meetup-join/mock-meeting-id' }),
   processPayment: async ({ studentId, amount, method, type }) => {
     const studentName = await studentNameById(studentId);
     const np = await sbInsert('payments', { id: uid('P'), studentName, type: type || 'Tuition', amount, currency: 'EUR', status: 'Paid', date: todayStr(), method: method || 'Stripe' });
-    if (studentId) await sb.from('students').update({ status: 'Paid' }).eq('id', studentId);
+    // C1: a fizetés a payments táblában él, a students."status" mezőt NEM írja
+    // át. Korábban itt egy status:'Paid' állt, ami FELÜLÍRTA a felvételi
+    // döntést — egy 'Nominated' jelentkezőből a díj beérkezésétől 'Paid' lett,
+    // és a bírálati állapot nyomtalanul elveszett. A 25_status_model.sql
+    // állapotgépe ezt az írást amúgy is elutasítaná.
     return np;
   },
   submitBankTransfer: async ({ studentId, amount, type, proofName }) => {
@@ -297,13 +670,13 @@ const api = {
   },
   verifyPayment: async (id) => {
     const p = await sbUpdate('payments', id, { status: 'Paid' });
-    if (p && p.studentName) await sb.from('students').update({ status: 'Paid' }).eq('name', p.studentName);
+    // C1: lásd processPayment — a students."status" nem pénzügyi mező.
     return p;
   },
   updateVisaChecklist: (id, checklist) => sbUpdate('students', id, { visaChecklist: checklist }),
   addPayment: async (payment) => {
     const np = await sbInsert('payments', { ...payment, id: uid('P'), date: todayStr() });
-    if (np.type === 'Tuition' && np.status === 'Paid' && np.studentName) await sb.from('students').update({ status: 'Paid' }).eq('name', np.studentName);
+    // C1: lásd processPayment — a students."status" nem pénzügyi mező.
     return np;
   },
   updateInvoice: (id, data) => sbUpdate('invoices', id, data),
@@ -636,23 +1009,26 @@ const VideoInterviewSystem: React.FC<VideoInterviewSystemProps> = ({ onComplete 
         <ICONS.Video size={40} />
       </div>
       <div>
-        <h3 className="text-2xl font-bold text-slate-900">Videó Interjú</h3>
+        <h3 className="text-2xl font-bold text-slate-900">AI interjú-gyakorlás</h3>
         <p className="text-slate-500 mt-2 max-w-md">
-          Ebben a szakaszban 4 rövid kérdésre kell válaszolnia videón keresztül. 
-          Kérjük, győződjön meg róla, hogy jól megvilágított helyen van és a mikrofonja megfelelően működik.
+          Felkészülési gyakorlat: 4 tipikus felvételi kérdésre válaszolhatsz videón.
+          Kérjük, győződj meg róla, hogy jól megvilágított helyen vagy és a mikrofonod megfelelően működik.
         </p>
       </div>
       <div className="bg-amber-50 border border-amber-100 p-4 rounded-xl flex items-start gap-3 text-left max-w-md">
         <ICONS.AlertCircle className="text-amber-500 shrink-0 mt-0.5" size={18} />
         <p className="text-xs text-amber-800">
-          Minden kérdésre meghatározott idő áll rendelkezésre. A felvétel automatikusan leáll, ha az idő lejár.
+          <span className="font-bold">Ez gyakorlás, nem a valódi felvételi interjú.</span> A felvétel nálad marad,
+          nem küldjük be a felvételi bizottságnak, és nem számít bele a bírálatba. A valódi interjúra az
+          Interjúk fülön tudsz időpontot foglalni. Minden kérdésre meghatározott idő áll rendelkezésre — a
+          felvétel automatikusan leáll, ha az idő lejár.
         </p>
       </div>
       <button 
         onClick={() => setCurrentStep('recording')}
         className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 flex items-center gap-2"
       >
-        Interjú megkezdése <ICONS.ArrowRight size={18} />
+        Gyakorlás megkezdése <ICONS.ArrowRight size={18} />
       </button>
     </div>
   );
@@ -734,7 +1110,7 @@ const VideoInterviewSystem: React.FC<VideoInterviewSystemProps> = ({ onComplete 
           onClick={handleSaveAndNext}
           className="flex-1 bg-indigo-600 text-white py-4 rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 flex items-center justify-center gap-2"
         >
-          {currentQuestionIndex < questions.length - 1 ? 'Következő kérdés' : 'Interjú befejezése'} <ICONS.ArrowRight size={18} />
+          {currentQuestionIndex < questions.length - 1 ? 'Következő kérdés' : 'Gyakorlás befejezése'} <ICONS.ArrowRight size={18} />
         </button>
       </div>
     </div>
@@ -746,9 +1122,13 @@ const VideoInterviewSystem: React.FC<VideoInterviewSystemProps> = ({ onComplete 
         <ICONS.CheckCircle size={40} />
       </div>
       <div>
-        <h3 className="text-2xl font-bold text-slate-900">Gratulálunk!</h3>
+        <h3 className="text-2xl font-bold text-slate-900">Készen vagy a gyakorlással!</h3>
         <p className="text-slate-500 mt-2 max-w-md">
-          Sikeresen befejezte a videó interjút. Válaszait elmentettük és a felvételi bizottság hamarosan értékeli őket.
+          Végigmentél mind a 4 gyakorlókérdésen. A felvételeidet nem küldtük el senkinek — a gyakorlás
+          eredménye nem számít bele a felvételi bírálatba.
+        </p>
+        <p className="text-sm font-bold text-slate-700 mt-3 max-w-md">
+          A következő lépés: foglalj időpontot a valódi felvételi interjúra az Interjúk fülön.
         </p>
       </div>
       <div className="grid grid-cols-2 gap-4 w-full max-w-md">
@@ -769,6 +1149,11 @@ const VideoInterviewSystem: React.FC<VideoInterviewSystemProps> = ({ onComplete 
 
   return (
     <div className="max-w-3xl mx-auto bg-white rounded-[40px] shadow-xl border border-slate-100 overflow-hidden">
+      {/* Végig látható szalag: a felhasználó egy pillanatra se hihesse, hogy ez
+          a valódi felvételi interjú. */}
+      <div className="bg-slate-900 text-white px-8 py-3 flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest">
+        <ICONS.Sparkles size={14} /> Gyakorlási mód — nem a valódi felvételi interjú
+      </div>
       <div className="p-8 md:p-12">
         <AnimatePresence mode="wait">
           <motion.div
@@ -992,9 +1377,14 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
     }
   };
   
-  const calculateCommission = (studentList: Student[], isPaidOnly: boolean) => {
+  // C1: a 'Paid' megszűnt fő státuszként (a fizetés a payments táblában él),
+  // ezért a jutalék alapja a felvételi állapot: ESEDÉKES a véglegesen
+  // felvetteknél ('Accepted'), FÜGGŐ a még folyamatban lévőknél.
+  const calculateCommission = (studentList: Student[], isSettledOnly: boolean) => {
     return studentList
-      .filter(s => isPaidOnly ? s.status === 'Paid' : (s.status === 'Accepted' || s.status === 'Submitted'))
+      .filter(s => isSettledOnly
+        ? s.status === 'Accepted'
+        : (s.status === 'Conditionally accepted' || s.status === 'Nominated' || s.status === 'Documents checked' || s.status === 'Submitted'))
       .reduce((acc, s) => {
         const agency = agencies.find(a => a.id === s.agencyId);
         const rate = agency ? agency.commissionRate : 0;
@@ -1004,7 +1394,9 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
 
   const stats = {
     totalStudents: students.length,
-    pendingApps: students.filter(s => s.status === 'Submitted' || s.status === 'Missing Info').length,
+    // C1: a döntés előtt álló jelentkezések (a 'Missing Info' beolvadt a
+    // 'Submitted'-be, a hiányzó dokumentum a dokumentumlista ténye).
+    pendingApps: students.filter(s => s.status === 'Submitted' || s.status === 'Documents checked').length,
     commissionTotal: calculateCommission(students, true),
   };
 
@@ -1020,6 +1412,12 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
   ];
 
   const [selectedAgencyFilter, setSelectedAgencyFilter] = useState<string>('All');
+  // B1: státusz szerinti szűrés — 'All' vagy egy kód a STUDENT_STATUSES-ból.
+  const [statusFilter, setStatusFilter] = useState<string>('All');
+  // B2: a listasor „Részletek" gombja ezt az adatlapot nyitja meg.
+  const [detailStudent, setDetailStudent] = useState<Student | null>(null);
+  const [trackBusy, setTrackBusy] = useState(false);
+  const [trackError, setTrackError] = useState('');
 
   const filteredStudents = students.filter(s => {
     const matchesSearch = s.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
@@ -1027,8 +1425,27 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
     const matchesAgency = selectedAgencyFilter === 'All' || 
                          (selectedAgencyFilter === 'Individual' && !s.agencyId) ||
                          s.agencyId === selectedAgencyFilter;
-    return matchesSearch && matchesAgency;
+    const matchesStatus = statusFilter === 'All' || s.status === statusFilter;
+    return matchesSearch && matchesAgency && matchesStatus;
   });
+
+  // C1/C2: a fő státusz és a három sáv írása. Az ügynök csak néz — a szerver
+  // (11 students_protect_identity + 25 students_protect_tracks) nem is
+  // engedné neki, itt a felület is elrejti a vezérlőket.
+  const canEditStatus = ['SUPERADMIN', 'ADMIN', 'ADMISSIONS'].indexOf(user.role) >= 0;
+  const applyStudentPatch = async (id: string, patch) => {
+    setTrackBusy(true); setTrackError('');
+    try {
+      const updated = await api.updateStudent(id, patch);
+      setStudents(prev => prev.map(s => s.id === id ? { ...s, ...updated } : s));
+      setDetailStudent(cur => (cur && cur.id === id) ? { ...cur, ...updated } : cur);
+    } catch (e) {
+      // Az állapotgép beszédes hibaüzenetet ad — mutassuk meg, ne nyeljük el.
+      setTrackError((e && (e.message || e.details)) || 'A módosítás nem sikerült.');
+    } finally {
+      setTrackBusy(false);
+    }
+  };
 
   const renderOverview = () => (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -1082,12 +1499,8 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
                   </div>
                 </div>
                 <div className="text-right">
-                  <span className={`px-2 py-1 rounded-md text-[10px] font-bold uppercase ${
-                    student.status === 'Paid' ? 'bg-emerald-50 text-emerald-600' : 
-                    student.status === 'Accepted' ? 'bg-blue-50 text-blue-600' : 
-                    student.status === 'Missing Info' ? 'bg-amber-50 text-amber-600' : 'bg-slate-100 text-slate-500'
-                  }`}>
-                    {student.status}
+                  <span className={`px-2 py-1 rounded-md text-[10px] font-bold uppercase ${statusBadgeClass(student.status)}`}>
+                    {statusLabel(student.status)}
                   </span>
                 </div>
               </div>
@@ -1124,7 +1537,7 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
       <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
         <div className="p-6 border-b border-slate-50 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
-            <h3 className="font-bold text-slate-800 text-lg">Diák Jelentkezések ({filteredStudents.length})</h3>
+            <h3 className="font-bold text-slate-800 text-lg">Diákjelentkezések ({filteredStudents.length})</h3>
             {!isAgent && (
               <select 
                 value={selectedAgencyFilter}
@@ -1150,15 +1563,21 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
             />
           </div>
         </div>
+        {/* B1: státusz szerinti szűrés — a darabszámok a teljes (nem szűrt)
+            listából jönnek, hogy egy pillantással látszódjon az eloszlás. */}
+        <div className="px-6 py-4 border-b border-slate-50 bg-slate-50/40">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">Státusz szerinti szűrés</div>
+          <StatusFilterBar students={students} value={statusFilter} onChange={setStatusFilter} />
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left">
             <thead className="bg-slate-50 text-slate-400 text-[10px] font-bold uppercase tracking-wider">
               <tr>
                 <th className="px-6 py-4">Diák adatai</th>
-                <th className="px-6 py-4">Program</th>
+                <th className="px-6 py-4">Képzés</th>
                 <th className="px-6 py-4">Ügynökség</th>
                 <th className="px-6 py-4">Státusz</th>
-                <th className="px-6 py-4 text-right">Művelet</th>
+                <th className="px-6 py-4 text-right">Részletek</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
@@ -1193,31 +1612,107 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
                     )}
                   </td>
                   <td className="px-6 py-4">
-                    <span className={`px-2 py-1 rounded-md text-[10px] font-bold uppercase ${
-                      student.status === 'Paid' ? 'bg-emerald-50 text-emerald-600' : 
-                      student.status === 'Accepted' ? 'bg-blue-50 text-blue-600' : 
-                      student.status === 'Missing Info' ? 'bg-amber-50 text-amber-600' : 
-                      student.status === 'Submitted' ? 'bg-indigo-50 text-indigo-600' : 'bg-slate-100 text-slate-500'
-                    }`}>
-                      {student.status}
-                    </span>
+                    <div className="flex flex-col items-start gap-1">
+                      <StatusBadge code={student.status} showHint />
+                      {/* C2: kis jelvény, ha valamelyik beiratkozás utáni sáv aktív */}
+                      <TrackBadges student={student} />
+                    </div>
                   </td>
+                  {/* B2: a fejléc korábban „Művelet" volt, alatta egy magában
+                      álló szem ikon — a tesztelők nem tudták, mit csinál. Most
+                      kiírjuk, hogy mit nyit meg, és tényleg meg is nyitja. */}
                   <td className="px-6 py-4 text-right">
-                    <button className="p-2 text-slate-400 hover:text-indigo-600 bg-white border border-slate-100 rounded-lg shadow-sm">
-                      <ICONS.Eye size={16} />
+                    <button
+                      onClick={() => { setDetailStudent(student); setTrackError(''); }}
+                      title="A jelentkező adatlapja: státusz, szak, pénzügy és a beiratkozás utáni sávok."
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold text-slate-600 hover:text-indigo-600 bg-white border border-slate-200 rounded-lg shadow-sm hover:border-indigo-200 transition-colors">
+                      <ICONS.Eye size={14} /> Részletek megnyitása
                     </button>
                   </td>
                 </tr>
               ))}
+              {!filteredStudents.length && (
+                <tr><td colSpan={5} className="px-6 py-10 text-center text-sm text-slate-400">Nincs a szűrésnek megfelelő jelentkező.</td></tr>
+              )}
             </tbody>
           </table>
         </div>
       </div>
+
+      {/* B2 + C1 + C2: a „Részletek" gomb adatlapja. Itt látszik a fő státusz,
+          innen léptethető (csak felvételi ügyintézőnek, csak megengedett
+          átmenetre), és 'Felvéve' állapotban itt jelenik meg a három
+          beiratkozás utáni sáv. */}
+      {detailStudent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm" onClick={() => setDetailStudent(null)}>
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="p-6 border-b border-slate-100 flex items-start justify-between sticky top-0 bg-white z-10">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Jelentkező adatlapja</p>
+                <h3 className="text-lg font-black text-slate-800">{detailStudent.name}</h3>
+                <p className="text-xs text-slate-400">{detailStudent.email}</p>
+              </div>
+              <button onClick={() => setDetailStudent(null)} className="text-slate-400 hover:text-slate-700"><ICONS.X size={22} /></button>
+            </div>
+            <div className="p-6 space-y-6">
+              <div className="grid sm:grid-cols-3 gap-3 text-sm">
+                <div><div className="text-[10px] uppercase font-bold text-slate-400">Szak</div><div className="font-bold text-slate-700">{detailStudent.program || '—'}</div></div>
+                <div><div className="text-[10px] uppercase font-bold text-slate-400">Tandíj</div><div className="font-bold text-slate-700">{detailStudent.tuitionFee ? detailStudent.tuitionFee + ' EUR' : '—'}</div></div>
+                <div><div className="text-[10px] uppercase font-bold text-slate-400">Ügynökség</div><div className="font-bold text-slate-700">{(agencies.find(a => a.id === detailStudent.agencyId) || {}).name || 'Egyéni jelentkező'}</div></div>
+              </div>
+
+              <div>
+                <div className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-3">Felvételi állapot</div>
+                {/* C1: a teljes lánc egy pillantásra, a mai állapot kiemelve. */}
+                <div className="flex flex-wrap gap-1.5 mb-3">
+                  {STUDENT_STATUSES.map(st => {
+                    const cur = st.code === detailStudent.status;
+                    const done = statusOrder(detailStudent.status) > statusOrder(st.code)
+                      && st.code !== 'Failed'
+                      // 'Failed' esetén csak a biztosan megtett közös szakaszt
+                      // jelöljük késznek (a bírálatig): az elágazás utáni
+                      // lépéseket ez a jelentkező nem járta be.
+                      && !(detailStudent.status === 'Failed' && statusOrder(st.code) > statusOrder('Nominated'));
+                    return (
+                      <span key={st.code} title={st.hint}
+                            className={`text-[10px] font-bold px-2 py-1 rounded-full inline-flex items-center gap-1 ${cur ? statusBadgeClass(st.code) + ' ring-2 ring-offset-1 ring-slate-300' : done ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
+                        {done && <ICONS.Check size={10} />}{st.hu}
+                      </span>
+                    );
+                  })}
+                </div>
+                <div className="flex items-center gap-3">
+                  <StatusBadge code={detailStudent.status} size="lg" />
+                  {canEditStatus
+                    ? <StatusSelect value={detailStudent.status} disabled={trackBusy} onPick={(code) => applyStudentPatch(detailStudent.id, { status: code })} />
+                    : <span className="text-[11px] text-slate-400">A státuszt csak felvételi ügyintéző módosíthatja.</span>}
+                </div>
+              </div>
+
+              <div className="border-t border-slate-100 pt-5">
+                <div className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-1">Beiratkozás utáni sávok</div>
+                <p className="text-[11px] text-slate-400 mb-3">A három sáv egymástól függetlenül halad; a fő státusz közben „Felvéve" marad.</p>
+                {detailStudent.status === 'Accepted'
+                  ? <TrackControls student={detailStudent} disabled={trackBusy || !canEditStatus}
+                                   onChange={(field, value) => applyStudentPatch(detailStudent.id, { [field]: value })} />
+                  : <div className="rounded-xl bg-slate-50 border border-slate-100 p-4 text-xs text-slate-400">A beiratkozás utáni sávok a „Felvéve" státusztól érhetők el.</div>}
+              </div>
+
+              {trackError && (
+                <div className="rounded-xl bg-red-50 border border-red-200 p-3 text-xs text-red-700 flex items-start gap-2">
+                  <ICONS.AlertCircle size={15} className="shrink-0 mt-0.5" /><span>{trackError}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 
   const renderCommission = () => {
-    const paidStudents = students.filter(s => s.status === 'Paid');
+    // C1: a jutalék alapja a véglegesen felvett hallgató (lásd calculateCommission).
+    const paidStudents = students.filter(s => s.status === 'Accepted');
     const totalCalculatedCommission = paidStudents.reduce((acc, s) => {
       const agency = agencies.find(a => a.id === s.agencyId);
       const rate = agency ? agency.commissionRate : 0;
@@ -1231,7 +1726,7 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
             <ICONS.Wallet size={180} />
           </div>
           <div className="relative z-10">
-            <p className="text-indigo-200 text-sm font-medium uppercase tracking-widest mb-2">Commission Wallet (Kalkulált)</p>
+            <p className="text-indigo-200 text-sm font-medium uppercase tracking-widest mb-2">Jutalék egyenleg (kalkulált)</p>
             <h2 className="text-5xl font-bold mb-8">€{totalCalculatedCommission.toLocaleString()}</h2>
             <div className="grid grid-cols-2 gap-8 max-w-md">
               <div>
@@ -1282,7 +1777,7 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
                     <td className="px-6 py-4 text-slate-600">{rate}%</td>
                     <td className="px-6 py-4 font-bold text-slate-800">€{amount.toLocaleString()}</td>
                     <td className="px-6 py-4 text-right">
-                      <span className="px-2 py-1 bg-emerald-50 text-emerald-600 rounded text-[10px] font-bold uppercase">Ready</span>
+                      <span className="px-2 py-1 bg-emerald-50 text-emerald-600 rounded text-[10px] font-bold uppercase">Kész</span>
                     </td>
                   </tr>
                 );
@@ -1339,7 +1834,7 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
               />
             </div>
             <div>
-              <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Email</label>
+              <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">E-mail</label>
               <input 
                 type="email" 
                 value={newAgency.email}
@@ -1401,7 +1896,7 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Email</label>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">E-mail</label>
                   <input 
                     type="email" 
                     value={editAgencyData.email}
@@ -1524,7 +2019,7 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
           onClick={() => setActiveTab('commission')}
           className={`px-6 py-3 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'commission' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
         >
-          Commission Wallet
+          Jutalék egyenleg
         </button>
         {!isAgent && (
           <>
@@ -1546,7 +2041,7 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
           onClick={() => setActiveTab('resources')}
           className={`px-6 py-3 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'resources' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
         >
-          Resource Library
+          Anyagtár
         </button>
       </div>
 
@@ -1567,7 +2062,7 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {agencies.map(agency => {
                     const agencyStudents = students.filter(s => s.agencyId === agency.id);
-                    const paidCount = agencyStudents.filter(s => s.status === 'Paid').length;
+                    const paidCount = agencyStudents.filter(s => s.status === 'Accepted').length;
                     const conversionRate = agencyStudents.length > 0 ? (paidCount / agencyStudents.length * 100).toFixed(1) : 0;
                     
                     return (
@@ -1720,6 +2215,28 @@ const AdmissionsCore = ({ user }) => {
       setStudents(students.map(s => s.id === studentId ? updated : s));
     } catch (error) {
       console.error('Failed to send conditional admission:', error);
+      setStatusError((error && (error.message || error.details)) || 'A státusz módosítása nem sikerült');
+    }
+  };
+
+  // B1: státusz szerinti szűrés a jelentkezési listán.
+  const [statusFilter, setStatusFilter] = useState<string>('All');
+  const [statusError, setStatusError] = useState('');
+  const [statusBusy, setStatusBusy] = useState(false);
+  const canEditStatus = !user || ['SUPERADMIN', 'ADMIN', 'ADMISSIONS'].indexOf(user.role) >= 0;
+
+  // C1/C2: egy lépés a fő láncon vagy egy sávon. A megengedettséget a
+  // 25_status_model.sql állapotgépe is ellenőrzi; ha mégis elbukik, a szerver
+  // beszédes hibáját mutatjuk meg — némán nem nyeljük el.
+  const patchStudent = async (id: string, patch) => {
+    setStatusBusy(true); setStatusError('');
+    try {
+      const updated = await api.updateStudent(id, patch);
+      setStudents(prev => prev.map(s => s.id === id ? { ...s, ...updated } : s));
+    } catch (e) {
+      setStatusError((e && (e.message || e.details)) || 'A státusz módosítása nem sikerült');
+    } finally {
+      setStatusBusy(false);
     }
   };
 
@@ -1836,7 +2353,7 @@ const AdmissionsCore = ({ user }) => {
                       {up ? (<div className="flex items-center gap-1.5 flex-wrap">
                         <button onClick={() => toggleVerifyDoc(p, d.id)} className={'px-2.5 py-1.5 rounded-lg text-[11px] font-bold inline-flex items-center gap-1 ' + (dv ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'bg-emerald-600 text-white hover:bg-emerald-700')}>{dv ? <><Lucide.X size={13} /> Visszavonás</> : <><Lucide.ShieldCheck size={13} /> Jóváhagyás</>}</button>
                         <button onClick={() => setPreviewDoc({ d, fileName: docs[d.id].fileName, p })} className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-slate-100 text-slate-600 hover:bg-slate-200 inline-flex items-center gap-1"><Lucide.Eye size={13} /> Előnézet</button>
-                        <button onClick={() => runAiCheck(d, p)} className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-primary/10 text-primary hover:bg-primary/20 inline-flex items-center gap-1"><Lucide.ScanSearch size={13} /> AI Check</button>
+                        <button onClick={() => runAiCheck(d, p)} className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-primary/10 text-primary hover:bg-primary/20 inline-flex items-center gap-1"><Lucide.ScanSearch size={13} /> AI ellenőrzés</button>
                         <button onClick={() => downloadDoc(d, docs[d.id].fileName, p)} className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-slate-100 text-slate-600 hover:bg-slate-200 inline-flex items-center gap-1"><Lucide.Download size={13} /> Letöltés</button>
                         <button onClick={() => toggleAttach(d, docs[d.id].fileName)} className={'px-2.5 py-1.5 rounded-lg text-[11px] font-bold inline-flex items-center gap-1 ' + (attached ? 'bg-primary text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200')}><Lucide.Paperclip size={13} /> {attached ? 'Hivatkozva' : 'Hivatkozás'}</button>
                       </div>) : <span className="text-[10px] font-bold text-red-500">hiányzik</span>}
@@ -1863,7 +2380,7 @@ const AdmissionsCore = ({ user }) => {
                 </div>
               </div>
               {(ex.name || ex.passportNumber) && (
-                <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6"><div className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-3">Kinyert adatok (útlevél)</div><div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm"><div><span className="text-slate-400 text-xs">Név</span><div className="font-bold text-slate-700">{ex.name || '—'}</div></div><div><span className="text-slate-400 text-xs">Útlevélszám</span><div className="font-bold text-slate-700">{ex.passportNumber || '—'}</div></div><div><span className="text-slate-400 text-xs">Ország</span><div className="font-bold text-slate-700">{ex.country || '—'}</div></div><div><span className="text-slate-400 text-xs">Szül. dátum</span><div className="font-bold text-slate-700">{ex.birthDate || '—'}</div></div></div></div>
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6"><div className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-3">Kinyert adatok (útlevél)</div><div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 text-sm"><div><span className="text-slate-400 text-xs">Név</span><div className="font-bold text-slate-700">{ex.name || '—'}</div></div><div><span className="text-slate-400 text-xs">Útlevélszám</span><div className="font-bold text-slate-700">{ex.passportNumber || '—'}</div></div><div><span className="text-slate-400 text-xs">Ország</span><div className="font-bold text-slate-700">{ex.country || '—'}</div></div><div><span className="text-slate-400 text-xs">Szül. dátum</span><div className="font-bold text-slate-700">{ex.birthDate || '—'}</div></div><div><span className="text-slate-400 text-xs">Neme</span><div className="font-bold text-slate-700">{genderLabel(ex.gender) || '—'}</div></div></div></div>
               )}
             </div>
             <div className="space-y-6">
@@ -1895,7 +2412,7 @@ const AdmissionsCore = ({ user }) => {
                 }).filter(Boolean);
                 return (
                   <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
-                    <div className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-3 flex items-center gap-2"><Lucide.Fingerprint size={14} className="text-primary" /> Duplicate Finder</div>
+                    <div className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-3 flex items-center gap-2"><Lucide.Fingerprint size={14} className="text-primary" /> Duplikátum-kereső</div>
                     {matches.length ? (
                       <div className="space-y-2">
                         <div className="flex items-center gap-2 text-red-600 font-bold text-sm"><Lucide.AlertTriangle size={16} /> {matches.length} lehetséges egyezés</div>
@@ -1945,7 +2462,7 @@ const AdmissionsCore = ({ user }) => {
                 <div className="p-4 border-b border-slate-100 flex items-center justify-between"><div className="font-bold text-slate-800 text-sm flex items-center gap-2"><previewDoc.d.Icon size={16} className="text-primary" /> {previewDoc.d.label}</div><button onClick={() => setPreviewDoc(null)} className="text-slate-400 hover:text-slate-700"><Lucide.X size={18} /></button></div>
                 <div className="p-4 bg-slate-50">
                   {(() => { const e = (previewDoc.p.data && previewDoc.p.data.docs && previewDoc.p.data.docs[previewDoc.d.id]) || {}; return (e.path || e.dataUrl) ? <DocViewer entry={e} fileName={previewDoc.fileName} /> : (
-                    <div className="bg-white border border-slate-200 rounded-xl mx-auto max-h-[55vh] aspect-[3/4] w-full max-w-xs flex flex-col items-center justify-center text-center p-6"><previewDoc.d.Icon size={48} className="text-slate-300 mb-4" /><div className="font-mono text-xs text-slate-400">{previewDoc.fileName}</div><div className="font-bold text-slate-700 mt-2">{previewDoc.d.label}</div>{previewDoc.d.id === 'passport' && previewDoc.p.data && previewDoc.p.data.extracted && (<div className="mt-4 text-xs text-slate-500 space-y-0.5"><div>{previewDoc.p.data.extracted.name}</div><div>{previewDoc.p.data.extracted.passportNumber}</div><div>{previewDoc.p.data.extracted.country}</div></div>)}<div className="mt-4 text-[10px] text-slate-300">Nincs csatolt fájl</div></div>
+                    <div className="bg-white border border-slate-200 rounded-xl mx-auto max-h-[55vh] aspect-[3/4] w-full max-w-xs flex flex-col items-center justify-center text-center p-6"><previewDoc.d.Icon size={48} className="text-slate-300 mb-4" /><div className="font-mono text-xs text-slate-400">{previewDoc.fileName}</div><div className="font-bold text-slate-700 mt-2">{previewDoc.d.label}</div>{previewDoc.d.id === 'passport' && previewDoc.p.data && previewDoc.p.data.extracted && (<div className="mt-4 text-xs text-slate-500 space-y-0.5"><div>{previewDoc.p.data.extracted.name}</div><div>{previewDoc.p.data.extracted.passportNumber}</div><div>{previewDoc.p.data.extracted.country}</div><div>{genderLabel(previewDoc.p.data.extracted.gender)}</div></div>)}<div className="mt-4 text-[10px] text-slate-300">Nincs csatolt fájl</div></div>
                   ); })()}
                 </div>
                 <div className="p-4 border-t border-slate-100 flex justify-end"><button onClick={() => downloadDoc(previewDoc.d, previewDoc.fileName, previewDoc.p)} className="bg-primary text-white px-4 py-2 rounded-lg text-sm font-bold inline-flex items-center gap-1.5"><Lucide.Download size={14} /> Letöltés</button></div>
@@ -2023,7 +2540,9 @@ const AdmissionsCore = ({ user }) => {
                 <th className="px-6 py-4">Folyamat</th>
                 <th className="px-6 py-4">Hiányzó dokumentumok</th>
                 <th className="px-6 py-4">Állapot</th>
-                <th className="px-6 py-4 text-right">Művelet</th>
+                {/* B2: a fejléc korábban „Művelet" volt — a cellában viszont
+                    egy „Részletek" gomb áll, tehát a fejléc is ezt mondja. */}
+                <th className="px-6 py-4 text-right">Részletek</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
@@ -2099,6 +2618,7 @@ const AdmissionsCore = ({ user }) => {
                       <div><span className="text-slate-400 text-xs">Útlevélszám</span><div className="font-bold text-slate-700">{ex.passportNumber || '—'}</div></div>
                       <div><span className="text-slate-400 text-xs">Ország</span><div className="font-bold text-slate-700">{ex.country || '—'}</div></div>
                       <div><span className="text-slate-400 text-xs">Szül. dátum</span><div className="font-bold text-slate-700">{ex.birthDate || '—'}</div></div>
+                      <div><span className="text-slate-400 text-xs">Neme</span><div className="font-bold text-slate-700">{genderLabel(ex.gender) || '—'}</div></div>
                     </div>
                   </div>
                 )}
@@ -2130,11 +2650,24 @@ const AdmissionsCore = ({ user }) => {
         <div className="p-6 border-b border-slate-50 flex justify-between items-center">
           <h3 className="font-bold text-slate-800 text-lg">Aktív Jelentkezések (Multi-Program)</h3>
           <div className="flex gap-2">
-            <span className="px-3 py-1 bg-amber-50 text-amber-600 rounded-full text-xs font-bold flex items-center gap-1">
-              <ICONS.AlertCircle size={14} /> {isLoading ? '…' : students.filter(s => s.status === 'Missing Info').length} Hiánypótlás szükséges
+            {/* C1: a régi „Hiánypótlás szükséges" a megszűnt 'Missing Info'
+                státuszt számolta. A napi munka valódi bemenete az, hogy ki vár
+                dokumentum-ellenőrzésre (= 'Submitted'). */}
+            <span className="px-3 py-1 bg-indigo-50 text-indigo-600 rounded-full text-xs font-bold flex items-center gap-1">
+              <ICONS.Inbox size={14} /> {isLoading ? '…' : students.filter(s => s.status === STATUS_AWAITING_DOC_CHECK).length} Dokumentum-ellenőrzésre vár
             </span>
           </div>
         </div>
+        {/* B1: státusz szerinti szűrés */}
+        <div className="px-6 py-4 border-b border-slate-50 bg-slate-50/40">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">Státusz szerinti szűrés</div>
+          <StatusFilterBar students={students} value={statusFilter} onChange={setStatusFilter} />
+        </div>
+        {statusError && (
+          <div className="mx-6 mt-4 rounded-xl bg-red-50 border border-red-200 p-3 text-xs text-red-700 flex items-start gap-2">
+            <ICONS.AlertCircle size={15} className="shrink-0 mt-0.5" /><span>{statusError}</span>
+          </div>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full text-left">
             <thead className="bg-slate-50 text-slate-400 text-[10px] font-bold uppercase tracking-wider">
@@ -2143,13 +2676,18 @@ const AdmissionsCore = ({ user }) => {
                 <th className="px-6 py-4">Választott Szakok</th>
                 <th className="px-6 py-4">Dokumentumok</th>
                 <th className="px-6 py-4">Ajánlások</th>
-                <th className="px-6 py-4">AI Státusz</th>
+                {/* C1: itt korábban egy „AI Státusz" oszlop volt, ami valójában
+                    a felvételi státuszt mutatta két értékkel. Most a teljes
+                    lánc és a három sáv látszik. */}
+                <th className="px-6 py-4">Felvételi állapot</th>
                 <th className="px-6 py-4 text-right">Műveletek</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
               {isLoading && <SkeletonRows rows={5} cols={['58%', '46%', '64%', '40%', '56%', '30%']} />}
-              {!isLoading && students.map(student => (
+              {!isLoading && students
+                .filter(student => statusFilter === 'All' || student.status === statusFilter)
+                .map(student => (
                 <tr key={student.id} className="hover:bg-slate-50 transition-colors">
                   <td className="px-6 py-4">
                     <p className="font-semibold text-slate-800">{student.name}</p>
@@ -2162,10 +2700,13 @@ const AdmissionsCore = ({ user }) => {
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
+                      {/* C1: a dokumentum-ellenőrzés a lánc 2→3. lépése, nem
+                          külön státusz. A 'Submitted' még ellenőrzésre vár, a
+                          'Documents checked'-től kezdve kész. */}
                       <div className="w-24 bg-slate-100 h-1.5 rounded-full overflow-hidden">
-                        <div className={`h-full ${student.status === 'Missing Info' ? 'bg-amber-500 w-1/4' : 'bg-emerald-500 w-full'}`}></div>
+                        <div className={`h-full ${statusOrder(student.status) >= statusOrder('Documents checked') ? 'bg-emerald-500 w-full' : 'bg-amber-500 w-1/3'}`}></div>
                       </div>
-                      <span className="text-[10px] font-bold text-slate-500">{student.status === 'Missing Info' ? '1/4' : '4/4'}</span>
+                      <span className="text-[10px] font-bold text-slate-500">{statusOrder(student.status) >= statusOrder('Documents checked') ? 'Ellenőrizve' : 'Ellenőrzésre vár'}</span>
                     </div>
                   </td>
                   <td className="px-6 py-4">
@@ -2177,15 +2718,47 @@ const AdmissionsCore = ({ user }) => {
                       </span>
                     </div>
                   </td>
+                  {/* C1 + C2: a fő státusz, a megengedett következő lépések és
+                      — 'Felvéve' állapotban — a három független sáv. */}
                   <td className="px-6 py-4">
-                    <span className={`${student.status === 'Paid' || student.status === 'Accepted' ? 'text-emerald-500' : 'text-slate-400'} flex items-center gap-1 text-xs font-semibold`}>
-                      {student.status === 'Paid' || student.status === 'Accepted' ? <ICONS.CheckCircle size={14} /> : <ICONS.Clock size={14} />}
-                      {student.status === 'Paid' || student.status === 'Accepted' ? 'Ellenőrizve' : 'Várat magára'}
-                    </span>
+                    <div className="flex flex-col items-start gap-1.5">
+                      <StatusBadge code={student.status} showHint />
+                      <TrackBadges student={student} compact={false} />
+                      {canEditStatus && (
+                        <StatusSelect value={student.status} disabled={statusBusy}
+                                      onPick={(code) => patchStudent(student.id, { status: code })} />
+                      )}
+                      {canEditStatus && student.status === 'Accepted' && (
+                        <div className="flex flex-wrap gap-1 pt-1">
+                          {POST_ENROLL_TRACKS.map(t => {
+                            const cur = student[t.field] || '';
+                            const opts = trackNext(t.key, cur);
+                            if (!opts.length) return null;
+                            const TIcon = Lucide[t.icon] || Lucide.Circle;
+                            return (
+                              <select key={t.key} value="" disabled={statusBusy}
+                                onChange={(e) => { const v = e.target.value; e.target.value = ''; if (v) patchStudent(student.id, { [t.field]: v === '__clear__' ? null : v }); }}
+                                title={t.hu + (cur ? ': ' + trackStateLabel(t.key, cur) : '')}
+                                className="text-[10px] bg-slate-50 border border-slate-200 rounded px-1.5 py-1 font-bold text-slate-500 focus:outline-none">
+                                <option value="">{t.hu}</option>
+                                {opts.map(o => (
+                                  <option key={o.to || '__clear__'} value={o.to || '__clear__'}>
+                                    {o.to ? ((o.back ? '↩ ' : '→ ') + trackStateLabel(t.key, o.to)) : '✕ Sáv törlése'}
+                                  </option>
+                                ))}
+                              </select>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex justify-end gap-2">
-                      {student.status === 'Submitted' && (
+                      {/* C1: a feltételes felvételi levél a bírálat UTÁN
+                          esedékes ('Nominated' → 'Conditionally accepted'),
+                          nem közvetlenül beadás után. */}
+                      {student.status === 'Nominated' && (
                         <button 
                           onClick={() => handleSendConditional(student.id)}
                           className="bg-indigo-50 text-indigo-600 px-3 py-1 rounded-lg text-[10px] font-bold hover:bg-indigo-100 transition-colors flex items-center gap-1"
@@ -2201,6 +2774,9 @@ const AdmissionsCore = ({ user }) => {
                   </td>
                 </tr>
               ))}
+              {!isLoading && !students.filter(st => statusFilter === 'All' || st.status === statusFilter).length && (
+                <tr><td colSpan={6} className="px-6 py-10 text-center text-sm text-slate-400">Nincs a szűrésnek megfelelő jelentkező.</td></tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -2407,6 +2983,15 @@ const AdmissionsCore = ({ user }) => {
 
   const renderOffers = () => (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      {/* C1: a státuszhiba-sáv itt is kell. A 'Küldés' gomb a students.status-t
+          írja, amit a 25_status_model.sql állapotgépe elutasíthat; a hibaüzenet
+          eddig csak a 'Jelentkezések' alnézetben jelent meg, így ezen a fülön
+          NYOM NÉLKÜL elveszett. */}
+      {statusError && (
+        <div className="md:col-span-2 lg:col-span-3 rounded-xl bg-red-50 border border-red-200 p-3 text-xs text-red-700 flex items-start gap-2">
+          <ICONS.AlertCircle size={15} className="shrink-0 mt-0.5" /><span>{statusError}</span>
+        </div>
+      )}
       <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
         <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center mb-4">
           <ICONS.FileCheck size={24} />
@@ -2414,12 +2999,24 @@ const AdmissionsCore = ({ user }) => {
         <h4 className="font-bold text-slate-800 mb-2">Feltételes Felvételi (Conditional)</h4>
         <p className="text-xs text-slate-400 mb-2">Címzett: <span className="font-bold">{selectedStudent?.name || '---'}</span></p>
         <p className="text-xs text-slate-400 mb-6">Sablon: standard_conditional_v2.pdf</p>
-        <button 
+        {/* C1: a feltételes levél csak a bírálat után ('Nominated') esedékes —
+            ugyanaz a feltétel, mint a jelentkezési listán lévő gombnál. Enélkül
+            a gomb minden más státuszban a szerver tiltásába futott. */}
+        <button
           onClick={() => selectedStudent && handleSendConditional(selectedStudent.id)}
-          className="w-full flex items-center justify-center gap-2 py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all"
+          disabled={!selectedStudent || selectedStudent.status !== 'Nominated'}
+          title={!selectedStudent
+            ? 'Előbb válassz jelentkezőt.'
+            : selectedStudent.status !== 'Nominated'
+              ? 'Csak „Bírálatra jelölve" állapotban küldhető feltételes felvételi levél.'
+              : 'Feltételes Felvételi Küldése'}
+          className="w-full flex items-center justify-center gap-2 py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-indigo-600"
         >
           Generálás & Küldés
         </button>
+        {selectedStudent && selectedStudent.status !== 'Nominated' && (
+          <p className="text-[11px] text-slate-400 mt-2 leading-relaxed">Csak „Bírálatra jelölve" állapotban küldhető feltételes felvételi levél.</p>
+        )}
       </div>
       <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
         <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center mb-4">
@@ -2543,7 +3140,9 @@ const mockWorkflows: Workflow[] = [
     totalProcessed: 850,
     successRate: 88,
     steps: [
-      { id: 's1', type: 'trigger', label: 'Státusz: Missing Info', description: 'Amikor a státusz Missing Info-ra vált', icon: 'AlertCircle' },
+      // C1: a 'Missing Info' megszűnt státuszként — a hiánypótlás a
+      // dokumentumlista ténye, a jelentkezés közben 'Beadva' állapotban áll.
+      { id: 's1', type: 'trigger', label: 'Státusz: Beadva + hiányzó dokumentum', description: 'Amikor a jelentkezés beadva, de kötelező dokumentum hiányzik', icon: 'AlertCircle' },
       { id: 's2', type: 'action', label: 'WhatsApp Értesítés', description: 'Azonnali üzenet a hiányzó elemekről', icon: 'Smartphone' },
       { id: 's3', type: 'action', label: 'Email Emlékeztető', description: 'Részletes lista küldése 24 óra múlva', icon: 'Mail' }
     ]
@@ -2718,7 +3317,7 @@ const EngagementCRM: React.FC = ({ user }) => {
               <p className="text-xs text-slate-500 truncate">{student.program}</p>
               <div className="flex items-center gap-1 mt-2">
                 <ICONS.Mail size={12} className="text-indigo-400" />
-                <span className="text-[10px] font-bold uppercase tracking-tighter text-slate-400">Email</span>
+                <span className="text-[10px] font-bold uppercase tracking-tighter text-slate-400">E-mail</span>
               </div>
             </div>
           ))}
@@ -2734,7 +3333,7 @@ const EngagementCRM: React.FC = ({ user }) => {
             </div>
             <div>
               <p className="font-bold text-slate-800 text-sm">{selectedStudent?.name || 'Válasszon beszélgetést'}</p>
-              <p className="text-[10px] text-emerald-500 font-bold uppercase">Online</p>
+              <p className="text-[10px] text-emerald-500 font-bold uppercase">Elérhető</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -3173,11 +3772,13 @@ const EngagementCRM: React.FC = ({ user }) => {
                 className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-5 py-4 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all"
               >
                 <option value="All">Összes jelentkező ({students?.length || 0})</option>
-                <option value="Draft">Draft ({students?.filter(s => s.status === 'Draft').length || 0})</option>
-                <option value="Submitted">Submitted ({students?.filter(s => s.status === 'Submitted').length || 0})</option>
-                <option value="Accepted">Accepted ({students?.filter(s => s.status === 'Accepted').length || 0})</option>
-                <option value="Paid">Paid ({students?.filter(s => s.status === 'Paid').length || 0})</option>
-                <option value="Missing Info">Missing Info ({students?.filter(s => s.status === 'Missing Info').length || 0})</option>
+                {/* C1: a lista a központi katalógusból épül, nem kézzel felsorolt
+                    státuszokból — így egy új állapot itt is azonnal megjelenik. */}
+                {STUDENT_STATUSES.map(st => (
+                  <option key={st.code} value={st.code}>
+                    {st.hu} ({students?.filter(s => s.status === st.code).length || 0})
+                  </option>
+                ))}
               </select>
             </div>
             <div className="flex items-end">
@@ -3630,7 +4231,7 @@ const Finance: React.FC = () => {
           <h3 className="font-bold text-slate-800 text-lg">Tranzakciók (Jelentkezési díjak & Tandíjak)</h3>
           <div className="flex gap-2">
             <button className="flex items-center gap-2 bg-indigo-50 text-indigo-600 px-4 py-2 rounded-xl text-xs font-bold hover:bg-indigo-100 transition-colors">
-              <ICONS.Download size={14} /> CSV Export
+              <ICONS.Download size={14} /> CSV export
             </button>
           </div>
         </div>
@@ -3684,7 +4285,7 @@ const Finance: React.FC = () => {
                         payment.status === 'Paid' ? 'bg-emerald-50 text-emerald-600' : 
                         payment.status === 'Pending' ? 'bg-amber-50 text-amber-600' : 'bg-red-50 text-red-600'
                       }`}>
-                        {payment.status}
+                        {enumLabel(payment.status)}
                       </span>
                     </div>
                   </td>
@@ -3946,7 +4547,11 @@ const Finance: React.FC = () => {
   );
 
   const renderPaymentPortal = () => {
-    const pendingStudents = students?.filter(s => s.status === 'Accepted' && s.paymentLink) || [];
+    // C1: a fizetési linket a FELTÉTELES felvételi levél állítja ki
+    // ('Conditionally accepted'), és a befizetés után a hallgató 'Accepted'
+    // lesz — mindkét állapotban meg kell jelennie a fizetési portálon.
+    const pendingStudents = students?.filter(s => s.paymentLink &&
+      (s.status === 'Conditionally accepted' || s.status === 'Accepted')) || [];
 
     return (
       <div className="max-w-4xl mx-auto space-y-8 animate-in zoom-in-95 duration-500">
@@ -4072,8 +4677,10 @@ const Finance: React.FC = () => {
             <div>
               <h5 className="font-bold text-slate-800 text-sm">Integrációs Megjegyzés</h5>
               <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                A fizetés után a rendszer automatikusan "Paid" státuszba helyezi a diákot, és rögzíti a tranzakciót a Pénzügyek listában. 
-                Éles üzemben itt történik az átirányítás a banki felületre.
+                A fizetés a Pénzügyek listájába kerül; a felvételi státuszt NEM írja át.
+                A tandíj befizetése pénzügyi tény, nem felvételi döntés — a kettőt a
+                rendszer külön tartja nyilván. Éles üzemben itt történik az
+                átirányítás a banki felületre.
               </p>
             </div>
           </div>
@@ -4352,11 +4959,8 @@ const ImmigrationCompliance: React.FC = () => {
                 <p className="font-bold text-slate-800 text-sm truncate">{student.name}</p>
                 <p className="text-[10px] text-slate-400 truncate">{student.program}</p>
                 <div className="flex items-center gap-2 mt-1">
-                  <span className={`w-1.5 h-1.5 rounded-full ${
-                    student.status === 'Paid' ? 'bg-emerald-500' : 
-                    student.status === 'Accepted' ? 'bg-indigo-500' : 'bg-amber-500'
-                  }`} />
-                  <span className="text-[10px] font-bold text-slate-400 uppercase">{student.status}</span>
+                  <span className={`w-1.5 h-1.5 rounded-full ${statusDotClass(student.status)}`} />
+                  <span className="text-[10px] font-bold text-slate-400 uppercase">{statusLabel(student.status)}</span>
                 </div>
               </div>
             </button>
@@ -4384,7 +4988,7 @@ const ImmigrationCompliance: React.FC = () => {
                     selectedStudent.visaApplication.status === 'Rejected' ? 'bg-red-100 text-red-700' :
                     selectedStudent.visaApplication.status === 'In Progress' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600'
                   }`}>
-                    {selectedStudent.visaApplication.status}
+                    {enumLabel(selectedStudent.visaApplication.status)}
                   </span>
                   <p className="text-sm text-slate-500 font-medium">Típus: {selectedStudent.visaApplication.type}</p>
                 </div>
@@ -4466,7 +5070,7 @@ const ImmigrationCompliance: React.FC = () => {
                         <p className="font-bold text-slate-800 text-sm">{item.label}</p>
                         {item.required && <span className="text-[10px] bg-red-50 text-red-500 px-1.5 py-0.5 rounded font-bold">KÖTELEZŐ</span>}
                       </div>
-                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-tight mt-0.5">Státusz: {item.status}</p>
+                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-tight mt-0.5">Státusz: {enumLabel(item.status)}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
@@ -4579,7 +5183,7 @@ const ImmigrationCompliance: React.FC = () => {
       <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-1 bg-white p-8 rounded-3xl border border-slate-100 shadow-sm flex flex-col items-center text-center">
-            <h3 className="font-bold text-slate-800 text-lg mb-8 uppercase tracking-widest text-[10px] text-slate-400">Risk Scoring</h3>
+            <h3 className="font-bold text-slate-800 text-lg mb-8 uppercase tracking-widest text-[10px] text-slate-400">Kockázati pontozás</h3>
             <div className="relative w-48 h-48 flex items-center justify-center mb-8">
                {/* Simple SVG Gauge */}
                <svg className="w-full h-full transform -rotate-90">
@@ -4819,7 +5423,7 @@ const Evaluation: React.FC = () => {
           <p className="text-indigo-300 text-[10px] font-bold uppercase tracking-widest mb-2">Összesített Értékelés</p>
           <div className="flex items-baseline gap-2 mb-6">
             <h2 className="text-5xl font-black">{percentage}%</h2>
-            <span className="text-indigo-300 text-lg">Score</span>
+            <span className="text-indigo-300 text-lg">Pontszám</span>
           </div>
           <div className="w-full bg-white/10 h-3 rounded-full overflow-hidden mb-6">
             <div className="bg-emerald-400 h-full transition-all duration-1000" style={{ width: `${percentage}%` }} />
@@ -4931,7 +5535,8 @@ const Evaluation: React.FC = () => {
           </div>
           <h3 className="text-xl font-bold text-slate-800 mb-2">Nincs rögzített interjú</h3>
           <p className="text-slate-500 max-w-md text-center">
-            A jelentkező még nem végezte el az automata videó interjút. Amint rögzíti a válaszait, azok itt fognak megjelenni.
+            Ehhez a jelentkezőhöz még nem tartozik rögzített felvételi interjú. A jelentkezői portál
+            AI interjú-gyakorlása szándékosan nem jelenik meg itt: az felkészülés, nem bírálati anyag.
           </p>
         </div>
       );
@@ -5363,12 +5968,12 @@ const SystemAdmin: React.FC = () => {
           <div className="flex gap-4 pt-4">
             <div className="text-center">
               <p className="text-indigo-400 text-xl font-bold">24/7</p>
-              <p className="text-[10px] uppercase text-slate-500 font-bold">Monitoring</p>
+              <p className="text-[10px] uppercase text-slate-500 font-bold">Monitorozás</p>
             </div>
             <div className="w-px h-10 bg-white/10" />
             <div className="text-center">
               <p className="text-indigo-400 text-xl font-bold">99.9%</p>
-              <p className="text-[10px] uppercase text-slate-500 font-bold">Uptime</p>
+              <p className="text-[10px] uppercase text-slate-500 font-bold">Rendelkezésre állás</p>
             </div>
           </div>
         </div>
@@ -5808,7 +6413,11 @@ const AdmissionsHub = (() => {
   const DOC_TYPES = [
     { id: 'school',     label: 'Iskolai tanulmányi adatok', hint: 'Bizonyítvány / diploma / leckekönyv', Icon: Lucide.GraduationCap, ocr: false },
     { id: 'passport',   label: 'Útlevél',                   hint: 'Érvényes úti okmány adatoldala',       Icon: Lucide.BookUser,     ocr: true },
-    { id: 'language',   label: 'Nyelvvizsga',               hint: 'Angol nyelvtudás igazolása (B2+)',     Icon: Lucide.Languages,    ocr: false },
+    // A nyelvvizsga-bizonyítvány feltöltése opcionális: sok jelentkezőnek a
+    // jelentkezés idején még nincs kézhez kapott bizonyítványa, a nyelvtudást az
+    // interjún is fel tudjuk mérni. Nem számít bele a hiányzó dokumentumok
+    // számlálójába és nem feltétele a továbblépésnek.
+    { id: 'language',   label: 'Nyelvvizsga',               hint: 'Angol nyelvtudás igazolása (B2+)',     Icon: Lucide.Languages,    ocr: false, optional: true },
     { id: 'motivation', label: 'Motivációs levél',          hint: 'Min. 1 oldal, angol nyelven',          Icon: Lucide.PenLine,      ocr: false },
     { id: 'internship', label: 'Szakmai gyakorlat',         hint: 'Igazolás (ha releváns)',               Icon: Lucide.Briefcase,    ocr: false, optional: true },
   ];
@@ -5844,7 +6453,9 @@ const AdmissionsHub = (() => {
   const generateMathTest = () => [genSystem(), genEvaluate(), genQuadratic(), genLogTrig()];
   function mockPassportOCR(acc) {
     const L = 'ABCDEFGHJKMNPRTVWX';
-    return { name: acc.fullName || 'GUEST APPLICANT', passportNumber: L[rnd(0, 17)] + L[rnd(0, 17)] + rnd(1000000, 9999999), country: acc.country || 'Nigeria', birthDate: acc.birthDate || '2002-06-21', confidence: rnd(94, 99) };
+    // A nem (MRZ 'sex' mező) ugyanúgy az útlevél adatoldaláról jön, mint a
+    // többi mező — a jelentkező a Kinyert adatok panelen felül tudja bírálni.
+    return { name: acc.fullName || 'GUEST APPLICANT', passportNumber: L[rnd(0, 17)] + L[rnd(0, 17)] + rnd(1000000, 9999999), country: acc.country || 'Nigeria', birthDate: acc.birthDate || '2002-06-21', gender: acc.gender || (rnd(0, 1) ? 'Female' : 'Male'), confidence: rnd(94, 99) };
   }
   const makeFileNumber = (k) => 'NJE/2026/' + k + '/' + String(rnd(1, 9999)).padStart(4, '0');
 
@@ -6037,9 +6648,12 @@ const AdmissionsHub = (() => {
           const score = okFormat && !tiny ? rnd(88, 99) : rnd(48, 72);
           return { detected: DETECTED[d.id] || d.label, expected: d.label, match: true, verdict: score >= 80 ? 'authentic' : 'review', score, flags, checkedAt: todayStr() };
         };
-        const aiExtract = (d, file) => {
+        // Az útlevél-ág az `ocr` paraméterből dolgozik, hogy az AI kivonat és a
+        // Kinyert adatok (útlevél) panel ugyanazt a nevet, útlevélszámot és
+        // nemet mutassa — korábban külön-külön generálódtak és eltértek.
+        const aiExtract = (d, file, ocr) => {
           const base = { 'Fájl': file.name, 'Típus': (file.type || 'ismeretlen'), 'Méret': Math.max(1, Math.round(file.size / 1024)) + ' KB', 'Beolvasva': todayStr(), 'AI megbízhatóság': rnd(92, 99) + '%' };
-          if (d.id === 'passport') return { ...base, 'Név': (acc.fullName || 'GUEST APPLICANT').toUpperCase(), 'Útlevélszám': 'P' + rnd(1000000, 9999999), 'Állampolgárság': acc.country || 'Nigeria', 'Lejárat': '2031-0' + rnd(1, 9) + '-1' + rnd(0, 9) };
+          if (d.id === 'passport') { const o = ocr || {}; return { ...base, 'Név': (o.name || acc.fullName || 'GUEST APPLICANT').toUpperCase(), 'Útlevélszám': o.passportNumber || ('P' + rnd(1000000, 9999999)), 'Állampolgárság': o.country || acc.country || 'Nigeria', 'Neme': genderLabel(o.gender) || '—', 'Lejárat': '2031-0' + rnd(1, 9) + '-1' + rnd(0, 9) }; }
           if (d.id === 'school') return { ...base, 'Intézmény': 'Federal Government College', 'Végzettség': 'Secondary School Certificate', 'Átlag (GPA)': (3 + Math.random()).toFixed(2), 'Végzés éve': 2024 - rnd(0, 3) };
           if (d.id === 'language') return { ...base, 'Vizsga': ['IELTS', 'TOEFL iBT', 'Duolingo'][rnd(0, 2)], 'Pontszám': 'B2 / ' + rnd(6, 8) + '.0', 'Kiállítva': '2025-0' + rnd(1, 9) + '-1' + rnd(0, 9) };
           if (d.id === 'motivation') return { ...base, 'Oldalszám': rnd(1, 3), 'Szószám': rnd(450, 900), 'Nyelv': 'angol', 'Kulcsszavak': 'motiváció, karriercél, NJE' };
@@ -6063,8 +6677,9 @@ const AdmissionsHub = (() => {
 
           const finish = (stored) => {
             const nd = { ...docs, [d.id]: { fileName: file.name, status: 'uploaded', type: file.type, size: file.size, ...stored } };
-            const patch = { docs: nd, aiExtracts: { ...(data.aiExtracts || {}), [d.id]: aiExtract(d, file) }, aiChecks: { ...(data.aiChecks || {}), [d.id]: aiCheck(d, file) } };
-            if (d.ocr) patch.extracted = mockPassportOCR(acc);
+            const ocr = d.ocr ? mockPassportOCR(acc) : null;
+            const patch = { docs: nd, aiExtracts: { ...(data.aiExtracts || {}), [d.id]: aiExtract(d, file, ocr) }, aiChecks: { ...(data.aiChecks || {}), [d.id]: aiCheck(d, file) } };
+            if (ocr) patch.extracted = ocr;
             set(patch);
             setUploadMsg({ tone: 'ok', text: d.label + ' — sikeresen feltöltve (' + DOC_fmtSize(file.size) + ')' });
             setTimeout(() => setUploadMsg(''), 3000);
@@ -6136,6 +6751,7 @@ const AdmissionsHub = (() => {
                     <div><label className={labelCls}>Név (útlevél szerint)</label><input className={inputCls} value={ex.name || ''} disabled={readOnly} onChange={e => setEx('name', e.target.value)} /></div>
                     <div><label className={labelCls}>Útlevélszám</label><input className={inputCls} value={ex.passportNumber || ''} disabled={readOnly} onChange={e => setEx('passportNumber', e.target.value)} /></div>
                     <div className="grid grid-cols-2 gap-3"><div><label className={labelCls}>Ország</label><input className={inputCls} value={ex.country || ''} disabled={readOnly} onChange={e => setEx('country', e.target.value)} /></div><div><label className={labelCls}>Szül. dátum</label><input type="date" className={inputCls} value={ex.birthDate || ''} disabled={readOnly} onChange={e => setEx('birthDate', e.target.value)} /></div></div>
+                    <div><label className={labelCls}>Neme</label><select className={inputCls} value={ex.gender || ''} disabled={readOnly} onChange={e => setEx('gender', e.target.value)}><option value="">Nincs megadva</option>{GENDER_OPTIONS.map(g => <option key={g.value} value={g.value}>{g.label}</option>)}</select></div>
                   </div>
                 </div>
               ) : (
@@ -6406,7 +7022,7 @@ const AdmissionsHub = (() => {
         account: { fullName: 'Adaeze Okonkwo', email: 'adaeze.okonkwo@example.com', phone: '+2348021234567', country: 'Nigeria', birthDate: '2003-02-14' },
         programs: ['ibe'],
         docs: { school: { fileName: 'iskolai_tanulmanyi_adatok.pdf', status: 'uploaded' }, passport: { fileName: 'utlevel.pdf', status: 'uploaded' }, language: { fileName: 'nyelvvizsga.pdf', status: 'uploaded' }, motivation: { fileName: 'motivacios_level.pdf', status: 'uploaded' }, internship: { fileName: 'szakmai_gyakorlat.pdf', status: 'uploaded' } },
-        extracted: { name: 'ADAEZE OKONKWO', passportNumber: 'A12345678', country: 'Nigeria', birthDate: '2003-02-14', confidence: 98 },
+        extracted: { name: 'ADAEZE OKONKWO', passportNumber: 'A12345678', country: 'Nigeria', birthDate: '2003-02-14', gender: 'Female', confidence: 98 },
         check: { duplicateChecked: true, duplicates: [], cleared: true, notes: 'Minden dokumentum rendben.' },
         math: { answers: {}, submitted: true, score: 4, passed: true },
         interview: { slotId: 's1', slot: { id: 's1', day: '2026. szept. 2.', time: '09:00', who: 'Dr. Kovács István' }, booked: true, teamsUrl: 'https://teams.microsoft.com/l/meetup-join/19%3ameeting_adaeze01' },
@@ -6416,7 +7032,7 @@ const AdmissionsHub = (() => {
         account: { fullName: 'Mehmet Yılmaz', email: 'mehmet.yilmaz@example.com', phone: '+905321234567', country: 'Turkey', birthDate: '2002-09-30' },
         programs: ['cse', 'mech'],
         docs: { school: { fileName: 'iskolai_tanulmanyi_adatok.pdf', status: 'uploaded' }, passport: { fileName: 'utlevel.pdf', status: 'uploaded' }, language: { fileName: 'nyelvvizsga.pdf', status: 'uploaded' }, motivation: { fileName: 'motivacios_level.pdf', status: 'uploaded' } },
-        extracted: { name: 'MEHMET YILMAZ', passportNumber: 'U72910384', country: 'Turkey', birthDate: '2002-09-30', confidence: 96 },
+        extracted: { name: 'MEHMET YILMAZ', passportNumber: 'U72910384', country: 'Turkey', birthDate: '2002-09-30', gender: 'Male', confidence: 96 },
         check: { duplicateChecked: true, duplicates: [], cleared: true, notes: '' },
         math: { answers: {}, submitted: false },
       } },
@@ -6424,7 +7040,7 @@ const AdmissionsHub = (() => {
         account: { fullName: 'Linh Nguyen', email: 'linh.nguyen@example.com', phone: '+84901234567', country: 'Vietnam', birthDate: '2004-05-08' },
         programs: ['tour', 'ibe'],
         docs: { school: { fileName: 'iskolai_tanulmanyi_adatok.pdf', status: 'uploaded' }, passport: { fileName: 'utlevel.pdf', status: 'uploaded' } },
-        extracted: { name: 'LINH NGUYEN', passportNumber: 'C04829173', country: 'Vietnam', birthDate: '2004-05-08', confidence: 95 },
+        extracted: { name: 'LINH NGUYEN', passportNumber: 'C04829173', country: 'Vietnam', birthDate: '2004-05-08', gender: 'Female', confidence: 95 },
       } },
     ];
   }
@@ -6563,6 +7179,41 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
   const [uploadingDocId, setUploadingDocId] = useState<string | null>(null);
   const [messages, setMessages] = useState([]);
   const [journeyProcs, setJourneyProcs] = useState([]);
+  // A jelentkezési azonosító vágólapra másolása (Fontos Tudnivalók blokk).
+  // A Clipboard API nem mindenhol elérhető (nem HTTPS, régi böngésző), ezért
+  // van egy rejtett textarea-s tartalék ág is.
+  const [copiedAppId, setCopiedAppId] = useState(false);
+  // Az AI interjú-gyakorlás legutóbbi menetének metaadatai (lásd lentebb).
+  const [practiceLog, setPracticeLog] = useState(null);
+  const copyAppId = async (value) => {
+    const text = String(value || '');
+    if (!text) return;
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.select(); document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      setCopiedAppId(true);
+      setTimeout(() => setCopiedAppId(false), 2000);
+    } catch (e) {
+      console.error('Nem sikerült vágólapra másolni:', e);
+    }
+  };
+
+  // A korábbi gyakorló menet visszatöltése (csak metaadat, csak helyben).
+  useEffect(() => {
+    const key = 'nje_ai_practice_' + ((student && student.id) || (user && user.email) || 'guest');
+    try {
+      const raw = localStorage.getItem(key);
+      setPracticeLog(raw ? JSON.parse(raw) : null);
+    } catch (e) {
+      setPracticeLog(null);
+    }
+  }, [student, user]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -6659,20 +7310,20 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
     }
   };
 
-  const handleVideoInterviewComplete = async (videos: VideoInterview[]) => {
-    if (!student) return;
+  // Az AI interjú GYAKORLÁSI mód: a felvétel a jelentkezőé, nem küldjük be és
+  // nem írjuk a student.evaluation mezőbe, ezért a bírálatba sem számít bele.
+  // Csak a saját visszanézéshez tartunk nyilván egy metaadat-naplót (kérdés,
+  // hossz, dátum) a böngészőben — videó nem hagyja el a gépet.
+  const handleVideoInterviewComplete = (videos: VideoInterview[]) => {
+    const log = {
+      at: new Date().toISOString(),
+      answers: (videos || []).map(v => ({ question: v.question, duration: v.duration })),
+    };
+    setPracticeLog(log);
     try {
-      const evaluation = {
-        ...student.evaluation,
-        videos: videos,
-        criteria: student.evaluation?.criteria || [],
-        comments: student.evaluation?.comments || []
-      };
-      
-      const updatedStudent = await api.updateStudent(student.id, { evaluation });
-      setStudent(updatedStudent);
-    } catch (error) {
-      console.error('Failed to save video interview:', error);
+      localStorage.setItem('nje_ai_practice_' + ((student && student.id) || (user && user.email) || 'guest'), JSON.stringify(log));
+    } catch (e) {
+      // A böngésző letilthatja a tárolást — a gyakorlás enélkül is működik.
     }
   };
 
@@ -6805,7 +7456,7 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
               </div>
               <div>
                 <p className="text-[10px] text-slate-400 uppercase font-bold">Nem</p>
-                <p className="text-sm font-medium text-slate-800">{student.gender === 'Male' ? 'Férfi' : student.gender === 'Female' ? 'Nő' : 'Egyéb'}</p>
+                <p className="text-sm font-medium text-slate-800">{genderLabel(student.gender) || 'Nincs megadva'}</p>
               </div>
             </div>
           </div>
@@ -6986,7 +7637,7 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
               student.visaApplication.status === 'Rejected' ? 'bg-red-100 text-red-700' :
               student.visaApplication.status === 'In Progress' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600'
             }`}>
-              {student.visaApplication.status}
+              {enumLabel(student.visaApplication.status)}
             </div>
           </div>
 
@@ -7018,7 +7669,7 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
                   </div>
                   <div>
                     <p className="text-sm font-bold text-slate-800">{item.label}</p>
-                    <p className="text-[10px] text-slate-400 font-bold uppercase">{item.status}</p>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase">{enumLabel(item.status)}</p>
                   </div>
                 </div>
                 {item.status === 'Pending' && (
@@ -7091,7 +7742,7 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
                     item.status === 'Verified' ? 'text-emerald-500' :
                     item.status === 'Uploaded' ? 'text-blue-500' :
                     item.status === 'Rejected' ? 'text-red-500' : 'text-slate-400'
-                  }`}>{item.status}</p>
+                  }`}>{enumLabel(item.status)}</p>
                 </div>
               </div>
               
@@ -7120,6 +7771,11 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
 
   const renderFinance = () => {
     const pendingInvoices = invoices.filter(i => i.studentName === student.name && i.status !== 'Paid');
+    // C1: a 'Paid' megszűnt fő státuszként, a fizetés ténye a payments/invoices
+    // adatból derül ki. Befizetettnek akkor tekintjük a tandíjat, ha van
+    // jóváírt tandíj-tranzakció, és nincs kiegyenlítetlen számla.
+    const tuitionSettled = payments.some(p => p.status === 'Paid' && (p.type || 'Tuition') === 'Tuition')
+                           && pendingInvoices.length === 0;
     
     return (
       <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -7173,12 +7829,12 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
                   <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Tandíj Összege</p>
                   <p className="text-3xl font-black text-slate-900">€{student.tuitionFee.toLocaleString()}</p>
                 </div>
-                <div className={`px-4 py-2 rounded-xl text-xs font-bold uppercase ${student.status === 'Paid' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                  {student.status === 'Paid' ? 'Befizetve' : 'Fizetésre vár'}
+                <div className={`px-4 py-2 rounded-xl text-xs font-bold uppercase ${tuitionSettled ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                  {tuitionSettled ? 'Befizetve' : 'Fizetésre vár'}
                 </div>
               </div>
               
-              {student.status !== 'Paid' && (
+              {!tuitionSettled && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <button className="p-6 border-2 border-primary/20 rounded-2xl flex flex-col items-center gap-3 hover:bg-primary/5 transition-all group">
                     <ICONS.CreditCard size={32} className="text-primary" />
@@ -7211,7 +7867,7 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
                   </div>
                   <div className="text-right">
                     <p className="text-sm font-black text-slate-900">€{payment.amount.toLocaleString()}</p>
-                    <p className={`text-[10px] font-bold uppercase ${payment.status === 'Paid' ? 'text-emerald-500' : 'text-amber-500'}`}>{payment.status}</p>
+                    <p className={`text-[10px] font-bold uppercase ${payment.status === 'Paid' ? 'text-emerald-500' : 'text-amber-500'}`}>{enumLabel(payment.status)}</p>
                   </div>
                 </div>
               )) : (
@@ -7226,9 +7882,27 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
             <h4 className="font-bold text-amber-900 mb-4 flex items-center gap-2">
               <ICONS.Info size={18} /> Fontos Tudnivalók
             </h4>
+            {/* A jelentkezési azonosító a banki közlemény rovat legfontosabb
+                eleme — ezért kiemelten, monospace betűvel és egy kattintással
+                vágólapra másolhatóan jelenik meg, nem a felsorolásba rejtve. */}
+            <div className="bg-white rounded-2xl border border-amber-200 p-4 mb-4">
+              <p className="text-[10px] font-bold text-amber-700 uppercase tracking-widest mb-1.5">Jelentkezési azonosító</p>
+              <div className="flex items-center gap-2">
+                <span className="flex-1 font-mono text-lg font-black text-slate-900 tracking-wider select-all">{student.id}</span>
+                <button
+                  type="button"
+                  onClick={() => copyAppId(student.id)}
+                  title="Másolás vágólapra"
+                  className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl text-[11px] font-bold bg-amber-100 text-amber-800 hover:bg-amber-200 transition-colors"
+                >
+                  {copiedAppId ? <><ICONS.Check size={14} /> Másolva</> : <><ICONS.Copy size={14} /> Másolás</>}
+                </button>
+              </div>
+              <p className="text-[11px] text-amber-700 mt-2 leading-relaxed">Ezt írd az átutalás közlemény rovatába.</p>
+            </div>
             <ul className="space-y-3 text-xs text-amber-800 leading-relaxed">
               <li>• A jelentkezési díj nem visszatérítendő.</li>
-              <li>• Átutalás esetén kérjük tüntesd fel a jelentkezési azonosítódat: <span className="font-bold">{student.id}</span></li>
+              <li>• Átutalás esetén kérjük, tüntesd fel a jelentkezési azonosítódat, az útlevélszámodat és a neved.</li>
               <li>• A tandíj befizetése után állítjuk ki a végleges befogadó nyilatkozatot a vízumhoz.</li>
             </ul>
           </div>
@@ -7252,37 +7926,22 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
         </div>
       ) : (
         <>
-          {/* Video Interview Section */}
-          <div className="bg-indigo-600 p-8 rounded-[32px] text-white shadow-xl shadow-indigo-100 flex flex-col md:flex-row items-center justify-between gap-8">
-            <div className="space-y-4 max-w-xl">
-              <div className="w-12 h-12 bg-white/20 rounded-2xl flex items-center justify-center">
-                <ICONS.Video size={24} />
-              </div>
-              <h3 className="text-2xl font-bold">Automata Videó Interjú</h3>
-              <p className="text-indigo-100 text-sm leading-relaxed">
-                Ez egy kötelező lépés a felvételi folyamatban. Válaszoljon 4 előre rögzített kérdésre videón keresztül. 
-                A válaszokat a felvételi bizottság fogja értékelni.
-              </p>
-              <div className="flex items-center gap-4 text-xs font-bold">
-                <div className="flex items-center gap-1.5">
-                  <ICONS.Clock size={14} /> ~10 perc
+          {/* A VALÓDI felvételi interjú áll elöl: ez az egyetlen, ami beleszámít
+              a bírálatba. Az AI-gyakorlás csak utána, másodlagos hangsúllyal. */}
+          <div className="bg-white p-8 rounded-3xl border-2 border-primary/20 shadow-sm">
+            <div className="flex items-start gap-4 mb-2">
+              <span className="w-12 h-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                <ICONS.CalendarCheck size={24} />
+              </span>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-xl font-bold text-slate-800">Valódi felvételi interjú — időpontfoglalás</h3>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/10 text-primary uppercase tracking-wide">Ez számít a bírálatba</span>
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <ICONS.CheckCircle size={14} /> 4 kérdés
-                </div>
+                <p className="text-sm text-slate-500 mt-1">Válassz egy számodra megfelelő időpontot a felvételi beszélgetéshez (Teams/Zoom). A felvételi döntés kizárólag ezen az interjún alapul.</p>
               </div>
             </div>
-            <button 
-              onClick={() => setShowVideoInterview(true)}
-              className="bg-white text-indigo-600 px-8 py-4 rounded-2xl font-bold hover:bg-indigo-50 transition-all shadow-lg whitespace-nowrap"
-            >
-              Interjú megkezdése
-            </button>
-          </div>
-
-          <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm">
-            <h3 className="text-xl font-bold text-slate-800 mb-2">Személyes Interjú Időpont Foglalás</h3>
-            <p className="text-sm text-slate-500 mb-8">Válassz egy számodra megfelelő időpontot a felvételi beszélgetéshez (Teams/Zoom).</p>
+            <div className="mb-8" />
             
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {interviewSlots.filter(s => s.status === 'Available').map((slot) => (
@@ -7305,6 +7964,44 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
                   </button>
                 </div>
               ))}
+            </div>
+          </div>
+
+          {/* AI interjú — GYAKORLÁSI mód. Visszaélési kockázat miatt nem
+              helyettesíti a valódi interjút: a felvétel nálad marad, nem
+              küldjük be, és a bírálatba sem számít bele. */}
+          <div className="bg-slate-50 p-8 rounded-3xl border border-slate-200">
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+              <div className="space-y-3 max-w-xl">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center">
+                    <ICONS.Sparkles size={20} />
+                  </span>
+                  <h3 className="text-xl font-bold text-slate-800">AI interjú-gyakorlás</h3>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-200 text-slate-600 uppercase tracking-wide">Gyakorlás · nem értékeljük</span>
+                </div>
+                <p className="text-sm text-slate-500 leading-relaxed">
+                  Felkészülési eszköz: 4 tipikus felvételi kérdésre válaszolhatsz videón, hogy magabiztosabb legyél.
+                  <span className="font-bold text-slate-700"> Ez NEM váltja ki a valódi felvételi interjút</span> — a felvétel nálad marad,
+                  nem küldjük be a felvételi bizottságnak, és nem számít bele a bírálatba.
+                </p>
+                <div className="flex items-center gap-4 text-xs font-bold text-slate-500">
+                  <div className="flex items-center gap-1.5"><ICONS.Clock size={14} /> ~10 perc</div>
+                  <div className="flex items-center gap-1.5"><ICONS.CheckCircle size={14} /> 4 kérdés</div>
+                  <div className="flex items-center gap-1.5"><ICONS.Lock size={14} /> Csak neked látható</div>
+                </div>
+                {practiceLog && practiceLog.answers && practiceLog.answers.length > 0 && (
+                  <p className="text-[11px] text-slate-400">
+                    Legutóbbi gyakorlás: {new Date(practiceLog.at).toLocaleString('hu-HU')} · {practiceLog.answers.length} válasz
+                  </p>
+                )}
+              </div>
+              <button 
+                onClick={() => setShowVideoInterview(true)}
+                className="bg-white text-indigo-600 border-2 border-indigo-200 px-8 py-4 rounded-2xl font-bold hover:bg-indigo-50 transition-all whitespace-nowrap"
+              >
+                Gyakorlás indítása
+              </button>
             </div>
           </div>
         </>
@@ -7839,27 +8536,27 @@ const Reports: React.FC = () => {
   const [selectedReport, setSelectedReport] = useState<ReportType | null>(null);
 
   const reports = [
-    { id: 'ApplicantRegistrations', name: 'ApplicantRegistrations', description: 'How many applicants registered on a particular date?' },
-    { id: 'ApplicationLastRevised', name: 'ApplicationLastRevised', description: 'Shows how many applications were *last revised* (changed one or more times) on a particular date.' },
-    { id: 'ApplicationRevisions', name: 'ApplicationRevisions', description: 'Shows how many revisions altogether there were on a particular date.' },
-    { id: 'DocumentUploads', name: 'DocumentUploads', description: 'Shows the document uploading activity - an indicator of applicants working with the applications.' },
-    { id: 'Status', name: 'Status', description: 'A quick overview of the aggregate numbers of applications in a particular status.' },
-    { id: 'StatusByCitizenship', name: 'StatusByCitizenship', description: 'A quick overview of the aggregate numbers of applications in a particular status, with more detailed info per citizenships.' },
-    { id: 'StatusByInstitutionAll', name: 'StatusByInstitutionAll', description: 'Shows how many applications and in which statuses have courses from a particular institution. Please note that this report takes into account all priorities.' },
-    { id: 'StatusByInstitutionTop1', name: 'StatusByInstitutionTop1', description: 'Shows how many applications and in which statuses have courses from a particular institution, counting the applications only if a particular institution was selected as the 1st priority.' },
-    { id: 'StatusByInstitutionTop3', name: 'StatusByInstitutionTop3', description: 'Shows how many applications and in which statuses have courses from a particular institution, counting the applications only if a particular institution was selected as a TOP 3 priority.' },
-    { id: 'SizeByStatus', name: 'SizeByStatus', description: 'Shows the distribution (histogram) of application sizes as a way of measuring applicants progress with their applications.' },
-    { id: 'Invoices', name: 'Invoices', description: 'Overview of invoiced amounts, collections and overdues.' },
-    { id: 'StatusByCourseAdmin', name: 'StatusByCourseAdmin', description: 'Overview on admin statuses per course' },
-    { id: 'StatusByCourseApplicant', name: 'StatusByCourseApplicant', description: 'Overview on applicant statuses per course' },
-    { id: 'StatusByCitizenshipAdmin', name: 'StatusByCitizenshipAdmin', description: 'Overview on admin statuses per citizenship' },
-    { id: 'StatusByCitizenshipApplicant', name: 'StatusByCitizenshipApplicant', description: 'Overview on applicant statuses per citizenship' },
-    { id: 'ApplicationsMatrix', name: 'ApplicationsMatrix', description: 'Shows a matrix of application statuses and citizenships with both totals' },
-    { id: 'OffersMatrix', name: 'OffersMatrix', description: 'Shows a matrix of offer types and citizenships with both totals' },
-    { id: 'ApplicationsFunnelMonthly', name: 'ApplicationsFunnelMonthly', description: 'Compares application statistics between two years on a monthly basis.' },
-    { id: 'ApplicationsFunnelWeekly', name: 'ApplicationsFunnelWeekly', description: 'Compares application statistics between two years on a weekly basis.' },
-    { id: 'ApplicationsPriorities', name: 'ApplicationsPriorities', description: 'Shows the relative priorities of applicants among several institutions. Useful only in a collaborative use case among several institutions.' },
-    { id: 'InvoicesDetails', name: 'InvoicesDetails', description: 'Detailed report of issued invoices.' },
+    { id: 'ApplicantRegistrations', name: 'ApplicantRegistrations', description: 'Hány jelentkező regisztrált egy adott napon?' },
+    { id: 'ApplicationLastRevised', name: 'ApplicationLastRevised', description: 'Megmutatja, hány jelentkezést módosítottak *utoljára* (egyszer vagy többször) egy adott napon.' },
+    { id: 'ApplicationRevisions', name: 'ApplicationRevisions', description: 'Megmutatja, összesen hány módosítás történt egy adott napon.' },
+    { id: 'DocumentUploads', name: 'DocumentUploads', description: 'A dokumentumfeltöltési aktivitás — jelzi, hogy a jelentkezők dolgoznak-e a jelentkezésükön.' },
+    { id: 'Status', name: 'Status', description: 'Gyors áttekintés az egyes státuszokban lévő jelentkezések összesített számáról.' },
+    { id: 'StatusByCitizenship', name: 'StatusByCitizenship', description: 'Gyors áttekintés az egyes státuszokban lévő jelentkezések összesített számáról, állampolgárság szerinti bontásban.' },
+    { id: 'StatusByInstitutionAll', name: 'StatusByInstitutionAll', description: 'Megmutatja, hány jelentkezés és milyen státuszban tartalmaz egy adott intézmény képzését. Ez a riport minden prioritást figyelembe vesz.' },
+    { id: 'StatusByInstitutionTop1', name: 'StatusByInstitutionTop1', description: 'Megmutatja, hány jelentkezés és milyen státuszban tartalmaz egy adott intézmény képzését — csak akkor számít bele, ha az intézmény az 1. prioritás volt.' },
+    { id: 'StatusByInstitutionTop3', name: 'StatusByInstitutionTop3', description: 'Megmutatja, hány jelentkezés és milyen státuszban tartalmaz egy adott intézmény képzését — csak akkor számít bele, ha az intézmény a TOP 3 prioritás egyike volt.' },
+    { id: 'SizeByStatus', name: 'SizeByStatus', description: 'A jelentkezések méretének eloszlása (hisztogram) — így mérhető, mennyire haladtak a jelentkezők.' },
+    { id: 'Invoices', name: 'Invoices', description: 'A kiszámlázott összegek, befizetések és lejárt tartozások áttekintése.' },
+    { id: 'StatusByCourseAdmin', name: 'StatusByCourseAdmin', description: 'Ügyintézői státuszok áttekintése képzésenként' },
+    { id: 'StatusByCourseApplicant', name: 'StatusByCourseApplicant', description: 'Jelentkezői státuszok áttekintése képzésenként' },
+    { id: 'StatusByCitizenshipAdmin', name: 'StatusByCitizenshipAdmin', description: 'Ügyintézői státuszok áttekintése állampolgárságonként' },
+    { id: 'StatusByCitizenshipApplicant', name: 'StatusByCitizenshipApplicant', description: 'Jelentkezői státuszok áttekintése állampolgárságonként' },
+    { id: 'ApplicationsMatrix', name: 'ApplicationsMatrix', description: 'A jelentkezési státuszok és állampolgárságok mátrixa, mindkét irányú összesítéssel.' },
+    { id: 'OffersMatrix', name: 'OffersMatrix', description: 'Az ajánlattípusok és állampolgárságok mátrixa, mindkét irányú összesítéssel.' },
+    { id: 'ApplicationsFunnelMonthly', name: 'ApplicationsFunnelMonthly', description: 'Két év jelentkezési statisztikáját hasonlítja össze havi bontásban.' },
+    { id: 'ApplicationsFunnelWeekly', name: 'ApplicationsFunnelWeekly', description: 'Két év jelentkezési statisztikáját hasonlítja össze heti bontásban.' },
+    { id: 'ApplicationsPriorities', name: 'ApplicationsPriorities', description: 'A jelentkezők relatív rangsorát mutatja több intézmény között. Csak több intézmény közös használata esetén van értelme.' },
+    { id: 'InvoicesDetails', name: 'InvoicesDetails', description: 'Részletes riport a kiállított számlákról.' },
   ];
 
   const renderReportContent = () => {
@@ -7874,24 +8571,24 @@ const Reports: React.FC = () => {
                   <span>2026</span>
                   <ICONS.ChevronRight size={14} className="rotate-90 text-slate-400" />
                 </div>
-                <div className="text-slate-400 text-sm italic">Click to add more filters</div>
+                <div className="text-slate-400 text-sm italic">Kattints további szűrők hozzáadásához</div>
               </div>
               <div className="flex items-center gap-2">
-                <button className="text-sm font-bold text-amber-600 hover:underline">Clear filters</button>
+                <button className="text-sm font-bold text-amber-600 hover:underline">Szűrők törlése</button>
                 <button className="flex items-center gap-2 bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-amber-700 transition-all">
-                  <ICONS.RefreshCw size={16} /> Reload
+                  <ICONS.RefreshCw size={16} /> Frissítés
                 </button>
               </div>
             </div>
             <button className="flex items-center gap-2 bg-slate-100 text-slate-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-200 transition-all w-fit">
-              <ICONS.Download size={16} /> Export
+              <ICONS.Download size={16} /> Exportálás
             </button>
             <div className="bg-white rounded-xl border border-slate-100 overflow-hidden">
               <table className="w-full text-left">
                 <thead className="bg-slate-50 text-slate-400 text-[10px] font-bold uppercase tracking-wider">
                   <tr>
-                    <th className="px-6 py-4">Date</th>
-                    <th className="px-6 py-4">Registered</th>
+                    <th className="px-6 py-4">Dátum</th>
+                    <th className="px-6 py-4">Regisztrált</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
@@ -7924,24 +8621,24 @@ const Reports: React.FC = () => {
                   <span>2025/26 (2/2 terms)</span>
                   <ICONS.ChevronRight size={14} className="rotate-90 text-slate-400" />
                 </div>
-                <div className="text-slate-400 text-sm italic">Click to add more filters</div>
+                <div className="text-slate-400 text-sm italic">Kattints további szűrők hozzáadásához</div>
               </div>
               <div className="flex items-center gap-2">
-                <button className="text-sm font-bold text-amber-600 hover:underline">Clear filters</button>
+                <button className="text-sm font-bold text-amber-600 hover:underline">Szűrők törlése</button>
                 <button className="flex items-center gap-2 bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-amber-700 transition-all">
                   <ICONS.RefreshCw size={16} /> Reload
                 </button>
               </div>
             </div>
             <button className="flex items-center gap-2 bg-slate-100 text-slate-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-200 transition-all w-fit">
-              <ICONS.Download size={16} /> Export
+              <ICONS.Download size={16} /> Exportálás
             </button>
             <div className="bg-white rounded-xl border border-slate-100 overflow-hidden">
               <table className="w-full text-left">
                 <thead className="bg-slate-50 text-slate-400 text-[10px] font-bold uppercase tracking-wider">
                   <tr>
-                    <th className="px-6 py-4">Date</th>
-                    <th className="px-6 py-4">Num. last revised</th>
+                    <th className="px-6 py-4">Dátum</th>
+                    <th className="px-6 py-4">Utolsó módosítások száma</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
@@ -7974,24 +8671,24 @@ const Reports: React.FC = () => {
                   <span>2025/26 (2/2 terms)</span>
                   <ICONS.ChevronRight size={14} className="rotate-90 text-slate-400" />
                 </div>
-                <div className="text-slate-400 text-sm italic">Click to add more filters</div>
+                <div className="text-slate-400 text-sm italic">Kattints további szűrők hozzáadásához</div>
               </div>
               <div className="flex items-center gap-2">
-                <button className="text-sm font-bold text-amber-600 hover:underline">Clear filters</button>
+                <button className="text-sm font-bold text-amber-600 hover:underline">Szűrők törlése</button>
                 <button className="flex items-center gap-2 bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-amber-700 transition-all">
                   <ICONS.RefreshCw size={16} /> Reload
                 </button>
               </div>
             </div>
             <button className="flex items-center gap-2 bg-slate-100 text-slate-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-200 transition-all w-fit">
-              <ICONS.Download size={16} /> Export
+              <ICONS.Download size={16} /> Exportálás
             </button>
             <div className="bg-white rounded-xl border border-slate-100 overflow-hidden">
               <table className="w-full text-left">
                 <thead className="bg-slate-50 text-slate-400 text-[10px] font-bold uppercase tracking-wider">
                   <tr>
-                    <th className="px-6 py-4">Date</th>
-                    <th className="px-6 py-4">Revisions</th>
+                    <th className="px-6 py-4">Dátum</th>
+                    <th className="px-6 py-4">Módosítások</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
@@ -8024,26 +8721,26 @@ const Reports: React.FC = () => {
                   <span>2026</span>
                   <ICONS.ChevronRight size={14} className="rotate-90 text-slate-400" />
                 </div>
-                <div className="text-slate-400 text-sm italic">Click to add more filters</div>
+                <div className="text-slate-400 text-sm italic">Kattints további szűrők hozzáadásához</div>
               </div>
               <div className="flex items-center gap-2">
-                <button className="text-sm font-bold text-amber-600 hover:underline">Clear filters</button>
+                <button className="text-sm font-bold text-amber-600 hover:underline">Szűrők törlése</button>
                 <button className="flex items-center gap-2 bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-amber-700 transition-all">
                   <ICONS.RefreshCw size={16} /> Reload
                 </button>
               </div>
             </div>
             <button className="flex items-center gap-2 bg-slate-100 text-slate-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-200 transition-all w-fit">
-              <ICONS.Download size={16} /> Export
+              <ICONS.Download size={16} /> Exportálás
             </button>
             <div className="bg-white rounded-xl border border-slate-100 overflow-hidden">
               <table className="w-full text-left">
                 <thead className="bg-slate-50 text-slate-400 text-[10px] font-bold uppercase tracking-wider">
                   <tr>
-                    <th className="px-6 py-4">Date</th>
-                    <th className="px-6 py-4">Uploads</th>
-                    <th className="px-6 py-4">Uploaders</th>
-                    <th className="px-6 py-4">Uploaded</th>
+                    <th className="px-6 py-4">Dátum</th>
+                    <th className="px-6 py-4">Feltöltések</th>
+                    <th className="px-6 py-4">Feltöltők</th>
+                    <th className="px-6 py-4">Feltöltve</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
@@ -8078,35 +8775,35 @@ const Reports: React.FC = () => {
                   <span>2025/26 (2/2 terms)</span>
                   <ICONS.ChevronRight size={14} className="rotate-90 text-slate-400" />
                 </div>
-                <div className="text-slate-400 text-sm italic">Click to add more filters</div>
+                <div className="text-slate-400 text-sm italic">Kattints további szűrők hozzáadásához</div>
               </div>
               <div className="flex items-center gap-2">
-                <button className="text-sm font-bold text-amber-600 hover:underline">Clear filters</button>
+                <button className="text-sm font-bold text-amber-600 hover:underline">Szűrők törlése</button>
                 <button className="flex items-center gap-2 bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-amber-700 transition-all">
                   <ICONS.RefreshCw size={16} /> Reload
                 </button>
               </div>
             </div>
             <button className="flex items-center gap-2 bg-slate-100 text-slate-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-200 transition-all w-fit">
-              <ICONS.Download size={16} /> Export
+              <ICONS.Download size={16} /> Exportálás
             </button>
             <div className="bg-white rounded-xl border border-slate-100 overflow-hidden">
               <table className="w-full text-left">
                 <thead className="bg-slate-50 text-slate-400 text-[10px] font-bold uppercase tracking-wider">
                   <tr>
-                    <th className="px-6 py-4">Status</th>
-                    <th className="px-6 py-4">Applications</th>
+                    <th className="px-6 py-4">Státusz</th>
+                    <th className="px-6 py-4">Jelentkezések</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
                   {[
-                    { status: 'Blank', count: 289 },
-                    { status: 'Inactive', count: 836 },
-                    { status: 'Submitted', count: 2685 },
-                    { status: 'Reopened', count: 90 },
-                    { status: 'Withdrawn', count: 61 },
-                    { status: 'Closed', count: 23 },
-                    { status: 'ALL STATUSES', count: 3984, isTotal: true },
+                    { status: 'Üres', count: 289 },
+                    { status: 'Inaktív', count: 836 },
+                    { status: 'Beadva', count: 2685 },
+                    { status: 'Újranyitva', count: 90 },
+                    { status: 'Visszavont', count: 61 },
+                    { status: 'Lezárva', count: 23 },
+                    { status: 'MINDEN STÁTUSZ', count: 3984, isTotal: true },
                   ].map((row, i) => (
                     <tr key={i} className={`hover:bg-slate-50 transition-colors ${row.isTotal ? 'bg-slate-50 font-bold' : ''}`}>
                       <td className="px-6 py-4 text-sm text-slate-600">{row.status}</td>
@@ -8128,30 +8825,30 @@ const Reports: React.FC = () => {
                   <span>2025/26 (2/2 terms)</span>
                   <ICONS.ChevronRight size={14} className="rotate-90 text-slate-400" />
                 </div>
-                <div className="text-slate-400 text-sm italic">Click to add more filters</div>
+                <div className="text-slate-400 text-sm italic">Kattints további szűrők hozzáadásához</div>
               </div>
               <div className="flex items-center gap-2">
-                <button className="text-sm font-bold text-amber-600 hover:underline">Clear filters</button>
+                <button className="text-sm font-bold text-amber-600 hover:underline">Szűrők törlése</button>
                 <button className="flex items-center gap-2 bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-amber-700 transition-all">
                   <ICONS.RefreshCw size={16} /> Reload
                 </button>
               </div>
             </div>
             <button className="flex items-center gap-2 bg-slate-100 text-slate-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-200 transition-all w-fit">
-              <ICONS.Download size={16} /> Export
+              <ICONS.Download size={16} /> Exportálás
             </button>
             <div className="bg-white rounded-xl border border-slate-100 overflow-hidden">
               <table className="w-full text-left">
                 <thead className="bg-slate-50 text-slate-400 text-[10px] font-bold uppercase tracking-wider">
                   <tr>
-                    <th className="px-6 py-4">Status</th>
-                    <th className="px-6 py-4">Citizenships</th>
-                    <th className="px-6 py-4">Applications</th>
+                    <th className="px-6 py-4">Státusz</th>
+                    <th className="px-6 py-4">Állampolgárságok</th>
+                    <th className="px-6 py-4">Jelentkezések</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
                   {[
-                    { status: 'Withdrawn', citizenship: 'ALL CITIZENSHIPS', count: 61, isTotal: true },
+                    { status: 'Visszavont', citizenship: 'MINDEN ÁLLAMPOLGÁRSÁG', count: 61, isTotal: true },
                     { status: '', citizenship: 'AF Afghanistan', count: 2 },
                     { status: '', citizenship: 'BD Bangladesh', count: 50 },
                     { status: '', citizenship: 'LR Liberia', count: 1 },
@@ -8182,31 +8879,31 @@ const Reports: React.FC = () => {
                   <span>2025/26 (2/2 terms)</span>
                   <ICONS.ChevronRight size={14} className="rotate-90 text-slate-400" />
                 </div>
-                <div className="text-slate-400 text-sm italic">Click to add more filters</div>
+                <div className="text-slate-400 text-sm italic">Kattints további szűrők hozzáadásához</div>
               </div>
               <div className="flex items-center gap-2">
-                <button className="text-sm font-bold text-amber-600 hover:underline">Clear filters</button>
+                <button className="text-sm font-bold text-amber-600 hover:underline">Szűrők törlése</button>
                 <button className="flex items-center gap-2 bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-amber-700 transition-all">
                   <ICONS.RefreshCw size={16} /> Reload
                 </button>
               </div>
             </div>
             <button className="flex items-center gap-2 bg-slate-100 text-slate-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-200 transition-all w-fit">
-              <ICONS.Download size={16} /> Export
+              <ICONS.Download size={16} /> Exportálás
             </button>
             <div className="bg-white rounded-xl border border-slate-100 overflow-hidden">
               <table className="w-full text-left">
                 <thead className="bg-slate-50 text-slate-400 text-[10px] font-bold uppercase tracking-wider">
                   <tr>
-                    <th className="px-6 py-4">Institution</th>
-                    <th className="px-6 py-4">Blank</th>
-                    <th className="px-6 py-4">Draft</th>
-                    <th className="px-6 py-4">Inactive</th>
-                    <th className="px-6 py-4">Reopened</th>
-                    <th className="px-6 py-4">Submitted</th>
-                    <th className="px-6 py-4">Withdrawn</th>
-                    <th className="px-6 py-4">Closed</th>
-                    <th className="px-6 py-4">Total</th>
+                    <th className="px-6 py-4">Intézmény</th>
+                    <th className="px-6 py-4">Üres</th>
+                    <th className="px-6 py-4">Piszkozat</th>
+                    <th className="px-6 py-4">Inaktív</th>
+                    <th className="px-6 py-4">Újranyitva</th>
+                    <th className="px-6 py-4">Beadva</th>
+                    <th className="px-6 py-4">Visszavont</th>
+                    <th className="px-6 py-4">Lezárva</th>
+                    <th className="px-6 py-4">Összesen</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
@@ -8224,7 +8921,7 @@ const Reports: React.FC = () => {
                 </tbody>
               </table>
             </div>
-            <p className="text-[10px] text-slate-400 italic">Data in this table is delayed by up to 15 minutes</p>
+            <p className="text-[10px] text-slate-400 italic">A táblázat adatai legfeljebb 15 perces késésben vannak</p>
           </div>
         );
       case 'SizeByStatus':
@@ -8237,24 +8934,24 @@ const Reports: React.FC = () => {
                   <span>2025/26 (2/2 terms)</span>
                   <ICONS.ChevronRight size={14} className="rotate-90 text-slate-400" />
                 </div>
-                <div className="text-slate-400 text-sm italic">Click to add more filters</div>
+                <div className="text-slate-400 text-sm italic">Kattints további szűrők hozzáadásához</div>
               </div>
               <div className="flex items-center gap-2">
-                <button className="text-sm font-bold text-amber-600 hover:underline">Clear filters</button>
+                <button className="text-sm font-bold text-amber-600 hover:underline">Szűrők törlése</button>
                 <button className="flex items-center gap-2 bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-amber-700 transition-all">
                   <ICONS.RefreshCw size={16} /> Reload
                 </button>
               </div>
             </div>
             <button className="flex items-center gap-2 bg-slate-100 text-slate-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-200 transition-all w-fit">
-              <ICONS.Download size={16} /> Export
+              <ICONS.Download size={16} /> Exportálás
             </button>
             <div className="bg-white rounded-xl border border-slate-100 overflow-hidden overflow-x-auto">
               <table className="w-full text-left min-w-[800px]">
                 <thead className="bg-slate-50 text-slate-400 text-[10px] font-bold uppercase tracking-wider">
                   <tr>
-                    <th className="px-6 py-4">Status</th>
-                    <th className="px-6 py-4">Total</th>
+                    <th className="px-6 py-4">Státusz</th>
+                    <th className="px-6 py-4">Összesen</th>
                     <th className="px-6 py-4">..-5</th>
                     <th className="px-6 py-4">5-10</th>
                     <th className="px-6 py-4">10-15</th>
@@ -8268,11 +8965,11 @@ const Reports: React.FC = () => {
                 </thead>
                 <tbody className="divide-y divide-slate-50">
                   {[
-                    { status: 'Submitted', total: 2685, c1: 0, c2: 109, c3: 131, c4: 443, c5: 1429, c6: 481, c7: 67, c8: 17, c9: 8 },
-                    { status: 'Reopened', total: 97, c1: 3, c2: 5, c3: 7, c4: 20, c5: 42, c6: 17, c7: 3, c8: 0, c9: 0 },
-                    { status: 'Inactive', total: 861, c1: 419, c2: 251, c3: 67, c4: 27, c5: 66, c6: 26, c7: 5, c8: 0, c9: 0 },
-                    { status: 'Blank', total: 289, c1: 289, c2: 0, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, c8: 0, c9: 0 },
-                    { status: 'Withdrawn', total: 73, c1: 0, c2: 3, c3: 3, c4: 7, c5: 48, c6: 10, c7: 2, c8: 0, c9: 0 },
+                    { status: 'Beadva', total: 2685, c1: 0, c2: 109, c3: 131, c4: 443, c5: 1429, c6: 481, c7: 67, c8: 17, c9: 8 },
+                    { status: 'Újranyitva', total: 97, c1: 3, c2: 5, c3: 7, c4: 20, c5: 42, c6: 17, c7: 3, c8: 0, c9: 0 },
+                    { status: 'Inaktív', total: 861, c1: 419, c2: 251, c3: 67, c4: 27, c5: 66, c6: 26, c7: 5, c8: 0, c9: 0 },
+                    { status: 'Üres', total: 289, c1: 289, c2: 0, c3: 0, c4: 0, c5: 0, c6: 0, c7: 0, c8: 0, c9: 0 },
+                    { status: 'Visszavont', total: 73, c1: 0, c2: 3, c3: 3, c4: 7, c5: 48, c6: 10, c7: 2, c8: 0, c9: 0 },
                   ].map((row, i) => (
                     <tr key={i} className="hover:bg-slate-50 transition-colors">
                       <td className="px-6 py-4 text-sm text-slate-600 font-medium">{row.status}</td>
@@ -8291,7 +8988,7 @@ const Reports: React.FC = () => {
                 </tbody>
               </table>
             </div>
-            <p className="text-[10px] text-slate-400 italic">Data in this table is delayed by up to 33 minutes</p>
+            <p className="text-[10px] text-slate-400 italic">A táblázat adatai legfeljebb 33 perces késésben vannak</p>
           </div>
         );
       case 'ApplicationsMatrix':
@@ -8304,31 +9001,31 @@ const Reports: React.FC = () => {
                   <span>2025/26 (2/2 terms)</span>
                   <ICONS.ChevronRight size={14} className="rotate-90 text-slate-400" />
                 </div>
-                <div className="text-slate-400 text-sm italic">Click to add more filters</div>
+                <div className="text-slate-400 text-sm italic">Kattints további szűrők hozzáadásához</div>
               </div>
               <div className="flex items-center gap-2">
-                <button className="text-sm font-bold text-amber-600 hover:underline">Clear filters</button>
+                <button className="text-sm font-bold text-amber-600 hover:underline">Szűrők törlése</button>
                 <button className="flex items-center gap-2 bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-amber-700 transition-all">
                   <ICONS.RefreshCw size={16} /> Reload
                 </button>
               </div>
             </div>
             <button className="flex items-center gap-2 bg-slate-100 text-slate-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-200 transition-all w-fit">
-              <ICONS.Download size={16} /> Export
+              <ICONS.Download size={16} /> Exportálás
             </button>
             <div className="bg-white rounded-xl border border-slate-100 overflow-hidden overflow-x-auto">
               <table className="w-full text-left min-w-[1000px]">
                 <thead className="bg-slate-50 text-slate-400 text-[10px] font-bold uppercase tracking-wider">
                   <tr>
-                    <th className="px-6 py-4">Citizenship</th>
-                    <th className="px-6 py-4">Blank</th>
-                    <th className="px-6 py-4">Draft</th>
-                    <th className="px-6 py-4">Inactive</th>
-                    <th className="px-6 py-4">Reopened</th>
-                    <th className="px-6 py-4">Submitted</th>
-                    <th className="px-6 py-4">Withdrawn</th>
-                    <th className="px-6 py-4">Closed</th>
-                    <th className="px-6 py-4 font-bold">Total</th>
+                    <th className="px-6 py-4">Állampolgárság</th>
+                    <th className="px-6 py-4">Üres</th>
+                    <th className="px-6 py-4">Piszkozat</th>
+                    <th className="px-6 py-4">Inaktív</th>
+                    <th className="px-6 py-4">Újranyitva</th>
+                    <th className="px-6 py-4">Beadva</th>
+                    <th className="px-6 py-4">Visszavont</th>
+                    <th className="px-6 py-4">Lezárva</th>
+                    <th className="px-6 py-4 font-bold">Összesen</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
@@ -8367,32 +9064,32 @@ const Reports: React.FC = () => {
                   <span>2025/26 (2/2 terms)</span>
                   <ICONS.ChevronRight size={14} className="rotate-90 text-slate-400" />
                 </div>
-                <div className="text-slate-400 text-sm italic">Click to add more filters</div>
+                <div className="text-slate-400 text-sm italic">Kattints további szűrők hozzáadásához</div>
               </div>
               <div className="flex items-center gap-2">
-                <button className="text-sm font-bold text-amber-600 hover:underline">Clear filters</button>
+                <button className="text-sm font-bold text-amber-600 hover:underline">Szűrők törlése</button>
                 <button className="flex items-center gap-2 bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-amber-700 transition-all">
                   <ICONS.RefreshCw size={16} /> Reload
                 </button>
               </div>
             </div>
             <button className="flex items-center gap-2 bg-slate-100 text-slate-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-200 transition-all w-fit">
-              <ICONS.Download size={16} /> Export
+              <ICONS.Download size={16} /> Exportálás
             </button>
             <div className="bg-white rounded-xl border border-slate-100 overflow-hidden overflow-x-auto">
               <table className="w-full text-left min-w-[1000px]">
                 <thead className="bg-slate-50 text-slate-400 text-[10px] font-bold uppercase tracking-wider">
                   <tr>
-                    <th className="px-6 py-4">Citizenship</th>
-                    <th className="px-6 py-4">Unreplied</th>
-                    <th className="px-6 py-4">Nominated</th>
-                    <th className="px-6 py-4">Conditionally accepted</th>
-                    <th className="px-6 py-4">Accepted</th>
-                    <th className="px-6 py-4">Visa</th>
-                    <th className="px-6 py-4">Failed</th>
-                    <th className="px-6 py-4">Arrived</th>
-                    <th className="px-6 py-4">Refused</th>
-                    <th className="px-6 py-4 font-bold">TOTAL</th>
+                    <th className="px-6 py-4">Állampolgárság</th>
+                    <th className="px-6 py-4">Megválaszolatlan</th>
+                    <th className="px-6 py-4">Bírálatra jelölve</th>
+                    <th className="px-6 py-4">Feltételesen felvéve</th>
+                    <th className="px-6 py-4">Elfogadva</th>
+                    <th className="px-6 py-4">Vízum</th>
+                    <th className="px-6 py-4">Elutasítva</th>
+                    <th className="px-6 py-4">Megérkezett</th>
+                    <th className="px-6 py-4">Elutasított kérelem</th>
+                    <th className="px-6 py-4 font-bold">ÖSSZESEN</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
@@ -8453,17 +9150,17 @@ const Reports: React.FC = () => {
                   <span>Spring semester</span>
                   <ICONS.ChevronRight size={14} className="rotate-90 text-slate-400" />
                 </div>
-                <div className="text-slate-400 text-sm italic">Click to add more filters</div>
+                <div className="text-slate-400 text-sm italic">Kattints további szűrők hozzáadásához</div>
               </div>
               <div className="flex items-center gap-2">
-                <button className="text-sm font-bold text-amber-600 hover:underline">Clear filters</button>
+                <button className="text-sm font-bold text-amber-600 hover:underline">Szűrők törlése</button>
                 <button className="flex items-center gap-2 bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-amber-700 transition-all">
                   <ICONS.RefreshCw size={16} /> Reload
                 </button>
               </div>
             </div>
             <button className="flex items-center gap-2 bg-slate-100 text-slate-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-200 transition-all w-fit">
-              <ICONS.Download size={16} /> Export
+              <ICONS.Download size={16} /> Exportálás
             </button>
             
             <div className="bg-white p-8 rounded-xl border border-slate-100">
@@ -8498,14 +9195,14 @@ const Reports: React.FC = () => {
                 <thead className="bg-slate-50 text-slate-400 text-[10px] font-bold uppercase tracking-wider">
                   <tr>
                     <th className="px-6 py-4">{isWeekly ? 'Week' : 'Month'}</th>
-                    <th className="px-6 py-4">Aggregate</th>
-                    <th className="px-6 py-4">Term: Spring semester</th>
+                    <th className="px-6 py-4">Összesítés</th>
+                    <th className="px-6 py-4">Félév: tavaszi félév</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
                   <tr className="hover:bg-slate-50 transition-colors">
                     <td className="px-6 py-4 text-sm text-slate-600">{isWeekly ? '# 1' : 'January'}</td>
-                    <td className="px-6 py-4 text-sm text-slate-600">Enrolments</td>
+                    <td className="px-6 py-4 text-sm text-slate-600">Beiratkozások</td>
                     <td className="px-6 py-4 text-sm text-slate-600">0</td>
                   </tr>
                 </tbody>
@@ -8529,25 +9226,25 @@ const Reports: React.FC = () => {
                   <span>Spring semester</span>
                   <ICONS.ChevronRight size={14} className="rotate-90 text-slate-400" />
                 </div>
-                <div className="text-slate-400 text-sm italic">Click to add more filters</div>
+                <div className="text-slate-400 text-sm italic">Kattints további szűrők hozzáadásához</div>
               </div>
               <div className="flex items-center gap-2">
-                <button className="text-sm font-bold text-amber-600 hover:underline">Clear filters</button>
+                <button className="text-sm font-bold text-amber-600 hover:underline">Szűrők törlése</button>
                 <button className="flex items-center gap-2 bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-amber-700 transition-all">
                   <ICONS.RefreshCw size={16} /> Reload
                 </button>
               </div>
             </div>
             <button className="flex items-center gap-2 bg-slate-100 text-slate-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-200 transition-all w-fit">
-              <ICONS.Download size={16} /> Export
+              <ICONS.Download size={16} /> Exportálás
             </button>
             
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
               <div className="text-sm text-slate-500 space-y-4 leading-relaxed">
-                <p>This report shows how the applicants prioritized the programmes that you have selected above. This helps you determine which are used as a primary choice for the applicants and which are merely used as 'backups'.</p>
-                <p className="font-bold text-slate-700">Especially useful in a collaborative use case among several institutions.</p>
-                <p>If there are multiple institutions using the system in a collaborative fashion, this report shows how well you are doing in relation to other institutions.</p>
-                <p>For example, if you select only one specific programme from above, you will see how many applicants had it as their 1st priority, 2nd priority and so on.</p>
+                <p>Ez a riport megmutatja, hogyan rangsorolták a jelentkezők a fent kiválasztott képzéseket. Ebből látszik, melyiket választják elsődlegesen, és melyiket használják csak „tartaléknak”.</p>
+                <p className="font-bold text-slate-700">Különösen hasznos, ha több intézmény közösen használja a rendszert.</p>
+                <p>Ha több intézmény közösen használja a rendszert, ez a riport megmutatja, hogyan teljesítesz a többi intézményhez képest.</p>
+                <p>Például ha fentről csak egyetlen képzést választasz ki, láthatod, hány jelentkezőnél volt az 1., 2. és további prioritás.</p>
               </div>
               <div className="bg-white p-8 rounded-xl border border-slate-100">
                 <h3 className="text-center text-slate-600 font-medium mb-8">Term: Spring semester</h3>
@@ -8580,33 +9277,33 @@ const Reports: React.FC = () => {
                   <span>2025/26 (2/2 terms)</span>
                   <ICONS.ChevronRight size={14} className="rotate-90 text-slate-400" />
                 </div>
-                <div className="text-slate-400 text-sm italic">Click to add more filters</div>
+                <div className="text-slate-400 text-sm italic">Kattints további szűrők hozzáadásához</div>
               </div>
               <div className="flex items-center gap-2">
-                <button className="text-sm font-bold text-amber-600 hover:underline">Clear filters</button>
+                <button className="text-sm font-bold text-amber-600 hover:underline">Szűrők törlése</button>
                 <button className="flex items-center gap-2 bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-amber-700 transition-all">
                   <ICONS.RefreshCw size={16} /> Reload
                 </button>
               </div>
             </div>
             <button className="flex items-center gap-2 bg-slate-100 text-slate-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-200 transition-all w-fit">
-              <ICONS.Download size={16} /> Export
+              <ICONS.Download size={16} /> Exportálás
             </button>
             <div className="bg-white rounded-xl border border-slate-100 overflow-hidden overflow-x-auto">
               <table className="w-full text-left min-w-[1500px]">
                 <thead className="bg-slate-50 text-slate-400 text-[10px] font-bold uppercase tracking-wider">
                   <tr>
-                    <th className="px-6 py-4">Applicant ID</th>
-                    <th className="px-6 py-4">Full name</th>
-                    <th className="px-6 py-4">First name</th>
-                    <th className="px-6 py-4">Last name</th>
-                    <th className="px-6 py-4">Applicant email</th>
-                    <th className="px-6 py-4">Application ID</th>
-                    <th className="px-6 py-4">Gender</th>
-                    <th className="px-6 py-4">Citizenship</th>
-                    <th className="px-6 py-4">Nationality</th>
-                    <th className="px-6 py-4">Country of residence</th>
-                    <th className="px-6 py-4">Date of birth</th>
+                    <th className="px-6 py-4">Jelentkező azonosító</th>
+                    <th className="px-6 py-4">Teljes név</th>
+                    <th className="px-6 py-4">Keresztnév</th>
+                    <th className="px-6 py-4">Vezetéknév</th>
+                    <th className="px-6 py-4">Jelentkező e-mail címe</th>
+                    <th className="px-6 py-4">Jelentkezés azonosító</th>
+                    <th className="px-6 py-4">Neme</th>
+                    <th className="px-6 py-4">Állampolgárság</th>
+                    <th className="px-6 py-4">Nemzetiség</th>
+                    <th className="px-6 py-4">Tartózkodási ország</th>
+                    <th className="px-6 py-4">Születési dátum</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
@@ -8645,17 +9342,17 @@ const Reports: React.FC = () => {
                   <span>2026</span>
                   <ICONS.ChevronRight size={14} className="rotate-90 text-slate-400" />
                 </div>
-                <div className="text-slate-400 text-sm italic">Click to add more filters</div>
+                <div className="text-slate-400 text-sm italic">Kattints további szűrők hozzáadásához</div>
               </div>
               <div className="flex items-center gap-2">
-                <button className="text-sm font-bold text-amber-600 hover:underline">Clear filters</button>
+                <button className="text-sm font-bold text-amber-600 hover:underline">Szűrők törlése</button>
                 <button className="flex items-center gap-2 bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-amber-700 transition-all">
                   <ICONS.RefreshCw size={16} /> Reload
                 </button>
               </div>
             </div>
             <button className="flex items-center gap-2 bg-slate-100 text-slate-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-200 transition-all w-fit">
-              <ICONS.Download size={16} /> Export
+              <ICONS.Download size={16} /> Exportálás
             </button>
             <div className="bg-white p-12 rounded-xl border border-slate-100 text-center text-slate-400 italic">
               The report contained no data
@@ -8672,40 +9369,40 @@ const Reports: React.FC = () => {
                   <span>2025/26 (2/2 terms)</span>
                   <ICONS.ChevronRight size={14} className="rotate-90 text-slate-400" />
                 </div>
-                <div className="text-slate-400 text-sm italic">Click to add more filters</div>
+                <div className="text-slate-400 text-sm italic">Kattints további szűrők hozzáadásához</div>
               </div>
               <div className="flex items-center gap-2">
-                <button className="text-sm font-bold text-amber-600 hover:underline">Clear filters</button>
+                <button className="text-sm font-bold text-amber-600 hover:underline">Szűrők törlése</button>
                 <button className="flex items-center gap-2 bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-amber-700 transition-all">
                   <ICONS.RefreshCw size={16} /> Reload
                 </button>
               </div>
             </div>
             <button className="flex items-center gap-2 bg-slate-100 text-slate-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-200 transition-all w-fit">
-              <ICONS.Download size={16} /> Export
+              <ICONS.Download size={16} /> Exportálás
             </button>
             <div className="bg-white rounded-xl border border-slate-100 overflow-hidden overflow-x-auto">
               <table className="w-full text-left min-w-[1200px]">
                 <thead className="bg-slate-50 text-slate-400 text-[10px] font-bold uppercase tracking-wider">
                   <tr>
-                    <th className="px-6 py-4">Institution</th>
-                    <th className="px-6 py-4">Department</th>
-                    <th className="px-6 py-4">Awards</th>
-                    <th className="px-6 py-4">Course name</th>
-                    <th className="px-6 py-4">Unreplied</th>
-                    <th className="px-6 py-4">Nominated</th>
-                    <th className="px-6 py-4">Conditionally accepted</th>
-                    <th className="px-6 py-4">Accepted</th>
-                    <th className="px-6 py-4">Visa</th>
-                    <th className="px-6 py-4">Failed</th>
-                    <th className="px-6 py-4">Arrived</th>
-                    <th className="px-6 py-4">Refused</th>
-                    <th className="px-6 py-4 font-bold">Total</th>
+                    <th className="px-6 py-4">Intézmény</th>
+                    <th className="px-6 py-4">Szervezeti egység</th>
+                    <th className="px-6 py-4">Odaítélt ösztöndíjak</th>
+                    <th className="px-6 py-4">Képzés neve</th>
+                    <th className="px-6 py-4">Megválaszolatlan</th>
+                    <th className="px-6 py-4">Bírálatra jelölve</th>
+                    <th className="px-6 py-4">Feltételesen felvéve</th>
+                    <th className="px-6 py-4">Elfogadva</th>
+                    <th className="px-6 py-4">Vízum</th>
+                    <th className="px-6 py-4">Elutasítva</th>
+                    <th className="px-6 py-4">Megérkezett</th>
+                    <th className="px-6 py-4">Elutasított kérelem</th>
+                    <th className="px-6 py-4 font-bold">Összesen</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
                   {[
-                    { inst: 'John von Neumann University', dept: '> ALL DEPARTMENTS', award: 'PC', course: 'Preparatory English and Math course', un: 0, nom: 9, cond: 34, acc: 49, visa: 0, fail: 45, arr: 0, ref: 110, tot: 247 },
+                    { inst: 'John von Neumann University', dept: '> MINDEN SZERVEZETI EGYSÉG', award: 'PC', course: 'Preparatory English and Math course', un: 0, nom: 9, cond: 34, acc: 49, visa: 0, fail: 45, arr: 0, ref: 110, tot: 247 },
                     { inst: '', dept: 'Faculty of Economics and Business', award: 'BSc', course: 'Tourism and Catering', un: 29, nom: 15, cond: 23, acc: 29, visa: 0, fail: 21, arr: 0, ref: 231, tot: 348 },
                     { inst: '', dept: 'Faculty of Economics and Business', award: 'BSc', course: 'Business Administration and Management', un: 25, nom: 16, cond: 23, acc: 23, visa: 0, fail: 13, arr: 0, ref: 179, tot: 279 },
                   ].map((row, i) => (
@@ -8740,33 +9437,33 @@ const Reports: React.FC = () => {
                   <span>2025/26 (2/2 terms)</span>
                   <ICONS.ChevronRight size={14} className="rotate-90 text-slate-400" />
                 </div>
-                <div className="text-slate-400 text-sm italic">Click to add more filters</div>
+                <div className="text-slate-400 text-sm italic">Kattints további szűrők hozzáadásához</div>
               </div>
               <div className="flex items-center gap-2">
-                <button className="text-sm font-bold text-amber-600 hover:underline">Clear filters</button>
+                <button className="text-sm font-bold text-amber-600 hover:underline">Szűrők törlése</button>
                 <button className="flex items-center gap-2 bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-amber-700 transition-all">
                   <ICONS.RefreshCw size={16} /> Reload
                 </button>
               </div>
             </div>
             <button className="flex items-center gap-2 bg-slate-100 text-slate-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-200 transition-all w-fit">
-              <ICONS.Download size={16} /> Export
+              <ICONS.Download size={16} /> Exportálás
             </button>
             <div className="bg-white rounded-xl border border-slate-100 overflow-hidden overflow-x-auto">
               <table className="w-full text-left min-w-[1000px]">
                 <thead className="bg-slate-50 text-slate-400 text-[10px] font-bold uppercase tracking-wider">
                   <tr>
-                    <th className="px-6 py-4">Institution</th>
-                    <th className="px-6 py-4">Awards</th>
-                    <th className="px-6 py-4">Course name</th>
-                    <th className="px-6 py-4">Blank</th>
-                    <th className="px-6 py-4">Draft</th>
-                    <th className="px-6 py-4">Inactive</th>
-                    <th className="px-6 py-4">Reopened</th>
-                    <th className="px-6 py-4">Submitted</th>
-                    <th className="px-6 py-4">Withdrawn</th>
-                    <th className="px-6 py-4">Closed</th>
-                    <th className="px-6 py-4 font-bold">Total</th>
+                    <th className="px-6 py-4">Intézmény</th>
+                    <th className="px-6 py-4">Odaítélt ösztöndíjak</th>
+                    <th className="px-6 py-4">Képzés neve</th>
+                    <th className="px-6 py-4">Üres</th>
+                    <th className="px-6 py-4">Piszkozat</th>
+                    <th className="px-6 py-4">Inaktív</th>
+                    <th className="px-6 py-4">Újranyitva</th>
+                    <th className="px-6 py-4">Beadva</th>
+                    <th className="px-6 py-4">Visszavont</th>
+                    <th className="px-6 py-4">Lezárva</th>
+                    <th className="px-6 py-4 font-bold">Összesen</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
@@ -8805,33 +9502,33 @@ const Reports: React.FC = () => {
                   <span>2025/26 (2/2 terms)</span>
                   <ICONS.ChevronRight size={14} className="rotate-90 text-slate-400" />
                 </div>
-                <div className="text-slate-400 text-sm italic">Click to add more filters</div>
+                <div className="text-slate-400 text-sm italic">Kattints további szűrők hozzáadásához</div>
               </div>
               <div className="flex items-center gap-2">
-                <button className="text-sm font-bold text-amber-600 hover:underline">Clear filters</button>
+                <button className="text-sm font-bold text-amber-600 hover:underline">Szűrők törlése</button>
                 <button className="flex items-center gap-2 bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-amber-700 transition-all">
                   <ICONS.RefreshCw size={16} /> Reload
                 </button>
               </div>
             </div>
             <button className="flex items-center gap-2 bg-slate-100 text-slate-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-200 transition-all w-fit">
-              <ICONS.Download size={16} /> Export
+              <ICONS.Download size={16} /> Exportálás
             </button>
             <div className="bg-white rounded-xl border border-slate-100 overflow-hidden overflow-x-auto">
               <table className="w-full text-left min-w-[1000px]">
                 <thead className="bg-slate-50 text-slate-400 text-[10px] font-bold uppercase tracking-wider">
                   <tr>
-                    <th className="px-6 py-4">Institution</th>
-                    <th className="px-6 py-4">Citizenship</th>
-                    <th className="px-6 py-4">Unreplied</th>
-                    <th className="px-6 py-4">Nominated</th>
-                    <th className="px-6 py-4">Conditionally accepted</th>
-                    <th className="px-6 py-4">Accepted</th>
-                    <th className="px-6 py-4">Visa</th>
-                    <th className="px-6 py-4">Failed</th>
-                    <th className="px-6 py-4">Arrived</th>
-                    <th className="px-6 py-4">Refused</th>
-                    <th className="px-6 py-4 font-bold">Total</th>
+                    <th className="px-6 py-4">Intézmény</th>
+                    <th className="px-6 py-4">Állampolgárság</th>
+                    <th className="px-6 py-4">Megválaszolatlan</th>
+                    <th className="px-6 py-4">Bírálatra jelölve</th>
+                    <th className="px-6 py-4">Feltételesen felvéve</th>
+                    <th className="px-6 py-4">Elfogadva</th>
+                    <th className="px-6 py-4">Vízum</th>
+                    <th className="px-6 py-4">Elutasítva</th>
+                    <th className="px-6 py-4">Megérkezett</th>
+                    <th className="px-6 py-4">Elutasított kérelem</th>
+                    <th className="px-6 py-4 font-bold">Összesen</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
@@ -8870,32 +9567,32 @@ const Reports: React.FC = () => {
                   <span>2025/26 (2/2 terms)</span>
                   <ICONS.ChevronRight size={14} className="rotate-90 text-slate-400" />
                 </div>
-                <div className="text-slate-400 text-sm italic">Click to add more filters</div>
+                <div className="text-slate-400 text-sm italic">Kattints további szűrők hozzáadásához</div>
               </div>
               <div className="flex items-center gap-2">
-                <button className="text-sm font-bold text-amber-600 hover:underline">Clear filters</button>
+                <button className="text-sm font-bold text-amber-600 hover:underline">Szűrők törlése</button>
                 <button className="flex items-center gap-2 bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-amber-700 transition-all">
                   <ICONS.RefreshCw size={16} /> Reload
                 </button>
               </div>
             </div>
             <button className="flex items-center gap-2 bg-slate-100 text-slate-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-200 transition-all w-fit">
-              <ICONS.Download size={16} /> Export
+              <ICONS.Download size={16} /> Exportálás
             </button>
             <div className="bg-white rounded-xl border border-slate-100 overflow-hidden overflow-x-auto">
               <table className="w-full text-left min-w-[1000px]">
                 <thead className="bg-slate-50 text-slate-400 text-[10px] font-bold uppercase tracking-wider">
                   <tr>
-                    <th className="px-6 py-4">Institution</th>
-                    <th className="px-6 py-4">Citizenship</th>
-                    <th className="px-6 py-4">Blank</th>
-                    <th className="px-6 py-4">Draft</th>
-                    <th className="px-6 py-4">Inactive</th>
-                    <th className="px-6 py-4">Reopened</th>
-                    <th className="px-6 py-4">Submitted</th>
-                    <th className="px-6 py-4">Withdrawn</th>
-                    <th className="px-6 py-4">Closed</th>
-                    <th className="px-6 py-4 font-bold">Total</th>
+                    <th className="px-6 py-4">Intézmény</th>
+                    <th className="px-6 py-4">Állampolgárság</th>
+                    <th className="px-6 py-4">Üres</th>
+                    <th className="px-6 py-4">Piszkozat</th>
+                    <th className="px-6 py-4">Inaktív</th>
+                    <th className="px-6 py-4">Újranyitva</th>
+                    <th className="px-6 py-4">Beadva</th>
+                    <th className="px-6 py-4">Visszavont</th>
+                    <th className="px-6 py-4">Lezárva</th>
+                    <th className="px-6 py-4 font-bold">Összesen</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
@@ -9002,7 +9699,7 @@ const Intelligence: React.FC = () => {
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         <div className="p-6 border-b border-slate-50 flex justify-between items-center">
           <div>
-            <h3 className="font-bold text-slate-800 text-lg">Duplicates Finder</h3>
+            <h3 className="font-bold text-slate-800 text-lg">Duplikátum-kereső</h3>
             <p className="text-xs text-slate-400">Jelentkezők, akik több fiókkal vagy hasonló adatokkal rendelkeznek.</p>
           </div>
           <button className="bg-indigo-600 text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-indigo-700 transition-all">
@@ -9054,7 +9751,7 @@ const Intelligence: React.FC = () => {
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         <div className="p-6 border-b border-slate-50">
-          <h3 className="font-bold text-slate-800 text-lg">Expired Passports</h3>
+          <h3 className="font-bold text-slate-800 text-lg">Lejárt útlevelek</h3>
           <p className="text-xs text-slate-400">Lejárt vagy hamarosan lejáró úti okmányok figyelése.</p>
         </div>
         <div className="overflow-x-auto">
@@ -9098,7 +9795,7 @@ const Intelligence: React.FC = () => {
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         <div className="p-6 border-b border-slate-50">
-          <h3 className="font-bold text-slate-800 text-lg">Data Cross-checks</h3>
+          <h3 className="font-bold text-slate-800 text-lg">Adat-keresztellenőrzés</h3>
           <p className="text-xs text-slate-400">Ellentmondásos adatok keresése a jelentkezési lap és a dokumentumok között.</p>
         </div>
         <div className="p-12 text-center">
@@ -9116,7 +9813,7 @@ const Intelligence: React.FC = () => {
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         <div className="p-6 border-b border-slate-50">
-          <h3 className="font-bold text-slate-800 text-lg">Similarity Check (Plagiarism)</h3>
+          <h3 className="font-bold text-slate-800 text-lg">Hasonlóság-vizsgálat (plágium)</h3>
           <p className="text-xs text-slate-400">Motivációs levelek és esszék hasonlóságának ellenőrzése más jelentkezőkével.</p>
         </div>
         <div className="overflow-x-auto">
@@ -9170,25 +9867,25 @@ const Intelligence: React.FC = () => {
           onClick={() => setActiveSubView('duplicates')}
           className={`px-6 py-3 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${activeSubView === 'duplicates' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
         >
-          Duplicates Finder
+          Duplikátum-kereső
         </button>
         <button 
           onClick={() => setActiveSubView('passports')}
           className={`px-6 py-3 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${activeSubView === 'passports' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
         >
-          Expired Passports
+          Lejárt útlevelek
         </button>
         <button 
           onClick={() => setActiveSubView('cross_checks')}
           className={`px-6 py-3 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${activeSubView === 'cross_checks' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
         >
-          Data Cross-checks
+          Adat-keresztellenőrzés
         </button>
         <button 
           onClick={() => setActiveSubView('similarity')}
           className={`px-6 py-3 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${activeSubView === 'similarity' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
         >
-          Similarity Check
+          Hasonlóság-vizsgálat
         </button>
       </div>
 
@@ -9469,6 +10166,27 @@ const App: React.FC = () => {
     const hasApprovalFlow = !!profile && Object.prototype.hasOwnProperty.call(profile, 'approval_status');
     const status = hasApprovalFlow ? (profile.approval_status || 'pending') : 'approved';
     const ov = loadAccountOverride(authUser.email);
+
+    // --- ECHO saját, HATÓKÖRÖS szerepkör-dimenziója (19_echo_roles.sql) ---
+    // MIÉRT NEM A profiles.role-BÓL: a lenti menüszűrő utolsó ága `return false`,
+    // és az afölötti ágak NEVESÍTETT UniPortal-szerepkörökre illeszkednek. Egy új
+    // profiles.role érték (pl. 'OKTATO') tehát egyetlen ágra sem illeszkedne, és a
+    // fiók NULLA menüpontot kapna. Ezért az ECHO külön dimenziót használ: a
+    // UniPortal-szerepkör marad, ami volt, és mellé jön nulla vagy több grant.
+    //
+    // DEFENZÍV, a loadProfile mintája szerint: a 19-es migráció lefutása ELŐTT az
+    // RPC nem létezik, ilyenkor a supabase-js HIBÁT AD VISSZA (nem dob), és mi
+    // üres listát veszünk fel. Ekkor a menü pontosan úgy viselkedik, ahogy eddig.
+    let echoRoles = [];
+    let echoTeacherId = null;
+    try {
+      const { data: er, error: erErr } = await sb.rpc('echo_my_roles');
+      if (!erErr && er) {
+        echoRoles = Array.isArray(er.szerepkorok) ? er.szerepkorok : [];
+        echoTeacherId = er.teacher_id || null;
+      }
+    } catch (e) { /* a 19-es migráció még nem futott le — a menü marad a régi */ }
+
     setCurrentUser({
       id: (profile && profile.id) || authUser.id,
       name: ov.name || (profile && profile.name) || meta.name || authUser.email,
@@ -9480,6 +10198,9 @@ const App: React.FC = () => {
       country: ov.country || (profile && profile.country) || '',
       birthDate: ov.birthDate || (profile && profile.birthDate) || '',
       agencyId: profile && profile.agencyId,
+      // Az ECHO-grantok NEM keverednek a UniPortal szerepkörrel: külön mezők.
+      echoRoles,
+      echoTeacherId,
       avatar: (profile && profile.avatar_url) || ov.avatar || 'https://i.pravatar.cc/150?u=' + encodeURIComponent(authUser.email),
     });
     // Land the superadmin on the approvals queue when something is waiting;
@@ -9627,17 +10348,21 @@ const App: React.FC = () => {
     // (partnerügynökség) nem hallgató, ezért nem véleményez oktatót — a
     // 15_echo_core.sql 11.7 seedje sem veszi fel a kurzusokra.
     if (item.id === AppView.ECHO_STUDENT) return currentUser.role !== 'AGENT';
-    // Az oktatoi eredmenynezet egyelore az ugyintezoi szerepkoroknek es az
-    // adminnak. Az OKTATO az ECHO SAJAT szerepkor-dimenziojaval jon kesobb
-    // (ECHO_ADMIN / ECHO_MIR / ECHO_DEKAN / OKTATO): ma az echo.teacher.profile_id
-    // minden soron NULL, tehat echo.my_teacher_id() NULL-t ad, es oktatokent
-    // belepve a szerver ECHO_FORBIDDEN-t dob. Amig ez igy van, a menupont a
-    // belso szerepkoroknek szol; a hallgato es a kulsos ugynok nem latja.
-    // MERVE: az echo_campaigns() es az echo_rate() torzse is_admin()-t kovetel,
-    // ezert ADMISSIONS / FINANCE eseten a kampany- es kurzusvalaszto ures marad
-    // — a nezet ezt kimondja, nem uresen hallgat.
+    // Az oktatoi eredmenynezet KET fele nyilik, es a ketto FUGGETLEN egymastol.
+    //   (a) UniPortal-oldal, valtozatlanul: a negy belso szerepkor. MERVE: az
+    //       echo_campaigns() es az echo_rate() torzse is_admin()-t kovetel, ezert
+    //       ADMISSIONS / FINANCE eseten a valaszto ures marad — a nezet ezt
+    //       kimondja, nem uresen hallgat.
+    //   (b) ECHO-oldal (19_echo_roles.sql): elo 'OKTATO' grant. Ez az, ami eddig
+    //       hianyzott — az echo.teacher.profile_id MIND a 4 soron NULL volt, tehat
+    //       echo.my_teacher_id() NULL-t adott, es oktatokent minden eredmeny-RPC
+    //       ECHO_FORBIDDEN-t dobott. A kotest az ECHO kampanyok -> Szerepkorok
+    //       fulon lehet letrehozni (public.echo_teacher_link).
+    // A (b) ag DEFENZIV: a 19-es migracio elott az echoRoles ures tomb, tehat a
+    // menupont lathatosaga BETURE ugyanaz marad, mint eddig.
     if (item.id === AppView.ECHO_TEACHER) {
-      return ['SUPERADMIN', 'ADMIN', 'ADMISSIONS', 'FINANCE'].includes(currentUser.role);
+      if (['SUPERADMIN', 'ADMIN', 'ADMISSIONS', 'FINANCE'].includes(currentUser.role)) return true;
+      return (currentUser.echoRoles || []).indexOf('OKTATO') >= 0;
     }
     if (currentUser.role === 'SUPERADMIN' || currentUser.role === 'ADMIN') return true;
     if (currentUser.role === 'AGENT') return [AppView.FEED, AppView.PROGRAMS, AppView.ASSISTANT, AppView.AGENT_PORTAL, AppView.INTERVIEWS].includes(item.id);
@@ -9675,7 +10400,10 @@ const App: React.FC = () => {
           ? <ECHO_AdminView user={currentUser} />
           : <FeedView user={currentUser} onNavigate={setActiveView} />;
       case AppView.ECHO_TEACHER:
-        return ['SUPERADMIN', 'ADMIN', 'ADMISSIONS', 'FINANCE'].includes(currentUser.role)
+        // Ugyanaz a ket feltetel, mint a menuszuresben — kulonben egy OKTATO
+        // latna a menupontot, es a Campus Feed jonne fel helyette.
+        return (['SUPERADMIN', 'ADMIN', 'ADMISSIONS', 'FINANCE'].includes(currentUser.role)
+                || (currentUser.echoRoles || []).indexOf('OKTATO') >= 0)
           ? <ECHO_TeacherView user={currentUser} />
           : <FeedView user={currentUser} onNavigate={setActiveView} />;
       default: return <FeedView user={currentUser} onNavigate={setActiveView} />;
@@ -9783,9 +10511,210 @@ const HU_EN = {
   // messages
   'Felvételi folyamatokhoz kapcsolódó értesítések':'Notifications related to your admission processes','Összes megjelölése olvasottként':'Mark all as read','Felvételi Iroda':'Admissions Office','Feltételes felvételi levél kiállítva':'Conditional acceptance letter issued','Dokumentumok jóváhagyva — szintfelmérő következik':'Documents approved — placement test next','A dokumentumellenőrzés sikeres. Kérjük, töltse ki a matematika szintfelmérőt.':'Document check successful. Please complete the math placement test.','Hiányzó dokumentum':'Missing document','Kérjük, töltse fel a hiányzó dokumentumokat a folyamat folytatásához.':'Please upload the missing documents to continue the process.','UniPortal Rendszer':'UniPortal System','Üdvözöljük a felvételi rendszerben':'Welcome to the admissions system','Itt nyomon követheti az összes felvételi folyamatát és a kapcsolódó üzeneteket.':'Here you can track all your admission processes and related messages.','Üzenet a felvételi irodától':'Message from the Admissions Office',
 };
+/* A státuszmodell (C1/C2) saját szótárrésze — a nagy táblától külön él, hogy
+   a két hely egymástól függetlenül legyen szerkeszthető. Lásd STATUS_I18N. */
+Object.assign(HU_EN, STATUS_I18N);
 const HU_EN_PHRASES = [
   [/Aktív jelentkezések/g,'Active applications'],[/Akív jelentkezések/g,'Active applications'],[/Új jelentkező/g,'New applicant'],[/\bMód\b/g,'Mode'],[/Felvételi folyamat ·/g,'Admission process ·'],[/(\d+)\s*\/\s*(\d+)\s*lépés/g,'$1/$2 steps'],[/(\d+)\s*lépés/g,'$1 steps'],[/(\d+)\s*folyamat\b/g,'$1 process(es)'],[/(\d+)%\s*biztos/g,'$1% confidence'],[/(\d+)\s*lehetséges egyezés/g,'$1 possible match(es)'],[/TESZT — helyes válasz:/g,'TEST — correct answer:'],[/Helyes:/g,'Correct:'],[/(\d+)\s*\/\s*(\d+)\s*helyes/g,'$1 / $2 correct'],[/(\d+)\s*\/\s*(\d+)\s*kötelező hitelesítve/g,'$1 / $2 required verified'],[/(\d+)\s*hiányzik/g,'$1 missing'],[/(\d+)\s*új\b/g,'$1 new'],[/EUR \/ szemeszter/g,'EUR / semester'],[/szemeszter/g,'semester'],[/szem\./g,'sem.'],[/Egyszerűsítsd, majd értékeld ki, ha/g,'Simplify, then evaluate if'],[/Mennyi/g,'What is'],[/Értékeld ki a következő kifejezést!/g,'Evaluate the following expression!'],[/Érték =/g,'Value ='],[/(\d+)\s*folyamat\b/g,'$1 process(es)'],[/(\d+)\s*\/\s*(\d+)\s*kötelező/g,'$1 / $2 required'],
 ];
+// ------------------------------------------------------------------
+// A1/A3/A4/H1/I1 csomag új magyar szövegei. Külön Object.assign hívásban,
+// hogy a nagy HU_EN literált ne kelljen módosítani (kisebb ütközési felület
+// a párhuzamos i18n-munkával). A setupI18n előtt fut, tehát időben van.
+// ------------------------------------------------------------------
+Object.assign(HU_EN, {
+  // A4 — nem az útlevéladatok között
+  'Neme':'Gender','Férfi':'Male','Nő':'Female','Egyéb':'Other','Nincs megadva':'Not provided',
+  // H1 — fizetési tudnivalók
+  'Fontos Tudnivalók':'Important information',
+  'Jelentkezési azonosító':'Application ID',
+  'Ezt írd az átutalás közlemény rovatába.':'Enter this in the payment reference field of your transfer.',
+  'Másolás':'Copy','Másolva':'Copied','Másolás vágólapra':'Copy to clipboard',
+  '• A jelentkezési díj nem visszatérítendő.':'• The application fee is non-refundable.',
+  '• Átutalás esetén kérjük, tüntesd fel a jelentkezési azonosítódat, az útlevélszámodat és a neved.':'• For a bank transfer, please state your application ID, your passport number and your name.',
+  '• A tandíj befizetése után állítjuk ki a végleges befogadó nyilatkozatot a vízumhoz.':'• The final letter of acceptance for the visa is issued once the tuition fee has been paid.',
+  // I1 — valódi interjú vs. AI gyakorlás
+  'Valódi felvételi interjú — időpontfoglalás':'Real admission interview — book a slot',
+  'Ez számít a bírálatba':'This counts toward the decision',
+  'Válassz egy számodra megfelelő időpontot a felvételi beszélgetéshez (Teams/Zoom). A felvételi döntés kizárólag ezen az interjún alapul.':'Pick a slot that suits you for the admission interview (Teams/Zoom). The admission decision is based on this interview alone.',
+  'AI interjú-gyakorlás':'AI interview practice',
+  'Gyakorlás · nem értékeljük':'Practice · not evaluated',
+  'Felkészülési eszköz: 4 tipikus felvételi kérdésre válaszolhatsz videón, hogy magabiztosabb legyél.':'A preparation tool: answer 4 typical admission questions on video to build confidence.',
+  'Ez NEM váltja ki a valódi felvételi interjút':'This does NOT replace the real admission interview',
+  '— a felvétel nálad marad, nem küldjük be a felvételi bizottságnak, és nem számít bele a bírálatba.':'— the recording stays with you, it is not submitted to the admissions committee and does not count toward the decision.',
+  'Csak neked látható':'Visible only to you',
+  'Gyakorlás indítása':'Start practice',
+  'Gyakorlási mód — nem a valódi felvételi interjú':'Practice mode — not the real admission interview',
+  'Felkészülési gyakorlat: 4 tipikus felvételi kérdésre válaszolhatsz videón. Kérjük, győződj meg róla, hogy jól megvilágított helyen vagy és a mikrofonod megfelelően működik.':'A preparation exercise: answer 4 typical admission questions on video. Please make sure you are in a well-lit place and your microphone works properly.',
+  'Ez gyakorlás, nem a valódi felvételi interjú.':'This is practice, not the real admission interview.',
+  'A felvétel nálad marad, nem küldjük be a felvételi bizottságnak, és nem számít bele a bírálatba. A valódi interjúra az Interjúk fülön tudsz időpontot foglalni. Minden kérdésre meghatározott idő áll rendelkezésre — a felvétel automatikusan leáll, ha az idő lejár.':'The recording stays with you, it is not submitted to the admissions committee and does not count toward the decision. You can book the real interview on the Interviews tab. Each question has a fixed time limit — recording stops automatically when it runs out.',
+  'Gyakorlás megkezdése':'Start practice',
+  'Gyakorlás befejezése':'Finish practice',
+  'Készen vagy a gyakorlással!':'Practice complete',
+  'Végigmentél mind a 4 gyakorlókérdésen. A felvételeidet nem küldtük el senkinek — a gyakorlás eredménye nem számít bele a felvételi bírálatba.':'You went through all 4 practice questions. Your recordings were not sent to anyone — the practice result does not count toward the admission decision.',
+  'A következő lépés: foglalj időpontot a valódi felvételi interjúra az Interjúk fülön.':'Next step: book a slot for the real admission interview on the Interviews tab.',
+  'Ehhez a jelentkezőhöz még nem tartozik rögzített felvételi interjú. A jelentkezői portál AI interjú-gyakorlása szándékosan nem jelenik meg itt: az felkészülés, nem bírálati anyag.':'There is no recorded admission interview for this applicant yet. The AI interview practice in the applicant portal deliberately does not appear here: it is preparation, not assessment material.',
+  'Vissza az interjúkhoz':'Back to interviews',
+});
+// A gyakorlás-napló sora számot tartalmaz, ezért kifejezés-mintával fordítjuk.
+HU_EN_PHRASES.push(
+  [/Legutóbbi gyakorlás:/g, 'Last practice:'],
+  [/(\d+)\s*válasz\b/g, '$1 answer(s)'],
+  [/(\d+)\s*kérdés\b/g, '$1 questions'],
+);
+
+/* ============================================================================
+   A2 · A VEGYES NYELVŰ FELÜLET JAVÍTÁSA
+   ----------------------------------------------------------------------------
+   A fordítás utólagos DOM-átírás: ami nincs a szótárban, magyarul marad angol
+   módban. A tesztelői visszajelzés két hibát mért:
+     1) angol módban magyar feliratok maradtak (a szótár hiányos volt),
+     2) magyar módban angol címek maradtak (a Képzések, a Hírfolyam és az AI
+        Asszisztens eleve ANGOLUL volt megírva, a szótár pedig csak HU→EN irányú).
+   A (2)-t úgy egységesítettük, hogy a rendszer FORRÁSNYELVE a magyar: azokat a
+   komponenseket magyarra fordítottuk, és itt kapják vissza az angolt.
+   NEM fordítunk: képzés-, kar- és személyneveket, a tudásbázis szövegeit
+   (azokból dolgozik az AI), a hírfolyam demo-bejegyzéseinek tartalmát, valamint
+   a riportok technikai azonosítóit — ezek adatok, nem felületi feliratok.
+   Az ECHO kérdőív tartalmát a setupI18n [data-echo-noi18n] ága védi; ez a
+   bővítés nem nyúl hozzá.
+   ============================================================================ */
+Object.assign(HU_EN, {
+  // --- A2 · másodlagos felsorolások (ENUM_HU párja) ---
+  'Jóváhagyva':'Approved','Folyamatban':'In Progress','Nincs elkezdve':'Not Started','Fizetve':'Paid','Függőben':'Pending','Sikertelen':'Failed','Feltöltve':'Uploaded','Hitelesítve':'Verified','Hiányzik':'Missing',
+  // --- A2 · Intelligence / compliance ---
+  'Duplikátum-kereső':'Duplicate Finder','Lejárt útlevelek':'Expired Passports','Adat-keresztellenőrzés':'Data Cross-checks','Hasonlóság-vizsgálat':'Similarity Check','Hasonlóság-vizsgálat (plágium)':'Similarity Check (Plagiarism)','Kockázati pontozás':'Risk Scoring','CSV export':'CSV Export',
+  // --- A2 · riportfelület (eredetileg angolul írt képernyők) ---
+  'Kattints további szűrők hozzáadásához':'Click to add more filters','Szűrők törlése':'Clear filters','A táblázat adatai legfeljebb 15 perces késésben vannak':'Data in this table is delayed by up to 15 minutes','A táblázat adatai legfeljebb 33 perces késésben vannak':'Data in this table is delayed by up to 33 minutes','Utolsó módosítások száma':'Num. last revised','Állampolgárság':'Citizenship','Összesen':'Total','ÖSSZESEN':'TOTAL','Jelentkező azonosító':'Applicant ID','Keresztnév':'First name','Vezetéknév':'Last name','Jelentkező e-mail címe':'Applicant email','Jelentkezés azonosító':'Application ID','Tartózkodási ország':'Country of residence','Képzés neve':'Course name','Összesítés':'Aggregate','Képzés':'Programme','MINDEN STÁTUSZ':'ALL STATUSES','MINDEN ÁLLAMPOLGÁRSÁG':'ALL CITIZENSHIPS','> MINDEN SZERVEZETI EGYSÉG':'> ALL DEPARTMENTS',
+  'Hány jelentkező regisztrált egy adott napon?':'How many applicants registered on a particular date?','Megmutatja, hány jelentkezést módosítottak *utoljára* (egyszer vagy többször) egy adott napon.':'Shows how many applications were *last revised* (changed one or more times) on a particular date.','Megmutatja, összesen hány módosítás történt egy adott napon.':'Shows how many revisions altogether there were on a particular date.','A dokumentumfeltöltési aktivitás — jelzi, hogy a jelentkezők dolgoznak-e a jelentkezésükön.':'Shows the document uploading activity - an indicator of applicants working with the applications.','Gyors áttekintés az egyes státuszokban lévő jelentkezések összesített számáról.':'A quick overview of the aggregate numbers of applications in a particular status.','Gyors áttekintés az egyes státuszokban lévő jelentkezések összesített számáról, állampolgárság szerinti bontásban.':'A quick overview of the aggregate numbers of applications in a particular status, with more detailed info per citizenships.','Megmutatja, hány jelentkezés és milyen státuszban tartalmaz egy adott intézmény képzését. Ez a riport minden prioritást figyelembe vesz.':'Shows how many applications and in which statuses have courses from a particular institution. Please note that this report takes into account all priorities.','Megmutatja, hány jelentkezés és milyen státuszban tartalmaz egy adott intézmény képzését — csak akkor számít bele, ha az intézmény az 1. prioritás volt.':'Shows how many applications and in which statuses have courses from a particular institution, counting the applications only if a particular institution was selected as the 1st priority.','Megmutatja, hány jelentkezés és milyen státuszban tartalmaz egy adott intézmény képzését — csak akkor számít bele, ha az intézmény a TOP 3 prioritás egyike volt.':'Shows how many applications and in which statuses have courses from a particular institution, counting the applications only if a particular institution was selected as a TOP 3 priority.','A jelentkezések méretének eloszlása (hisztogram) — így mérhető, mennyire haladtak a jelentkezők.':'Shows the distribution (histogram) of application sizes as a way of measuring applicants progress with their applications.','A jelentkezési státuszok és állampolgárságok mátrixa, mindkét irányú összesítéssel.':'Shows a matrix of application statuses and citizenships with both totals','Az ajánlattípusok és állampolgárságok mátrixa, mindkét irányú összesítéssel.':'Shows a matrix of offer types and citizenships with both totals','Két év jelentkezési statisztikáját hasonlítja össze havi bontásban.':'Compares application statistics between two years on a monthly basis.','Két év jelentkezési statisztikáját hasonlítja össze heti bontásban.':'Compares application statistics between two years on a weekly basis.','Jelentkezői státuszok áttekintése képzésenként':'Overview on applicant statuses per course','Jelentkezői státuszok áttekintése állampolgárságonként':'Overview on applicant statuses per citizenship','Ügyintézői státuszok áttekintése képzésenként':'Overview on admin statuses per course','Ügyintézői státuszok áttekintése állampolgárságonként':'Overview on admin statuses per citizenship','A kiszámlázott összegek, befizetések és lejárt tartozások áttekintése.':'Overview of invoiced amounts, collections and overdues.','Részletes riport a kiállított számlákról.':'Detailed report of issued invoices.','Ez a riport megmutatja, hogyan rangsorolták a jelentkezők a fent kiválasztott képzéseket. Ebből látszik, melyiket választják elsődlegesen, és melyiket használják csak „tartaléknak”.':'This report shows how the applicants prioritized the programmes that you have selected above. This helps you determine which are used as a primary choice for the applicants and which are merely used as ’backups’.','Különösen hasznos, ha több intézmény közösen használja a rendszert.':'Especially useful in a collaborative use case among several institutions.','Ha több intézmény közösen használja a rendszert, ez a riport megmutatja, hogyan teljesítesz a többi intézményhez képest.':'If there are multiple institutions using the system in a collaborative fashion, this report shows how well you are doing in relation to other institutions.','Például ha fentről csak egyetlen képzést választasz ki, láthatod, hány jelentkezőnél volt az 1., 2. és további prioritás.':'For example, if you select only one specific programme from above, you will see how many applicants had it as their 1st priority, 2nd priority and so on.',
+  // --- A2 · maradék magyar felületi szövegek ---
+  'Jelentkező Kiválasztása':'Select an applicant','Státusz: Missing Info':'Status: Missing Info',
+  // --- keresők, beviteli helyőrzők ---
+  'Beszélgetés keresése...':'Search conversations...','Email válasz írása...':'Write an email reply...','ID szerinti keresés...':'Search by ID...','Jelentkező keresése...':'Search applicants...','Keresés a Messengerben':'Search in Messenger','Megjegyzés írása...':'Write a note...','Név vagy szak...':'Name or programme...','Tárgy (opcionális)':'Subject (optional)','Város, Utca, Házszám':'City, street, house number','pl. Fontos tájékoztató a beiratkozásról':'e.g. Important information about enrolment','Írj üzenetet a jelentkezőnek…':'Write a message to the applicant…','Írja ide az üzenet tartalmát...':'Type the message here...','Üzenet küldése...':'Sending message...','Keresés név vagy e-mail szerint…':'Search by name or email…','pl. nem azonosítható jelentkező':'e.g. applicant cannot be identified','Válasszon diákot...':'Select a student...','Válasszon hallgatót...':'Select a student...','Sablon választása…':'Choose a template…','Válasz rögzítése a visszajelzéshez...':'Record an answer for the feedback...','Pl. Adaeze Okonkwo':'e.g. Adaeze Okonkwo','pl. admin@uni.hu':'e.g. admin@uni.hu',
+  // --- általános műveletek, gombok ---
+  'Küldés':'Send','Küldés Indítása':'Start sending','Szerkesztés':'Edit','Szűrés':'Filter','Exportálás':'Export','AI ellenőrzés':'AI Check','Frissítés':'Refresh','Mégse':'Cancel','Mégsem':'Cancel','Döntés':'Decision','Elutasítás':'Reject','Összevonás':'Merge','Összehasonlítás':'Compare','Újraelemzés':'Re-analyse','Újrafeltöltés kérése':'Request re-upload','Változtatások':'Changes','Változtatások Mentése':'Save changes','Profil megtekintése':'View profile','Profilom megnyitása':'Open my profile','Betöltés...':'Loading...','Feltöltés...':'Uploading...','Rendszer betöltése...':'Loading the system...','frissítés…':'refreshing…','Log Exportálása (JSON)':'Export log (JSON)','Checklist Generálása':'Generate checklist','Kifizetés Rögzítése':'Record payout','Felvétel leállítása':'Stop recording','Válasz rögzítése':'Record answer','Ellenőrizze a választ':'Check the answer','← Vissza a főoldalra':'← Back to the home page','Vissza az interjúkhoz':'Back to interviews','Műveletek':'Actions','Hozzáférés-kezelés':'Access management',
+  // --- táblázatfejlécek, mezőnevek ---
+  'Név':'Name','Név / Kapcsolat':'Name / contact','Teljes Név':'Full name','Hallgató':'Student','Hallgató Neve':'Student name','Diákok':'Students','Diák adatai':'Student details','Diák / Időpont':'Student / time','Jelentkezők':'Applicants','Egyéni':'Individual','Egyéni jelentkező':'Direct applicant','Egyéni jelentkezők':'Direct applicants','Elsődleges Jelentkező':'Primary applicant','Aktuális Jelentkező':'Current applicant','Aktív Jelentkezés':'Active application','Státusz':'Status','Típus':'Type','Típus:':'Type:','Típus-egyezés':'Type match','Elvárt típus':'Expected type','Felismert típus':'Detected type','Felismert típus:':'Detected type:','Dátum':'Date','Dátum:':'Date:','Kezdés':'Start','Lejárat':'Expiry','Lejárat Dátuma':'Expiry date','Forrás':'Source','Forrás / UTM':'Source / UTM','Minden forrás':'All sources','Összeg':'Amount','Módszer':'Method','Konverzió':'Conversion','Hasonlóság':'Similarity','Egyezési Arány':'Match rate','Érintett Elem':'Affected item','Észlelt jelzők':'Detected flags','Szak megnevezése':'Programme name','Választott Program':'Selected programme','Beadás dátuma':'Submission date','Város':'City','Lakcím':'Address','Utca, házszám':'Street and number','Ország:':'Country:','IP cím':'IP address','Jelszó':'Password','E-mail Cím':'Email address','E-mail cím':'Email address','E-mail Tárgya':'Email subject','Üzenet Törzse':'Message body','Címzett:':'Recipient:','Kedvezményezett:':'Beneficiary:','Közlemény:':'Reference:','Bíráló:':'Reviewer:','Interjúztató:':'Interviewer:','Időpont:':'Time:','Maximum:':'Maximum:','Javaslat:':'Recommendation:','Indoklás:':'Reason:','Indoklás (opcionális)':'Reason (optional)','Szerepkör a jóváhagyáskor':'Role at approval','A(z)':'The','Regisztrált':'Registered','Felhasználó':'User','Jóváhagyva':'Approved','Aktív':'Active','Függőben lévő':'Pending','Fizetésre vár':'Awaiting payment','Már kifizetve':'Already paid','Feldolgozva':'Processed','Kikapcsolva':'Disabled','Aktív most':'Active now','Oldal 1 / 1':'Page 1 / 1',
+  // --- modulcímek, szekciócímek, leírások ---
+  'Marketing & Lead Kezelés':'Marketing & Lead Management','Rendszerkezelés & Backend':'System Administration & Backend','Pénzügyi Áttekintés':'Financial overview','Jelentkezési Adatok':'Application data','Jelentkezési Lap Szerkesztő':'Application form editor','Személyes Adatok':'Personal details','Személyes Adatok Szekció':'Personal details section','Közös Adatok':'Shared data','Tanulmányi Előzmények':'Academic history','Legmagasabb iskolai végzettség':'Highest level of education','Nyelvtudás':'Language skills','Nyelvi Készségek':'Language skills','Motivációs Levél':'Motivation letter','Szükséges Dokumentumok':'Required documents','Feltöltött dokumentumok':'Uploaded documents','Csatolt Dokumentumok':'Attached documents','Nincs csatolt fájl':'No attached file','Útlevél másolat':'Passport copy','Érvényes útlevél másolata':'Copy of a valid passport','Diploma kivonat':'Diploma transcript','Anyagi fedezet igazolása':'Proof of financial means','Ajánlólevelek':'Letters of recommendation','Ajánlólevelek Minősége':'Quality of recommendation letters','Születési Dátum':'Date of birth','Kapcsolattartó':'Contact person','Ügynökség':'Agency','Ügynökségek Kezelése':'Agency management','Ügynökségi Hierarchia és Teljesítmény':'Agency hierarchy and performance','Új Ügynökség':'New agency','Jutalék %':'Commission %','Jutalék Kulcs (%)':'Commission rate (%)','Jutalék Előzmények (Ügynökségi Kulcsok Alapján)':'Commission history (based on agency rates)','Várható Jutalék':'Expected commission','Commission Wallet (Kalkulált)':'Commission wallet (calculated)','Szerződéskezelés':'Contract management','Minden kiküldött ajánlat kifizetésre került vagy még nem küldtek ajánlatot.':'Every offer sent has been paid out, or no offer has been sent yet.',
+  // --- pénzügy ---
+  'Tandíj':'Tuition fee','Tandíj Összege':'Tuition amount','Tandíj Előleg / Szemeszter díj':'Tuition deposit / semester fee','Tandíj Előlegek (Proforma)':'Tuition deposits (proforma)','Előleg':'Deposit','Jelentkezési díj':'Application fee','Alapértelmezett díjak':'Default fees','Befizetendő tételek':'Items to pay','Nincs függőben lévő fizetés':'No pending payment','Még nincsenek tranzakciók.':'No transactions yet.','Tranzakciók (Jelentkezési díjak & Tandíjak)':'Transactions (application fees & tuition)','Tranzakciós Előzmények':'Transaction history','Bevétel (Havi)':'Revenue (monthly)','Bevételek, jelentkezési díjak és tandíj előlegek központi kezelése.':'Central management of revenue, application fees and tuition deposits.','Fizetési Kapuk':'Payment gateways','Fizetési Mód':'Payment method','Fizetési Portál (Test)':'Payment portal (test)','Fizetési Portál (Teszt Üzemmód)':'Payment portal (test mode)','Online Fizetés (Stripe)':'Online payment (Stripe)','Stripe (Kártya)':'Stripe (card)','Stripe & PayPal össz.':'Stripe & PayPal total','Banki Átutalás':'Bank transfer','Készpénz':'Cash','Azonnali jóváírás':'Instant credit','Biztonságos fizetés a Stripe rendszerén keresztül':'Secure payment through Stripe','Utalási Adatok':'Transfer details','Utalási bizonylat feltöltése':'Upload the transfer receipt','Manuális tranzakció rögzítése a rendszerben':'Record a manual transaction in the system','Új kifizetés rögzítése':'Record a new payout','Átváltási Árfolyam':'Exchange rate','Aktív árfolyam':'Active rate','Deviza':'Currency','Számlázó Rendszerek':'Invoicing systems','Proforma számla automatikus PDF generálása felvétel után.':'Automatic proforma invoice PDF after admission.','Sikeres befizetés esetén automatikus "Fizetve" státusz frissítés.':'Automatic "Paid" status update on successful payment.','Várható (Függő)':'Expected (pending)','Ösztöndíjak és Kedvezmények':'Scholarships and discounts','Új Ösztöndíj':'New scholarship','Kezelje az automatikusan vagy manuálisan kiosztható tandíjkedvezményeket.':'Manage tuition discounts that can be granted automatically or manually.','Költés':'Spend','Költségkeret Felhasználás':'Budget usage','Marketing Költségkeret':'Marketing budget','Fizetési határidő':'Payment deadline','Tandíj határidő közeleg':'Tuition deadline approaching','• A jelentkezési díj nem visszatérítendő.':'• The application fee is non-refundable.','• A tandíj befizetése után állítjuk ki a végleges befogadó nyilatkozatot a vízumhoz.':'• The final acceptance letter for the visa is issued after the tuition payment.','• Átutalás esetén kérjük tüntesd fel a jelentkezési azonosítódat:':'• For bank transfers, please quote your application ID:','Fontos Tudnivalók':'Important information','Gyakori Kérdések':'Frequently asked questions',
+  // --- interjú, videóinterjú, gyakorlás ---
+  'Interjú Időpont Foglalás':'Interview booking','Személyes Interjú Időpont Foglalás':'In-person interview booking','Interjú Kérdések':'Interview questions','Interjú Felkészülés':'Interview preparation','Interjú kitűzve':'Interview scheduled','Interjú időpont':'Interview time','Nincs rögzített interjú':'No recorded interview','Jelenleg nincs szabad időpont.':'No free slots at the moment.','Válassz egy időpontot a listából a folytatáshoz.':'Pick a slot from the list to continue.','Válassz egy szabad időpontot a felvételi interjúhoz.':'Pick a free slot for your admission interview.','Válassz egy számodra megfelelő időpontot a felvételi beszélgetéshez (Teams/Zoom).':'Pick a slot that suits you for the admission interview (Teams/Zoom).','Foglalás Megerősítése':'Confirm booking','Foglalás Összegzése':'Booking summary','Sikeres foglalás!':'Booked successfully!','Automata Videó Interjú':'Automated video interview','Videó Interjú':'Video interview','Videóminőség':'Video quality','Videoüzenet előnyei':'Benefits of a video message','Személyes Videoüzenet Rögzítése':'Record a personal video message','1080p • Aszinkron rögzítés':'1080p • Asynchronous recording','Visszanézheti a felvételt, mielőtt továbblépne a következő kérdésre.':'You can review the recording before moving on to the next question.','Gyakorló Mód Aktív':'Practice mode active','Kérdés':'Question','4 kérdés':'4 questions','Bírálói Segédlet':'Reviewer guide','Működési Segédlet':'Operating guide','Használati Tipp':'Usage tip','Használja a videót gratulációhoz vagy ha a diák elakadt a jelentkezési folyamatban.':'Use video to congratulate the student or when they are stuck in the application process.','Kattintson az indításhoz és rögzítsen egy köszöntőt.':'Click to start and record a greeting.','A személyre szabott videóüzenetek akár 40%-kal növelik a beiratkozási kedvet a Z-generációs diákok körében.':'Personalised video messages raise enrolment intent by up to 40% among Gen-Z students.','A videóinterjú során figyeljen a diák kommunikációs készségére és a válaszok strukturáltságára. Ez a pontozótábla "Kommunikáció" szekciójába tartozik.':'During the video interview watch the student’s communication skills and how structured the answers are. This belongs to the "Communication" section of the scorecard.','A válaszában ne csak a szak nevét említse, hanem kapcsolja össze a korábbi tanulmányaival és a jövőbeli karriercéljaival.':'In your answer do not just name the programme — connect it to your previous studies and future career goals.','"Miért pont ezt a szakot választotta?"':'"Why did you choose this programme in particular?"','Kérjük, mutassa be magát röviden!':'Please introduce yourself briefly.','Miért választotta a Neumann János Egyetemet?':'Why did you choose John von Neumann University?','Miért választotta ezt a szakot?':'Why did you choose this programme?','Milyen szakmai céljai vannak a diploma megszerzése után?':'What are your professional goals after graduation?','Hol látja magát 5 év múlva a diploma megszerzése után?':'Where do you see yourself 5 years after graduation?','Meséljen egy szakmai kihívásról, amit sikeresen megoldott!':'Tell us about a professional challenge you solved successfully.','Hogyan tervezi finanszírozni a tanulmányait?':'How do you plan to finance your studies?','Szakmai Motiváció':'Professional motivation','Összesített Értékelés':'Overall evaluation','Elért pontszám:':'Score achieved:','Beszélgetés a jelentkezővel':'Conversation with the applicant','Még nincs üzenet ezzel a jelentkezővel.':'No messages with this applicant yet.','Még nincs üzenetváltás ezzel a jelentkezővel.':'No message exchange with this applicant yet.','Nincs üzenet.':'No messages.','Csevegések':'Chats','Válasszon egy beszélgetést':'Select a conversation','Rendszerüzenet':'System message',
+  // --- bírálat, kockázat, duplikátum ---
+  'Kockázati Tényezők (Risk Factors)':'Risk factors','Gyanús Másolat':'Suspicious duplicate','Jelentkezők, akik több fiókkal vagy hasonló adatokkal rendelkeznek.':'Applicants with multiple accounts or similar data.','Motivációs levelek és esszék hasonlóságának ellenőrzése más jelentkezőkével.':'Checks motivation letters and essays for similarity with other applicants.','Ellentmondásos adatok keresése a jelentkezési lap és a dokumentumok között.':'Looks for contradictions between the application form and the documents.','Lejárt vagy hamarosan lejáró úti okmányok figyelése.':'Monitors expired or soon-to-expire travel documents.','Az utolsó ellenőrzés óta nem találtunk ellentmondást a rendszerben.':'No contradiction has been found in the system since the last check.','Minden adat konzisztens':'All data is consistent','Nincs gyanús jelző.':'No suspicious flags.','Valódinak tűnik':'Appears genuine','Ellenőrzés javasolt':'Review recommended','Tanulmányi hézag (Study Gap)':'Study gap','Tanulmányi Átlag (GPA)':'Grade point average (GPA)','Pénzügyi háttér':'Financial background','Ország Ellenőrzés':'Country check','Ország-profilok':'Country profiles','Belső adatbázis (ID: 2841)':'Internal database (ID: 2841)','6 hónapon belül lejár':'Expires within 6 months','A diák 4 évet hagyott ki a középiskola és az egyetem között magyarázat nélkül.':'The student has a 4-year gap between secondary school and university with no explanation.','A matematikai alapok erősek, de a programozási tapasztalat kevés.':'The mathematics fundamentals are strong, but programming experience is limited.','A motivációs levél kiemelkedő, látszik a kutatási irányultság.':'The motivation letter is outstanding; a research orientation is visible.','A szponzori igazolás megfelelő, stabil jövedelem látható.':'The sponsor certificate is adequate; stable income is visible.','Egyetértek, de a szakmai gyakorlata ezt kompenzálhatja.':'I agree, but the work experience may compensate for this.','Kiváló technikai háttér.':'Excellent technical background.','Nagyon erős elméleti tudás.':'Very strong theoretical knowledge.','Nigériai jelentkezők elutasítási aránya az elmúlt 12 hónapban: 18%.':'Rejection rate of Nigerian applicants over the last 12 months: 18%.','Származási ország statisztika':'Country-of-origin statistics','Hogyan működik az ajánlás?':'How does the recommendation work?','AI Kiolvasási Eredmény':'AI extraction result','AI elemzés folyamatban…':'AI analysis in progress…','Az AI elemzés nem sikerült.':'The AI analysis failed.','Az AI szolgáltatás nem elérhető ebben a nézetben.':'The AI service is not available in this view.','A dokumentum beolvasása és valódiság-ellenőrzése.':'Reads the document and checks its authenticity.','A PDF nem jeleníthető meg.':'The PDF cannot be displayed.','PDF betöltése…':'Loading PDF…','Dokumentum betöltése…':'Loading document…','PDF, JPG vagy PNG (max. 5MB)':'PDF, JPG or PNG (max. 5MB)','Ehhez a jelentkezőhöz még nincs generálva checklist.':'No checklist has been generated for this applicant yet.','Még nem kértél ajánlólevelet.':'You have not requested a recommendation letter yet.','Még nem érkezett ajánlólevél ehhez a jelentkezőhöz.':'No recommendation letter has arrived for this applicant yet.','Kérj ajánlást oktatóidtól vagy szakmai feletteseidtől.':'Ask your lecturers or professional supervisors for a recommendation.','Kérjen a diáktól egy részletes önéletrajzot és motivációs levelet a kérelem mellé.':'Ask the student for a detailed CV and motivation letter alongside the request.',
+  // --- vízum és compliance ---
+  'Vízum Dokumentumok Bírálata':'Visa document review','Vízum Interjú Felkészítő':'Visa interview preparation','Vízum Kérelem Folyamata':'Visa application process','Vízum Kérelem Állapota':'Visa application status','Vízum szám':'Visa number','Vízum Tájékoztató':'Visa information','Vízumügyintézés hamarosan':'Visa processing coming soon','Kövesse nyomon a vízumigénylésének aktuális állapotát.':'Track the current status of your visa application.','Nemzetközi jelentkezők vízumügyintézésének támogatása és bírálata.':'Support and review of visa processing for international applicants.','Konzulátus':'Consulate','Befogadó nyilatkozat':'Letter of acceptance','Email küldése a vízum folyamatról':'Send an email about the visa process','Ha az ország nem EU-s':'If the country is outside the EU','Várható döntés':'Expected decision','Felvételi döntés':'Admission decision','Feltételes Felvételi (Conditional)':'Conditional admission','Végleges Felvételi (Unconditional)':'Unconditional admission','Feltételes Felvételi Küldése':'Send conditional admission','Új felvétel':'New admission','Gratulálunk!':'Congratulations!','Sikeresen kiküldve!':'Sent successfully!',
+  // --- CRM, marketing, automatizáció ---
+  'Automatizáció':'Automation','Automatizált Munkafolyamatok':'Automated workflows','Új Munkafolyamat':'New workflow','Válasszon egy munkafolyamatot':'Select a workflow','Kattintson a bal oldali listából egy automatizációra a részletek megtekintéséhez és szerkesztéséhez.':'Click an automation in the list on the left to view and edit its details.','Kattintson a bal oldali listából egy hallgatóra, hogy megkezdje a WhatsApp csevegést.':'Click a student in the list on the left to start the WhatsApp chat.','Hozzon létre komplex, több lépéses automatizációkat.':'Create complex, multi-step automations.','Automatikus Emlékeztetők (Nudges)':'Automatic reminders (nudges)','Ezek az üzenetek automatikusan kiküldésre kerülnek bizonyos feltételek teljesülésekor.':'These messages are sent automatically when certain conditions are met.','Emlékeztető küldése 3 nappal a lejárat előtt.':'Send a reminder 3 days before expiry.','Emlékeztetők küldése, ha a jelentkezés hiányos.':'Send reminders when the application is incomplete.','Automatikus válasz és követés nemzetközi leadek számára.':'Automatic reply and follow-up for international leads.','Nemzetközi Érdeklődő Gondozás':'International lead nurturing','Amikor a státusz Missing Info-ra vált':'When the status changes to Missing Info','Amikor új nemzetközi lead érkezik':'When a new international lead arrives','Azonnali üzenet a hiányzó elemekről':'Instant message about the missing items','Részletes lista küldése 24 óra múlva':'Send a detailed list after 24 hours','Befejezetlen jelentkezés':'Incomplete application','Hiánypótlás emlékeztető':'Missing-document reminder','Hiányzó Dokumentum Követés':'Missing document tracking','Email Emlékeztető':'Email reminder','WhatsApp Értesítés':'WhatsApp notification','Célcsoport (Státusz)':'Target group (status)','Válassza ki a célcsoportot státusz alapján.':'Select the target group by status.','Új Tömeges E-mail Küldése':'Send a new bulk email','Új Tömeges Küldés':'New bulk send','Új tömeges e-mail':'New bulk email','Lead Adatbázis':'Lead database','Lead Források Eloszlása':'Lead source distribution','Összes Lead':'All leads','Új Lead':'New lead','Leadek':'Leads','Konverziós Arány':'Conversion rate','Megnyitási arány':'Open rate','Aktív Kampányok':'Active campaigns','Korábbi Kampányok':'Previous campaigns','Új Kampány Indítása':'Launch a new campaign','Új Kampány Létrehozása':'Create a new campaign','Kampány Teljesítmény (Lead vs Konverzió)':'Campaign performance (leads vs conversion)','Kampány teljesítmény és lead konverzió elemzése.':'Analysis of campaign performance and lead conversion.','Az Engagement modul az egyetemi kapcsolattartás központja.':'The Engagement module is the hub of university communications.','Az Admissions Core modul központosított bírálati felülete.':'The centralised review workspace of the Admissions Core module.','Szakmai bírálati felület, pontozás és bizottsági döntéshozatal.':'Professional review workspace, scoring and committee decision-making.','A 24 órás ablak zárva — csak jóváhagyott sablon küldhető.':'The 24-hour window is closed — only an approved template can be sent.','Egyetemi Brosúra 2024':'University brochure 2024','Hivatalos Logo Készlet':'Official logo pack','Kampusz Galéria':'Campus gallery','Tavaszi Nyílt Nap 2024':'Spring Open Day 2024','Early Bird Kedvezmény':'Early Bird discount',
+  // --- rendszerkezelés ---
+  'Szerepkörök':'Roles','Jogosultság Mátrix':'Permission matrix','Szerkeszthető jogosultságok a kiválasztott szerepkörhöz.':'Editable permissions for the selected role.','Eseménynapló (Audit Log)':'Audit log','Audit logok, jogosultságkezelés és API integrációk központja.':'Hub for audit logs, permission management and API integrations.','Részletes naplózás a GDPR megfelelőség érdekében.':'Detailed logging for GDPR compliance.','Adatminőség, biztonság és csalásmegelőzési eszközök.':'Data quality, security and fraud-prevention tools.','API Hozzáférés':'API access','API Engedélyek':'API permissions','Külső Integrációk':'External integrations','Integrációs Megjegyzés':'Integration note','Microsoft Teams Integráció':'Microsoft Teams integration','Teams Integráció':'Teams integration','Microsoft Fiók Összekapcsolása':'Connect Microsoft account','Kapcsolja össze a rendszert a Microsoft 365 naptárral az automatikus interjú szervezéshez.':'Connect the system to the Microsoft 365 calendar for automatic interview scheduling.','Kapcsolja össze az UniPortal Pro-t fizetési kapukkal és számlázó rendszerekkel.':'Connect UniPortal Pro to payment gateways and invoicing systems.','Tanulmányi Rendszer Szinkron':'Student information system sync','Szinkronizáció':'Synchronisation','Nincs csatlakoztatva':'Not connected','Minden rendszer üzemkész':'All systems operational','Élesítés (Production) Útmutató':'Going live (production) guide','Feltételes Logika':'Conditional logic','Legördülő Menü • Kötelező':'Dropdown • Required','Új mező hozzáadása':'Add a new field','A "Submit" gomb automatikusan letiltásra kerül, ha egy kötelező mező üres.':'The "Submit" button is disabled automatically when a required field is empty.','IF \'PhD\' THEN: Publikációs lista feltöltése':'IF \'PhD\' THEN: upload publication list','Teszt fiókok · jelszó:':'Test accounts · password:','Kérjük, jelentkezzen be a folytatáshoz':'Please sign in to continue','Regisztráció elutasítása':'Reject registration','A regisztrációk betöltése nem sikerült.':'Failed to load registrations.','Köszönjük a regisztrációt! A(z)':'Thank you for registering! The','fiókot a rendszergazdának jóvá kell hagynia, mielőtt beléphetsz. Erről e-mailben nem küldünk értesítést — próbáld meg később újra a bejelentkezést.':'account must be approved by an administrator before you can sign in. We do not send an email about this — please try signing in again later.','Utolsó frissítés: 1 órája':'Last updated: 1 hour ago','1 órája':'1 hour ago','3 nap inaktivitás után':'after 3 days of inactivity','7 nappal a határidő előtt':'7 days before the deadline','3 bíráló online':'3 reviewers online','Nincs elkezdve':'Not started','2026. július 15.':'15 July 2026','+14.2% az előző hónaphoz':'+14.2% vs. previous month','PONTOSSÁG: 99.8%':'ACCURACY: 99.8%','(opcionális)':'(optional)','KÖTELEZŐ':'REQUIRED','Összes Diák':'All students','Legutóbbi Jelentkezők':'Recent applicants','Függő Jelentkezések':'Pending applications','Értesítés':'Notification','Válasszon egy riportot az adatok megtekintéséhez.':'Select a report to view the data.','Hitelesítsd a dokumentumokat egyesével a bal oldali listában a „Jóváhagyás” gombbal. Ha minden kötelező dokumentum hitelesítve, a folyamat automatikusan továbblép.':'Verify the documents one by one with the "Approve" button in the list on the left. Once every required document is verified, the process advances automatically.',
+  // ============================================================
+  // A2/b — az EREDETILEG ANGOLUL írt felületek (Képzések, Hírfolyam,
+  // AI Asszisztens) magyarra fordultak a komponensben; itt kapják vissza
+  // az angolt. A képzés-, kar- és programnevek ADATOK, azok angolul maradnak.
+  // ============================================================
+  // Képzések (features/programs.jsx)
+  'Képzések kezelése':'Degree Management','Programok kezelése':'Program Management','Képzési kínálat':'Study Programmes','Képzések':'Degrees','Programok':'Programs','Képzések (BSc, MSc, MA, MBA, PhD), a felvételi folyamataik és a jelentkezők kezelése.':'Manage degree programmes (BSc, MSc, MA, MBA, PhD), their admission flows and applicants.','Előkészítő programok, rövid kurzusok és tanulmányi kirándulások kezelése.':'Manage preparatory programmes, short courses and educational excursions.','Böngészd az NJE angol nyelvű képzéseit és jelentkezz online.':'Explore English-taught programmes at NJE and apply online.','Jelentkezők':'Applicants','Új képzés':'New degree','Új program':'New programme','Még nincs képzés':'No degrees yet','Még nincs program':'No programmes yet','Vedd fel az első képzést (BSc, MSc, MA, MBA vagy PhD).':'Add your first degree programme (BSc, MSc, MA, MBA or PhD).','Vegyél fel egy előkészítő programot, rövid kurzust vagy tanulmányi kirándulást.':'Add a preparatory programme, short course or educational excursion.','Jelentkezéseim':'My applications','Minden képzés':'All programmes','Még nincs jelentkezés':'No applications yet','A hallgatói jelentkezések itt fognak megjelenni.':'Applications from students will appear here.','Előrehaladás':'Progress','Beadva':'Submitted','Szint':'Level','Tandíj':'Tuition','Határidő':'Deadline','Nyitva':'Open','Lezárva':'Closed','Jelentkezés lezárása':'Close applications','Jelentkezés megnyitása':'Open applications','Program':'Program',
+  'Személyes adatok':'Personal details','Angol nyelvtudás':'English proficiency','Online interjú':'Online interview','Beadás és ellenőrzés':'Submit & review','Útlevél (adatoldal)':'Passport (data page)','Érettségi bizonyítvány + leckekönyv':'Secondary-school certificate + transcript','Alapdiploma + leckekönyv':'Bachelor degree + transcript','Mesterdiploma + leckekönyv':'Master degree + transcript','Önéletrajz (CV)':'Curriculum vitae (CV)','Portfólió / munkaminták':'Portfolio / work samples','Kutatási terv':'Research proposal','Ajánlólevél':'Recommendation letter','Előkészítő':'Preparatory','Rövid kurzus':'Short course','Tanulmányi kirándulás':'Educational excursion','Mesterképzés (MA · MBA)':'Master (MA · MBA)','Doktori (PhD)':'Doctoral (PhD)','Piszkozat':'Draft','Bírálat alatt':'In review','Elfogadva':'Accepted','Várólistán':'Waitlisted',
+  'A képzés felvételi lépései':'Admission steps for this programme','Szükséges dokumentumok':'Required documents','A jelentkezés lezárult':'Applications closed','Jelentkezés folytatása':'Continue application','Jelentkezem':'Apply now','Vissza a képzésekhez':'Back to programmes','Mentés és kilépés':'Save & exit later','Erősítsd meg a kapcsolattartási adataidat ehhez a jelentkezéshez.':'Confirm your contact information for this application.','Telefon':'Phone','Állampolgárság szerinti ország':'Country of citizenship','pl. Nigéria':'e.g. Nigeria','Ezek a fájlok kötelezőek ehhez a képzéshez.':'These files are required for this programme.','Add meg az angol nyelvvizsgád adatait (B2 vagy magasabb ajánlott).':'Tell us about your English certificate (B2 or higher recommended).','Bizonyítvány':'Certificate','Válassz…':'Select…','Oktatás nyelve':'Medium of instruction','Egyéb':'Other','Pontszám / szint':'Score / level','Miért ezt a képzést választod? Legalább ~40 karakter (egy rövid bekezdés ideális).':'Why this programme? Minimum ~40 characters (a short paragraph is ideal).','Tisztelt Felvételi Bizottság! …':'Dear Admissions Committee, …','Online interjú foglalása':'Book an online interview','Regisztrációs díj':'Registration fee','Foglald le a helyed — ez a díj erősíti meg a regisztrációdat.':'Secure your place — this fee confirms your registration.','A jelentkezés feldolgozásához egyszeri, vissza nem térítendő jelentkezési díj szükséges.':'A one-time, non-refundable application fee is required to process your application.','Nincs fizetendő díj — minden rendben.':"No fee required — you're all set.",'Kártya':'Card','Banki átutalás':'Bank transfer','Fizetés kártyával':'Pay by card','Banki átutalás rögzítése':'Mark bank transfer','Teszt üzemmód — valódi terhelés nem történik.':'Test mode — no real charge is made.','Jelentkezés beadva':'Application submitted','Ellenőrzés és beadás':'Review & submit','A jelentkezésed a felvételi csoportnál van.':'Your application is with the admissions team.','Ellenőrizd, hogy minden kész, majd add be bírálatra.':'Check everything is complete, then submit for review.','Kész':'Complete','Hiányos':'Incomplete','Jelentkezés beadása':'Submit application','A beadáshoz minden lépést teljesíts':'Complete all steps to submit','Ismeretlen lépés.':'Unknown step.','Három rövid feladat. A megfeleléshez legalább 2 helyes válasz kell.':'Three short tasks. You need at least 2 correct to pass.','Válaszok beadása':'Submit answers','Minden szint':'All levels','Keresés a képzések között…':'Search programmes…','Nincs találat':'No results','Próbálj másik szintet vagy keresőkifejezést.':'Try a different level or search term.','Az adatok és a képzés felvételi folyamatának beállítása':"Configure details and this programme's admission flow",'Képzés neve':'Programme name','Kar':'Faculty','Fokozat megnevezése':'Degree label','Tandíj / szemeszter (EUR)':'Tuition / semester (EUR)','Időtartam (szemeszter)':'Duration (semesters)','Létszámkeret':'Capacity','Jelentkezési határidő':'Application deadline','Címkék (vesszővel elválasztva)':'Tags (comma-separated)','Összefoglaló':'Summary','Képzés borítóképe':'Programme image','Feltöltött kép ✓':'Uploaded image ✓','Kép URL (https://…)':'Image URL (https://…)','Felvételi folyamat — lépések':'Admission flow — steps','Sorrend':'Order','Jelentkezés nyitva':'Applications open','Képzés mentése':'Save programme','Időtartam':'Duration','Nyelv':'Language',
+  // Hírfolyam (features/feed.jsx)
+  'Hír':'News','Galéria':'Gallery','Ajánlat':'Offer','Jegy':'Ticket','Esemény':'Event','Határidő dátuma':'Deadline date','Új hírfolyam-bejegyzés':'New feed post','Minden belépő felhasználó látja':'Published to everyone who signs in','Bejegyzés típusa':'Post type','Cím':'Title','A bejegyzés címe':'Headline of your post','Szöveg':'Body','Írd le a részleteket…':'Write the details…','Borítókép URL':'Cover image URL','…vagy feltöltés':'…or upload','Kép választása':'Choose image','Galéria kép-URL-ek':'Gallery image URLs','Soronként egy (vagy vesszővel elválasztva)':'One per line (or comma-separated)','Kuponkód':'Promo code','Kedvezmény megnevezése':'Discount label','15% tandíjkedvezmény':'15% off tuition','Jegy- vagy kuponkód':'Ticket / voucher code','Dátum és időpont':'Date & time','Helyszín':'Location','Kampusz / Online':'Campus / Online','Létszámkeret (opcionális)':'Capacity (optional)','pl. 200':'e.g. 200','Gomb felirata (opcionális)':'Button label (optional)','Tudj meg többet':'Learn more','Gomb hivatkozása (opcionális)':'Button link (optional)','Kiemelés a hírfolyam tetejére':'Pin to top of feed','Közzététel…':'Publishing…','Bejegyzés közzététele':'Publish post','Kiemelt':'Pinned','Törlés':'Delete','Ma':'Today','A kódod':'Your code','Kérem a jegyet':'Claim your ticket','Ott leszek':"You're going",'Kampusz hírfolyam':'Campus Feed','Hírek, ajánlatok, események és határidők az egyetemtől.':'News, offers, events and deadlines from the university.','Új bejegyzés':'New post','Itt még nincs semmi':'Nothing here yet','Tedd közzé az első bejegyzést, hogy elinduljon a hírfolyam.':'Publish the first post to get the feed going.','Nézz vissza hamarosan a hírekért és eseményekért.':'Check back soon for news and events.','Törlöd a bejegyzést?':'Delete post?',
+  // AI Asszisztens (features/assistant.jsx)
+  'Milyen képzések folynak angol nyelven?':'What programmes are taught in English?','Hogyan jelentkezhetek nemzetközi hallgatóként?':'How do I apply as an international student?','Mennyi a tandíj és a jelentkezési díj?':'How much is the tuition and the application fee?','Milyen dokumentumok kellenek a jelentkezéshez?':'What documents do I need to apply?','Mesélj az ösztöndíjakról':'Tell me about scholarships','Hogyan zajlik a diákvízum-eljárás?':'How does the student visa process work?','Az AI szolgáltatás ebben a nézetben nem érhető el. Segítségért írj az admission@nje.hu címre.':'The AI service is not available in this view. For help, email admission@nje.hu.','Elnézést — most nem tudtam választ adni. Próbáld újra, vagy írj az admission@nje.hu címre.':'Sorry — I could not generate an answer just now. Please try again, or email admission@nje.hu.','Kérdezz az NJE-n való tanulásról':'Ask me about studying at NJE','Képzések, jelentkezés, díjak, dokumentumok, ösztöndíjak és vízum — a hivatalos információk alapján válaszolok, a te nyelveden.':'Programmes, applications, fees, documents, scholarships and visas — I answer from the official info, in your language.','Új beszélgetés':'New chat','Kérdezz bármit az NJE-ről…':'Ask anything about NJE…','Tudásbázis':'Knowledge base','Szöveg hozzáadása':'Add text','Az itt tárolt tartalom adja az asszisztens válaszainak alapját. Az NJE angol nyelvű honlapjáról indul; PDF-ekkel vagy szöveggel (díjtáblázat, GYIK, képzési kiadványok) bővíthető.':'Everything here grounds the assistant’s answers. Seeded from the NJE English website; add PDFs or text (fees sheets, FAQs, programme brochures) to expand it.','Cím (pl. Tandíjak 2026)':'Title (e.g. Tuition fees 2026)','Forrás URL (opcionális)':'Source URL (optional)','Illeszd be a tartalmat…':'Paste the content…','Hozzáadás a tudásbázishoz':'Add to knowledge base','Dokumentum feldolgozása…':'Processing document…','A tudásbázis üres.':'Knowledge base is empty.','Kérdezd az NJE-t':'Ask NJE','Kérdéseid a Neumann János Egyetemen való tanulásról — hivatalos információk alapján megválaszolva.':'Your questions about studying at John von Neumann University, answered from official info.','Csevegés':'Chat','NJE Asszisztens':'NJE Assistant','Kérdezd az NJE Asszisztenst':'Ask the NJE Assistant',
+});
+/* ----------------------------------------------------------------------------
+   A2/c · A FELMÉRÉS UTÁN MARADT SZÖVEGEK
+   ----------------------------------------------------------------------------
+   A felületi szövegek gépi összegyűjtése (JSX szövegcsomópontok, title/
+   placeholder attribútumok, label-mezők) után ez a maradék: ami magyarul volt
+   megírva, de nem szerepelt a szótárban. NEM kerül ide: személynév, képzésnév,
+   a jelentkezők beírt demo-szövegei (motivációs levél), az angol nyelvű
+   felvételi levél törzse (az dokumentum, nem felület) és a riporttípusok
+   technikai azonosítói.
+   -------------------------------------------------------------------------- */
+Object.assign(HU_EN, {
+  // --- riportok: a magyarra fordított fejlécek angol párja ---
+  'Intézmény':'Institution','Visszavont':'Withdrawn','Újranyitva':'Reopened','Inaktív':'Inactive',
+  'Üres':'Blank','Megválaszolatlan':'Unreplied','Elutasított kérelem':'Refused','Megérkezett':'Arrived',
+  'Odaítélt ösztöndíjak':'Awards','Jelentkezések':'Applications','Feltöltések':'Uploads',
+  'Feltöltők':'Uploaders','Módosítások':'Revisions','Nemzetiség':'Nationality',
+  'Szervezeti egység':'Department','Állampolgárságok':'Citizenships','Beiratkozások':'Enrolments',
+  'Félév: tavaszi félév':'Term: Spring semester','Születési dátum':'Date of birth',
+  'Visszautasítva':'Rejected','Exportálás':'Export',
+  // --- rendszerkezelés / monitorozás ---
+  'Monitorozás':'Monitoring','Rendelkezésre állás':'Uptime','Pontszám':'Score','Elérhető':'Online',
+  'Anyagtár':'Resource Library','Jutalék egyenleg':'Commission Wallet',
+  'Jutalék egyenleg (kalkulált)':'Commission Wallet (calculated)',
+  'Karbantartási Mód':'Maintenance mode','Integrációk':'Integrations','Hitelesítés':'Authentication',
+  'Eseménynapló (Audit)':'Audit log','Szerepkörök (RBAC)':'Roles (RBAC)','+ Új szerepkör':'+ New role',
+  'Új API kulcs generálása':'Generate a new API key','Új Webhook hozzáadása':'Add a new webhook',
+  'Beállítások módosítása':'Change settings','Konfigurálás':'Configure',
+  'Előkészítve szinkronizációra':'Queued for sync',
+  'Generáljon API kulcsokat a külső rendszerek (Neptun, ETR, CRM) integrációjához.':'Generate API keys to integrate external systems (Neptun, ETR, CRM).',
+  'A UniPortal automatikusan szinkronizálja a felvételt nyert diákokat a Neptun vagy ETR rendszerrel. Minden adatváltozás azonnal frissül a központi adatbázisban.':'UniPortal syncs admitted students to Neptun or ETR automatically. Every data change is reflected in the central database immediately.',
+  'Használja a drag-and-drop funkciót a szekciók átrendezéséhez. A feltételes logika lehetővé teszi, hogy csak a releváns kérdések jelenjenek meg a diáknak.':'Use drag and drop to reorder the sections. Conditional logic lets you show only the questions that are relevant to the student.',
+  // --- pénzügy ---
+  'Fizetés':'Payment','Bankkártya':'Card','Átutalás':'Bank transfer',
+  'Bankkártyás Fizetés Indítása':'Start card payment','Befizetések (App Fees)':'Payments (application fees)',
+  'Tandíj Előlegek (Deposit)':'Tuition deposits','Deviza Kezelés':'Currency handling',
+  'Kifizetés igénylése':'Request a payout','Új Számla Generálása':'Generate a new invoice',
+  'Ösztöndíjak':'Scholarships','Iktatószám':'Reference number',
+  // --- bírálat, interjú, dokumentumok ---
+  'Dokumentum Bírálat':'Document review','Bizottsági Nézet':'Committee view',
+  'Bizottsági Chat & Megjegyzések':'Committee chat & notes','Jelentkező Pontozótáblája':'Applicant scorecard',
+  'Pontozótábla (Scorecard)':'Scorecard','Kockázatelemzés (Risk)':'Risk analysis',
+  'Egyesített PDF (All-in-One)':'Merged PDF (all-in-one)','Beérkezett Ajánlólevelek':'Reference letters received',
+  'Új Ajánló Hozzáadása':'Add a new referee','Videóinterjú (Aszinkron)':'Video interview (asynchronous)',
+  'Rögzítés':'Record','Rögzítés leállítása':'Stop recording','Foglalás':'Book',
+  'Elfogadás':'Accept','Ajánlatlevél Generátor':'Offer letter generator',
+  'Generálás & Küldés':'Generate & send','Feladatok generálása…':'Generating tasks…',
+  'Az időpontok automatikusan szinkronizálódnak az interjúztatók naptárával.':'Slots are synced automatically with the interviewers’ calendars.',
+  'A foglalás után automatikusan generálunk egy Teams linket, amit e-mailben is megkapsz.':'Once booked, a Teams link is generated automatically and emailed to you.',
+  '"A válaszában ne csak a szak nevét említse, hanem kapcsolja össze a korábbi tanulmányaival és a jövőbeli karriercéljaival."':'"In your answer, do not just name the programme — connect it to your earlier studies and your future career goals."',
+  // --- vízum és compliance ---
+  'Vízum Checklist':'Visa checklist','Interjú Felkészítő':'Interview preparation',
+  'A vízumügyintézési folyamat akkor kezdődik el, amikor a tandíj befizetése megtörtént és a felvételi iroda kiállította a befogadó nyilatkozatot.':'The visa procedure starts once the tuition fee has been paid and the admissions office has issued the letter of acceptance.',
+  'Ez a modul segít a diákoknak felkészülni a nagykövetségi interjúra. A rendszer rögzíti a válaszokat, és AI vagy mentor segítségével pontozza azokat.':'This module helps students prepare for the embassy interview. The system records the answers and scores them with AI or a mentor.',
+  'Gyakorolja a leggyakoribb vízumkérdéseket interaktív felületünkön, és kapjon azonnali visszajelzést.':'Practise the most common visa questions in our interactive tool and get instant feedback.',
+  // --- CRM, marketing, ügynökségek ---
+  'Egyesített Inbox':'Unified inbox','Tömeges E-mail':'Bulk email','Automatikus Emlékeztetők':'Automatic reminders',
+  'Videoüzenet Küldés':'Send a video message','Új üzenet írása':'Write a new message',
+  'Kampányok':'Campaigns','Új Lead Hozzáadása':'Add a new lead','Ügynökségek':'Agencies',
+  'Hiearchia & Al-ügynökök':'Hierarchy & sub-agents','Összes megtekintése':'View all',
+  // --- hallgatói portál / jelentkezés ---
+  'Új jelentkezés indítása':'Start a new application',
+  'Válasszon legalább egy szakot a 2. lépésben.':'Please pick at least one programme in step 2.',
+  'Státusz: Beadva + hiányzó dokumentum':'Status: Submitted + missing document',
+  'Amikor a jelentkezés beadva, de kötelező dokumentum hiányzik':'When the application is submitted but a required document is missing',
+  'Neumann János Egyetem · Kecskemét, Hungary':'John von Neumann University · Kecskemét, Hungary',
+  // --- regisztrációk (features/registrations.jsx) ---
+  'Regisztrációk betöltése…':'Loading registrations…','Állapot frissítése':'Update state',
+  'Hozzáférés visszavonása':'Revoke access','Mégis jóváhagyom':'Approve anyway','Kijelentkezés':'Sign out',
+  'A jelentkezők relatív rangsorát mutatja több intézmény között. Csak több intézmény közös használata esetén van értelme.':'Shows the relative priorities of applicants among several institutions. Useful only in a collaborative use case among several institutions.',
+  // --- legördülő értékek ---
+  'Összes jelentkező':'All applicants','Minden státusz':'All statuses','Minden állampolgárság':'All citizenships',
+});
+/* Interpolált (számot vagy nevet tartalmazó) feliratok — ezek egy szöveg-
+   csomópontban csak töredékként jelennek meg, ezért mintával fordítjuk. */
+HU_EN_PHRASES.push(
+  [/Diákjelentkezések/g, 'Student applications'],
+  [/Megkaptuk a jelentkezésedet a\(z\)/g, 'We have received your application for'],
+  [/képzésre\. A következő lépésekről e-mailben és a Hírfolyamban értesítünk\./g, 'programme. We will notify you about the next steps by email and in the Feed.'],
+  [/(\d+)\s*résztvevő\b/g, '$1 attending'],
+);
+/* Számot tartalmazó feliratok — ezeket kifejezés-mintával fordítjuk. */
+HU_EN_PHRASES.push(
+  [/(\d+)\s*jelentkezés\b/g, '$1 application(s)'],
+  [/(\d+)\s*jelentkező\b/g, '$1 applicant(s)'],
+  [/(\d+)\s*karakter\b/g, '$1 characters'],
+  [/(\d+)\s*dokumentum\b/g, '$1 docs'],
+  [/(\d+)\s*résztvevő\b/g, '$1 attending'],
+  [/(\d+)\s*nap múlva lejár/g, 'Ends in $1 day(s)'],
+  [/(\d+)\s*nap van hátra/g, '$1 days left'],
+  [/(\d+)\s*szemeszter\b/g, '$1 semesters'],
+);
+
 (function setupI18n(){
   if ((localStorage.getItem('nje_lang') || 'hu') !== 'en') return;
   const SKIP = { INPUT:1, TEXTAREA:1, SCRIPT:1, STYLE:1, OPTION:1 };
@@ -9816,6 +10745,34 @@ const HU_EN_PHRASES = [
       root.querySelectorAll('[title]').forEach(el => { if (NO_I18N(el)) return; const k = (el.getAttribute('title')||'').trim(); if (HU_EN[k]) el.setAttribute('title', HU_EN[k]); });
     }
   };
+  /* A legördülő (<select>) értékei. Az OPTION szándékosan a SKIP-ben marad:
+     a legördülők tartalma gyakran ADAT (kurzus-, kampány-, sablon- és
+     profilnév, ECHO-szekciócím), amire a kifejezés-minták nem futhatnak rá.
+     Itt ezért KIZÁRÓLAG pontos szótári egyezéssel fordítunk — ami nincs a
+     HU_EN táblában, az érintetlen marad —, és a [data-echo-noi18n] részfát
+     ugyanúgy kihagyjuk. Enélkül a szűrők értékei ("Minden forrás",
+     "Egyéni jelentkezők") angol módban is magyarul maradtak. */
+  const options = (root) => {
+    if (!root || (root.nodeType !== 1 && root.nodeType !== 9 && root.nodeType !== 11)) return;
+    const list = [];
+    if (root.nodeName === 'OPTION') list.push(root);
+    if (root.querySelectorAll) root.querySelectorAll('option').forEach(el => list.push(el));
+    list.forEach(el => {
+      if (NO_I18N(el)) return;
+      const k = (el.textContent || '').trim();
+      if (!k) return;
+      let to = HU_EN[k];
+      if (!to) {
+        // Gyakori minta: „Felirat (12)" — a darabszám marad, a felirat fordul.
+        const c = k.match(/^(.*\S)\s*\((\d+)\)$/);
+        if (c && HU_EN[c[1]]) to = HU_EN[c[1]] + ' (' + c[2] + ')';
+      }
+      if (!to) return;
+      const only = el.childNodes.length === 1 && el.firstChild.nodeType === 3;
+      if (only) el.firstChild.nodeValue = el.firstChild.nodeValue.replace(k, to);
+      else el.textContent = to;
+    });
+  };
   const walk = (root) => {
     if (!root) return;
     if (root.nodeType === 3) { translateOne(root); return; }
@@ -9826,6 +10783,7 @@ const HU_EN_PHRASES = [
     const nodes = []; while (w.nextNode()) nodes.push(w.currentNode);
     nodes.forEach(n => { const t = translateText(n.nodeValue); if (t !== n.nodeValue) n.nodeValue = t; });
     attrs(root);
+    options(root);
   };
   let obs = null;
   const OPTS = { childList: true, subtree: true, characterData: true };
@@ -9835,7 +10793,12 @@ const HU_EN_PHRASES = [
     obs.disconnect();
     try {
       for (const r of records) {
-        if (r.type === 'characterData') translateOne(r.target);
+        if (r.type === 'characterData') {
+          translateOne(r.target);
+          // Ha React írta át egy <option> szövegét, a szövegcsomópont a SKIP miatt
+          // kimarad — a szülő legördülő értékét külön futtatjuk le.
+          if (r.target && r.target.parentNode && r.target.parentNode.nodeName === 'OPTION') options(r.target.parentNode);
+        }
         else if (r.addedNodes && r.addedNodes.length) r.addedNodes.forEach(n => walk(n));
       }
     } catch (e) {}

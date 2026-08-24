@@ -585,13 +585,20 @@
       }, 5200);
     }
 
-    /* ---- Demo accounts ---- */
+    /* ---- Demo accounts ----
+       A jelentkező a platform elsődleges felhasználója, ezért a hallgatói
+       belépés áll az első helyen, és kiemelt (alapértelmezett) gombként
+       jelenik meg. A többi szerepkör utána, változatlan sorrendben. */
     const DEMOACCTS = [
-      ['Admin', 'admin@uni.hu'], ['Admissions', 'admissions@uni.hu'], ['Finance', 'finance@uni.hu'],
-      ['Agent', 'agent@globalstudy.com'], ['Student', 'ammar@test.com'],
+      ['Student', 'ammar@test.com', true],
+      ['Admin', 'admin@uni.hu'], ['Admissions', 'admissions@uni.hu'],
+      ['Finance', 'finance@uni.hu'], ['Agent', 'agent@globalstudy.com'],
     ];
-    document.getElementById('demoChips').innerHTML = DEMOACCTS.map(([label, email]) => `
-      <button type="button" onclick="fillDemo('${email}')" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 text-slate-600 hover:bg-primary-50 hover:text-primary-700 transition-colors">${label}</button>`).join('');
+    const CHIP_BASE = 'px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ';
+    document.getElementById('demoChips').innerHTML = DEMOACCTS.map(([label, email, primary]) => `
+      <button type="button" onclick="fillDemo('${email}')" title="${email}" class="${CHIP_BASE}${primary
+        ? 'bg-primary-600 text-white shadow-md shadow-primary-600/20 ring-2 ring-primary-200 hover:bg-primary-700'
+        : 'bg-slate-100 text-slate-600 hover:bg-primary-50 hover:text-primary-700'}">${label}${primary ? ' <span class="font-semibold opacity-80">· default</span>' : ''}</button>`).join('');
     function fillDemo(email){ document.getElementById('loginEmail').value = email; document.getElementById('loginPassword').value = 'Demo1234!'; }
     function enterApp(){ window.location.href = 'app.html'; }
     function showErr(id, msg){ const el = document.getElementById(id); el.textContent = msg; el.classList.remove('hidden'); }

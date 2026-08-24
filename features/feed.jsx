@@ -11,12 +11,12 @@ const RSVP_TABLE = 'event_rsvps', RSVP_LS = 'uni_rsvps';
 const TIX_TABLE = 'ticket_claims', TIX_LS = 'uni_tickets';
 
 const FEED_TYPES = {
-  news:     { label: 'News',     icon: Lucide.Newspaper,    tone: 'blue',    accent: 'text-sky-600' },
-  gallery:  { label: 'Gallery',  icon: Lucide.Images,       tone: 'violet',  accent: 'text-violet-600' },
-  promo:    { label: 'Offer',    icon: Lucide.BadgePercent, tone: 'primary', accent: 'text-primary' },
-  ticket:   { label: 'Ticket',   icon: Lucide.Ticket,       tone: 'green',   accent: 'text-emerald-600' },
-  event:    { label: 'Event',    icon: Lucide.CalendarDays, tone: 'amber',   accent: 'text-amber-600' },
-  deadline: { label: 'Deadline', icon: Lucide.AlarmClock,   tone: 'red',     accent: 'text-red-600' },
+  news:     { label: 'Hír',     icon: Lucide.Newspaper,    tone: 'blue',    accent: 'text-sky-600' },
+  gallery:  { label: 'Galéria',  icon: Lucide.Images,       tone: 'violet',  accent: 'text-violet-600' },
+  promo:    { label: 'Ajánlat',    icon: Lucide.BadgePercent, tone: 'primary', accent: 'text-primary' },
+  ticket:   { label: 'Jegy',   icon: Lucide.Ticket,       tone: 'green',   accent: 'text-emerald-600' },
+  event:    { label: 'Esemény',    icon: Lucide.CalendarDays, tone: 'amber',   accent: 'text-amber-600' },
+  deadline: { label: 'Határidő', icon: Lucide.AlarmClock,   tone: 'red',     accent: 'text-red-600' },
 };
 
 function FEED_seed() {
@@ -72,10 +72,10 @@ function FeedComposer({ open, onClose, onPublished, authorName }) {
   const typeBtns = Object.entries(FEED_TYPES);
   const show = (keys) => keys.includes(f.type);
   return (
-    <UModal open={open} onClose={onClose} title="New feed post" subtitle="Published to everyone who signs in" icon={<Lucide.PenSquare size={20} />} max="max-w-2xl">
+    <UModal open={open} onClose={onClose} title="Új hírfolyam-bejegyzés" subtitle="Minden belépő felhasználó látja" icon={<Lucide.PenSquare size={20} />} max="max-w-2xl">
       <div className="space-y-5">
         <div>
-          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Post type</span>
+          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Bejegyzés típusa</span>
           <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
             {typeBtns.map(([key, meta]) => {
               const I = meta.icon; const on = f.type === key;
@@ -87,43 +87,43 @@ function FeedComposer({ open, onClose, onPublished, authorName }) {
             })}
           </div>
         </div>
-        <UField label="Title"><input className={U_input} value={f.title} onChange={e => set('title', e.target.value)} placeholder="Headline of your post" /></UField>
-        <UField label="Body"><textarea className={U_input + ' min-h-[90px] resize-y'} value={f.body} onChange={e => set('body', e.target.value)} placeholder="Write the details…" /></UField>
+        <UField label="Cím"><input className={U_input} value={f.title} onChange={e => set('title', e.target.value)} placeholder="A bejegyzés címe" /></UField>
+        <UField label="Szöveg"><textarea className={U_input + ' min-h-[90px] resize-y'} value={f.body} onChange={e => set('body', e.target.value)} placeholder="Írd le a részleteket…" /></UField>
 
         {show(['news', 'promo', 'event']) && (
           <div className="grid sm:grid-cols-2 gap-4">
-            <UField label="Cover image URL"><input className={U_input} value={f.image_url && f.image_url.startsWith('data:') ? '' : f.image_url} onChange={e => set('image_url', e.target.value)} placeholder="https://…" /></UField>
-            <UField label="…or upload"><label className={U_btnGhost + ' w-full cursor-pointer'}><Lucide.Upload size={15} /> Choose image<input type="file" accept="image/*" className="hidden" onChange={uploadImg} /></label></UField>
+            <UField label="Borítókép URL"><input className={U_input} value={f.image_url && f.image_url.startsWith('data:') ? '' : f.image_url} onChange={e => set('image_url', e.target.value)} placeholder="https://…" /></UField>
+            <UField label="…vagy feltöltés"><label className={U_btnGhost + ' w-full cursor-pointer'}><Lucide.Upload size={15} /> Kép választása<input type="file" accept="image/*" className="hidden" onChange={uploadImg} /></label></UField>
           </div>
         )}
-        {show(['gallery']) && <UField label="Gallery image URLs" hint="One per line (or comma-separated)"><textarea className={U_input + ' min-h-[70px]'} value={f.gallery} onChange={e => set('gallery', e.target.value)} placeholder={"https://…\nhttps://…"} /></UField>}
+        {show(['gallery']) && <UField label="Galéria kép-URL-ek" hint="Soronként egy (vagy vesszővel elválasztva)"><textarea className={U_input + ' min-h-[70px]'} value={f.gallery} onChange={e => set('gallery', e.target.value)} placeholder={"https://…\nhttps://…"} /></UField>}
         {show(['promo']) && (
           <div className="grid sm:grid-cols-2 gap-4">
-            <UField label="Promo code"><input className={U_input} value={f.promo_code} onChange={e => set('promo_code', e.target.value)} placeholder="EARLYBIRD15" /></UField>
-            <UField label="Discount label"><input className={U_input} value={f.discount} onChange={e => set('discount', e.target.value)} placeholder="15% off tuition" /></UField>
+            <UField label="Kuponkód"><input className={U_input} value={f.promo_code} onChange={e => set('promo_code', e.target.value)} placeholder="EARLYBIRD15" /></UField>
+            <UField label="Kedvezmény megnevezése"><input className={U_input} value={f.discount} onChange={e => set('discount', e.target.value)} placeholder="15% tandíjkedvezmény" /></UField>
           </div>
         )}
-        {show(['ticket']) && <UField label="Ticket / voucher code"><input className={U_input} value={f.ticket_code} onChange={e => set('ticket_code', e.target.value)} placeholder="WELCOME-2026" /></UField>}
+        {show(['ticket']) && <UField label="Jegy- vagy kuponkód"><input className={U_input} value={f.ticket_code} onChange={e => set('ticket_code', e.target.value)} placeholder="WELCOME-2026" /></UField>}
         {show(['event', 'ticket', 'promo', 'deadline']) && (
           <div className="grid sm:grid-cols-2 gap-4">
-            <UField label={f.type === 'deadline' ? 'Deadline date' : 'Date & time'}><input type="datetime-local" className={U_input} value={f.event_date} onChange={e => set('event_date', e.target.value)} /></UField>
-            {show(['event', 'ticket']) && <UField label="Location"><input className={U_input} value={f.event_location} onChange={e => set('event_location', e.target.value)} placeholder="Campus / Online" /></UField>}
+            <UField label={f.type === 'deadline' ? 'Határidő dátuma' : 'Dátum és időpont'}><input type="datetime-local" className={U_input} value={f.event_date} onChange={e => set('event_date', e.target.value)} /></UField>
+            {show(['event', 'ticket']) && <UField label="Helyszín"><input className={U_input} value={f.event_location} onChange={e => set('event_location', e.target.value)} placeholder="Kampusz / Online" /></UField>}
           </div>
         )}
-        {show(['event', 'ticket']) && <UField label="Capacity (optional)"><input type="number" className={U_input} value={f.capacity} onChange={e => set('capacity', e.target.value)} placeholder="e.g. 200" /></UField>}
+        {show(['event', 'ticket']) && <UField label="Létszámkeret (opcionális)"><input type="number" className={U_input} value={f.capacity} onChange={e => set('capacity', e.target.value)} placeholder="pl. 200" /></UField>}
         {show(['news', 'promo']) && (
           <div className="grid sm:grid-cols-2 gap-4">
-            <UField label="Button label (optional)"><input className={U_input} value={f.cta_label} onChange={e => set('cta_label', e.target.value)} placeholder="Learn more" /></UField>
-            <UField label="Button link (optional)"><input className={U_input} value={f.cta_href} onChange={e => set('cta_href', e.target.value)} placeholder="https://nje.hu/en" /></UField>
+            <UField label="Gomb felirata (opcionális)"><input className={U_input} value={f.cta_label} onChange={e => set('cta_label', e.target.value)} placeholder="Tudj meg többet" /></UField>
+            <UField label="Gomb hivatkozása (opcionális)"><input className={U_input} value={f.cta_href} onChange={e => set('cta_href', e.target.value)} placeholder="https://nje.hu/en" /></UField>
           </div>
         )}
 
         <label className="flex items-center gap-2.5 text-sm font-bold text-slate-600 cursor-pointer">
-          <input type="checkbox" checked={f.pinned} onChange={e => set('pinned', e.target.checked)} className="w-4 h-4 accent-primary" /> Pin to top of feed
+          <input type="checkbox" checked={f.pinned} onChange={e => set('pinned', e.target.checked)} className="w-4 h-4 accent-primary" /> Kiemelés a hírfolyam tetejére
         </label>
         <div className="flex justify-end gap-3 pt-2">
-          <button className={U_btnGhost} onClick={onClose}>Cancel</button>
-          <button className={U_btnPrimary} disabled={busy || !f.title.trim()} onClick={publish}>{busy ? 'Publishing…' : 'Publish post'}</button>
+          <button className={U_btnGhost} onClick={onClose}>Mégse</button>
+          <button className={U_btnPrimary} disabled={busy || !f.title.trim()} onClick={publish}>{busy ? 'Közzététel…' : 'Bejegyzés közzététele'}</button>
         </div>
       </div>
     </UModal>
@@ -168,11 +168,11 @@ function FeedCard({ post, user, rsvps, tix, onChange, onDelete }) {
         <div className="flex items-center justify-between gap-3 mb-3">
           <div className="flex items-center gap-2">
             <UBadge tone={meta.tone}><I size={12} /> {meta.label}</UBadge>
-            {post.pinned && <UBadge tone="slate"><Lucide.Pin size={11} /> Pinned</UBadge>}
+            {post.pinned && <UBadge tone="slate"><Lucide.Pin size={11} /> Kiemelt</UBadge>}
           </div>
           <div className="flex items-center gap-2">
             <span className="text-[11px] text-slate-400 font-bold">{DL_date(post.created_at)}</span>
-            {isAdmin(user) && <button onClick={() => onDelete(post)} className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-300 hover:bg-red-50 hover:text-red-500 transition-colors" title="Delete"><Lucide.Trash2 size={14} /></button>}
+            {isAdmin(user) && <button onClick={() => onDelete(post)} className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-300 hover:bg-red-50 hover:text-red-500 transition-colors" title="Törlés"><Lucide.Trash2 size={14} /></button>}
           </div>
         </div>
 
@@ -196,7 +196,7 @@ function FeedCard({ post, user, rsvps, tix, onChange, onDelete }) {
                 {post.promo_code} {copied ? <Lucide.Check size={14} /> : <Lucide.Copy size={14} className="opacity-60 group-hover:opacity-100" />}
               </button>
             )}
-            {dleft != null && dleft >= 0 && <span className="text-xs font-bold text-slate-400">Ends in {dleft} day{dleft === 1 ? '' : 's'}</span>}
+            {dleft != null && dleft >= 0 && <span className="text-xs font-bold text-slate-400">{dleft + ' nap múlva lejár'}</span>}
           </div>
         )}
 
@@ -204,7 +204,7 @@ function FeedCard({ post, user, rsvps, tix, onChange, onDelete }) {
         {post.type === 'deadline' && (
           <div className="mt-4 flex items-center gap-3">
             <div className={'px-4 py-3 rounded-2xl font-black ' + (dleft != null && dleft <= 7 ? 'bg-red-50 text-red-600' : 'bg-amber-50 text-amber-600')}>
-              {dleft == null ? DL_date(post.event_date) : dleft < 0 ? 'Closed' : dleft === 0 ? 'Today' : dleft + ' days left'}
+              {dleft == null ? DL_date(post.event_date) : dleft < 0 ? 'Lezárva' : dleft === 0 ? 'Ma' : dleft + ' nap van hátra'}
             </div>
             <span className="text-sm font-bold text-slate-500">{DL_dateLong(post.event_date)}</span>
           </div>
@@ -216,10 +216,10 @@ function FeedCard({ post, user, rsvps, tix, onChange, onDelete }) {
             {myTix ? (
               <div className="flex items-center gap-3 p-4 rounded-2xl bg-emerald-50 border border-emerald-100">
                 <div className="w-10 h-10 rounded-xl bg-emerald-500 text-white flex items-center justify-center"><Lucide.TicketCheck size={20} /></div>
-                <div><div className="text-[11px] font-black text-emerald-700 uppercase tracking-wider">Your code</div><div className="font-mono font-black text-emerald-800 text-lg tracking-wide">{myTix.code}</div></div>
+                <div><div className="text-[11px] font-black text-emerald-700 uppercase tracking-wider">A kódod</div><div className="font-mono font-black text-emerald-800 text-lg tracking-wide">{myTix.code}</div></div>
               </div>
             ) : (
-              <button onClick={claim} className={U_btnPrimary}><Lucide.Ticket size={16} /> Claim your ticket</button>
+              <button onClick={claim} className={U_btnPrimary}><Lucide.Ticket size={16} /> Kérem a jegyet</button>
             )}
           </div>
         )}
@@ -228,9 +228,9 @@ function FeedCard({ post, user, rsvps, tix, onChange, onDelete }) {
         {post.type === 'event' && (
           <div className="mt-5 flex flex-wrap items-center gap-4">
             <button onClick={toggleRsvp} className={iRsvped ? U_btnGhost : U_btnPrimary}>
-              {iRsvped ? <><Lucide.Check size={16} /> You're going</> : <><Lucide.CalendarPlus size={16} /> RSVP</>}
+              {iRsvped ? <><Lucide.Check size={16} /> Ott leszek</> : <><Lucide.CalendarPlus size={16} /> Jelentkezem</>}
             </button>
-            <span className="text-sm font-bold text-slate-400 flex items-center gap-1.5"><Lucide.Users size={15} /> {attendees.length}{post.capacity ? ' / ' + post.capacity : ''} attending</span>
+            <span className="text-sm font-bold text-slate-400 flex items-center gap-1.5"><Lucide.Users size={15} /> {attendees.length}{post.capacity ? ' / ' + post.capacity : ''}{' résztvevő'}</span>
           </div>
         )}
 
@@ -266,18 +266,18 @@ const FeedView = ({ user, onNavigate }) => {
   const filtered = (posts || []).filter(p => filter === 'all' || p.type === filter);
   const ordered = [...filtered].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || new Date(b.created_at) - new Date(a.created_at));
 
-  const chips = [['all', 'All'], ...Object.entries(FEED_TYPES).map(([k, m]) => [k, m.label])];
+  const chips = [['all', 'Összes'], ...Object.entries(FEED_TYPES).map(([k, m]) => [k, m.label])];
 
   return (
     <div className="max-w-3xl mx-auto px-6 sm:px-8 py-8 animate-in fade-in duration-500">
       {/* hero */}
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-6">
         <div>
-          <p className="text-primary font-black text-xs uppercase tracking-widest mb-1">Campus Feed</p>
-          <h1 className="text-3xl font-black text-slate-900 tracking-tight">Welcome back, {firstName} 👋</h1>
-          <p className="text-slate-400 mt-1 font-medium">News, offers, events and deadlines from the university.</p>
+          <p className="text-primary font-black text-xs uppercase tracking-widest mb-1">Kampusz hírfolyam</p>
+          <h1 className="text-3xl font-black text-slate-900 tracking-tight">Üdv újra itt, {firstName} 👋</h1>
+          <p className="text-slate-400 mt-1 font-medium">Hírek, ajánlatok, események és határidők az egyetemtől.</p>
         </div>
-        {isAdmin(user) && <button className={U_btnPrimary} onClick={() => setComposer(true)}><Lucide.Plus size={17} /> New post</button>}
+        {isAdmin(user) && <button className={U_btnPrimary} onClick={() => setComposer(true)}><Lucide.Plus size={17} /> Új bejegyzés</button>}
       </div>
 
       {/* filters */}
@@ -290,7 +290,7 @@ const FeedView = ({ user, onNavigate }) => {
       {posts === null ? (
         <div className="space-y-4">{[0, 1, 2].map(i => <div key={i} className="h-52 rounded-3xl bg-white border border-slate-100 animate-pulse" />)}</div>
       ) : ordered.length === 0 ? (
-        <div className="bg-white rounded-3xl border border-slate-100"><UEmpty icon={<Lucide.Newspaper size={26} />} title="Nothing here yet" subtitle={isAdmin(user) ? 'Publish the first post to get the feed going.' : 'Check back soon for news and events.'} action={isAdmin(user) ? <button className={U_btnPrimary} onClick={() => setComposer(true)}><Lucide.Plus size={16} /> New post</button> : null} /></div>
+        <div className="bg-white rounded-3xl border border-slate-100"><UEmpty icon={<Lucide.Newspaper size={26} />} title="Itt még nincs semmi" subtitle={isAdmin(user) ? 'Tedd közzé az első bejegyzést, hogy elinduljon a hírfolyam.' : 'Nézz vissza hamarosan a hírekért és eseményekért.'} action={isAdmin(user) ? <button className={U_btnPrimary} onClick={() => setComposer(true)}><Lucide.Plus size={16} /> Új bejegyzés</button> : null} /></div>
       ) : (
         <div className="space-y-5">
           {ordered.map(p => <FeedCard key={p.id} post={p} user={user} rsvps={rsvps} tix={tix} onChange={refetch} onDelete={setConfirmDel} />)}
@@ -298,11 +298,11 @@ const FeedView = ({ user, onNavigate }) => {
       )}
 
       <FeedComposer open={composer} onClose={() => setComposer(false)} onPublished={refetch} authorName={user && user.name} />
-      <UModal open={!!confirmDel} onClose={() => setConfirmDel(null)} title="Delete post?" icon={<Lucide.Trash2 size={20} />} max="max-w-md">
-        <p className="text-sm text-slate-500">This removes “{confirmDel && confirmDel.title}” from the feed for everyone.</p>
+      <UModal open={!!confirmDel} onClose={() => setConfirmDel(null)} title="Törlöd a bejegyzést?" icon={<Lucide.Trash2 size={20} />} max="max-w-md">
+        <p className="text-sm text-slate-500">Ezzel a(z) „{confirmDel && confirmDel.title}” bejegyzés mindenki hírfolyamából eltűnik.</p>
         <div className="flex justify-end gap-3 mt-6">
-          <button className={U_btnGhost} onClick={() => setConfirmDel(null)}>Cancel</button>
-          <button className={U_btn + ' bg-red-500 text-white px-5 py-3 hover:bg-red-600'} onClick={async () => { await dlDelete(FEED_TABLE, confirmDel.id, FEED_LS); setConfirmDel(null); refetch(); }}>Delete</button>
+          <button className={U_btnGhost} onClick={() => setConfirmDel(null)}>Mégse</button>
+          <button className={U_btn + ' bg-red-500 text-white px-5 py-3 hover:bg-red-600'} onClick={async () => { await dlDelete(FEED_TABLE, confirmDel.id, FEED_LS); setConfirmDel(null); refetch(); }}>Törlés</button>
         </div>
       </UModal>
     </div>

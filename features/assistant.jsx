@@ -16,12 +16,12 @@ const ASSIST_SYS = [
 ].join(' ');
 
 const ASSIST_SUGGEST = [
-  'What programmes are taught in English?',
-  'How do I apply as an international student?',
-  'How much is the tuition and the application fee?',
-  'What documents do I need to apply?',
-  'Tell me about scholarships',
-  'How does the student visa process work?',
+  'Milyen képzések folynak angol nyelven?',
+  'Hogyan jelentkezhetek nemzetközi hallgatóként?',
+  'Mennyi a tandíj és a jelentkezési díj?',
+  'Milyen dokumentumok kellenek a jelentkezéshez?',
+  'Mesélj az ösztöndíjakról',
+  'Hogyan zajlik a diákvízum-eljárás?',
 ];
 
 async function ASSIST_ask(question, history, docs) {
@@ -95,7 +95,7 @@ function ASSIST_Chat({ user, compact }) {
       const { text, sources } = await ASSIST_ask(question, next, docs);
       setMsgs(m => [...m, { role: 'assistant', content: text, sources: (sources || []).map(s => ({ title: s.title, url: s.url })).filter(s => s.url) }]);
     } catch (e) {
-      setMsgs(m => [...m, { role: 'assistant', content: noAI ? 'The AI service is not available in this view. For help, email admission@nje.hu.' : 'Sorry — I could not generate an answer just now. Please try again, or email admission@nje.hu.', sources: [] }]);
+      setMsgs(m => [...m, { role: 'assistant', content: noAI ? 'Az AI szolgáltatás ebben a nézetben nem érhető el. Segítségért írj az admission@nje.hu címre.' : 'Elnézést — most nem tudtam választ adni. Próbáld újra, vagy írj az admission@nje.hu címre.', sources: [] }]);
     } finally { setBusy(false); }
   };
 
@@ -108,8 +108,8 @@ function ASSIST_Chat({ user, compact }) {
         {msgs.length === 0 && (
           <div className="h-full flex flex-col items-center justify-center text-center px-4">
             <div className="w-14 h-14 rounded-3xl bg-primary/10 text-primary flex items-center justify-center mb-3"><Lucide.Sparkles size={26} /></div>
-            <h4 className="font-black text-slate-800">Ask me about studying at NJE</h4>
-            <p className="text-sm text-slate-400 mt-1 max-w-xs">Programmes, applications, fees, documents, scholarships and visas — I answer from the official info, in your language.</p>
+            <h4 className="font-black text-slate-800">Kérdezz az NJE-n való tanulásról</h4>
+            <p className="text-sm text-slate-400 mt-1 max-w-xs">Képzések, jelentkezés, díjak, dokumentumok, ösztöndíjak és vízum — a hivatalos információk alapján válaszolok, a te nyelveden.</p>
             <div className="flex flex-wrap gap-2 justify-center mt-5 max-w-md">
               {ASSIST_SUGGEST.slice(0, compact ? 3 : 6).map(s => <button key={s} onClick={() => send(s)} className="px-3 py-1.5 rounded-full bg-white border border-slate-200 text-[12px] font-bold text-slate-600 hover:border-primary hover:text-primary transition-colors">{s}</button>)}
             </div>
@@ -135,9 +135,9 @@ function ASSIST_Chat({ user, compact }) {
 
       {/* input */}
       <div className="pt-3 mt-2 border-t border-slate-100">
-        {msgs.length > 0 && <button onClick={clear} className="text-[11px] font-bold text-slate-400 hover:text-slate-600 mb-2 flex items-center gap-1"><Lucide.RotateCcw size={12} /> New chat</button>}
+        {msgs.length > 0 && <button onClick={clear} className="text-[11px] font-bold text-slate-400 hover:text-slate-600 mb-2 flex items-center gap-1"><Lucide.RotateCcw size={12} /> Új beszélgetés</button>}
         <div className="flex items-end gap-2">
-          <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }} rows={1} placeholder="Ask anything about NJE…" className="flex-1 resize-none bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 max-h-32" />
+          <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }} rows={1} placeholder="Kérdezz bármit az NJE-ről…" className="flex-1 resize-none bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 max-h-32" />
           <button onClick={() => send()} disabled={busy || !input.trim()} className="w-11 h-11 flex-none rounded-2xl bg-primary text-white flex items-center justify-center shadow-lg shadow-primary/10 hover:bg-primary/90 disabled:opacity-40 transition-all active:scale-95"><Lucide.ArrowUp size={18} /></button>
         </div>
       </div>
@@ -161,22 +161,22 @@ function ASSIST_KB({ onChange }) {
   return (
     <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6">
       <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2"><Lucide.Database size={18} className="text-primary" /><h3 className="font-black text-slate-800">Knowledge base</h3><UBadge tone="slate">{docs ? docs.length : '…'} docs</UBadge></div>
+        <div className="flex items-center gap-2"><Lucide.Database size={18} className="text-primary" /><h3 className="font-black text-slate-800">Tudásbázis</h3><UBadge tone="slate">{(docs ? docs.length : '…') + ' dokumentum'}</UBadge></div>
         <div className="flex items-center gap-2">
-          <label className={U_btnGhost + ' cursor-pointer text-[13px] py-2 px-4'}><Lucide.Upload size={15} /> Upload<input type="file" accept=".pdf,.txt,.md,.csv,.json" className="hidden" onChange={upload} /></label>
-          <button className={U_btnPrimary + ' text-[13px] py-2 px-4'} onClick={() => setAdding(a => !a)}><Lucide.Plus size={15} /> Add text</button>
+          <label className={U_btnGhost + ' cursor-pointer text-[13px] py-2 px-4'}><Lucide.Upload size={15} /> Feltöltés<input type="file" accept=".pdf,.txt,.md,.csv,.json" className="hidden" onChange={upload} /></label>
+          <button className={U_btnPrimary + ' text-[13px] py-2 px-4'} onClick={() => setAdding(a => !a)}><Lucide.Plus size={15} /> Szöveg hozzáadása</button>
         </div>
       </div>
-      <p className="text-[12px] text-slate-400 mb-4">Everything here grounds the assistant\u2019s answers. Seeded from the NJE English website; add PDFs or text (fees sheets, FAQs, programme brochures) to expand it.</p>
+      <p className="text-[12px] text-slate-400 mb-4">Az itt tárolt tartalom adja az asszisztens válaszainak alapját. Az NJE angol nyelvű honlapjáról indul; PDF-ekkel vagy szöveggel (díjtáblázat, GYIK, képzési kiadványok) bővíthető.</p>
       {adding && (
         <div className="space-y-3 p-4 rounded-2xl bg-slate-50 mb-4">
-          <input className={U_input} placeholder="Title (e.g. Tuition fees 2026)" value={nt.title} onChange={e => setNt(p => ({ ...p, title: e.target.value }))} />
-          <input className={U_input} placeholder="Source URL (optional)" value={nt.url} onChange={e => setNt(p => ({ ...p, url: e.target.value }))} />
-          <textarea className={U_input + ' min-h-[110px]'} placeholder="Paste the content…" value={nt.content} onChange={e => setNt(p => ({ ...p, content: e.target.value }))} />
-          <div className="flex justify-end gap-2"><button className={U_btnGhost + ' text-[13px] py-2 px-4'} onClick={() => setAdding(false)}>Cancel</button><button className={U_btnPrimary + ' text-[13px] py-2 px-4'} disabled={busy} onClick={addText}>Add to knowledge base</button></div>
+          <input className={U_input} placeholder="Cím (pl. Tandíjak 2026)" value={nt.title} onChange={e => setNt(p => ({ ...p, title: e.target.value }))} />
+          <input className={U_input} placeholder="Forrás URL (opcionális)" value={nt.url} onChange={e => setNt(p => ({ ...p, url: e.target.value }))} />
+          <textarea className={U_input + ' min-h-[110px]'} placeholder="Illeszd be a tartalmat…" value={nt.content} onChange={e => setNt(p => ({ ...p, content: e.target.value }))} />
+          <div className="flex justify-end gap-2"><button className={U_btnGhost + ' text-[13px] py-2 px-4'} onClick={() => setAdding(false)}>Mégse</button><button className={U_btnPrimary + ' text-[13px] py-2 px-4'} disabled={busy} onClick={addText}>Hozzáadás a tudásbázishoz</button></div>
         </div>
       )}
-      {busy && !adding && <div className="text-[12px] font-bold text-slate-400 mb-3 flex items-center gap-2"><Lucide.Loader2 size={14} className="animate-spin" /> Processing document…</div>}
+      {busy && !adding && <div className="text-[12px] font-bold text-slate-400 mb-3 flex items-center gap-2"><Lucide.Loader2 size={14} className="animate-spin" /> Dokumentum feldolgozása…</div>}
       <div className="space-y-2 max-h-80 overflow-y-auto custom-scrollbar">
         {(docs || []).map(d => (
           <div key={d.id} className="flex items-center gap-3 p-3 rounded-xl border border-slate-100 hover:bg-slate-50/60">
@@ -186,7 +186,7 @@ function ASSIST_KB({ onChange }) {
             <button onClick={() => remove(d.id)} className="w-8 h-8 rounded-lg text-slate-300 hover:bg-red-50 hover:text-red-500 flex items-center justify-center transition-colors"><Lucide.Trash2 size={15} /></button>
           </div>
         ))}
-        {docs && docs.length === 0 && <div className="text-sm text-slate-400 py-6 text-center">Knowledge base is empty.</div>}
+        {docs && docs.length === 0 && <div className="text-sm text-slate-400 py-6 text-center">A tudásbázis üres.</div>}
       </div>
     </div>
   );
@@ -200,14 +200,14 @@ const AssistantView = ({ user }) => {
     <div className="max-w-4xl mx-auto px-6 sm:px-8 py-8 animate-in fade-in duration-500">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-6">
         <div>
-          <p className="text-primary font-black text-xs uppercase tracking-widest mb-1">AI Assistant</p>
-          <h1 className="text-3xl font-black text-slate-900 tracking-tight">Ask NJE</h1>
-          <p className="text-slate-400 mt-1 font-medium">Your questions about studying at John von Neumann University, answered from official info.</p>
+          <p className="text-primary font-black text-xs uppercase tracking-widest mb-1">AI Asszisztens</p>
+          <h1 className="text-3xl font-black text-slate-900 tracking-tight">Kérdezd az NJE-t</h1>
+          <p className="text-slate-400 mt-1 font-medium">Kérdéseid a Neumann János Egyetemen való tanulásról — hivatalos információk alapján megválaszolva.</p>
         </div>
         {admin && (
           <div className="flex items-center gap-1 bg-white border border-slate-100 rounded-2xl p-1">
-            <button onClick={() => setTab('chat')} className={'px-4 py-2 rounded-xl text-[13px] font-bold transition-colors ' + (tab === 'chat' ? 'bg-primary text-white' : 'text-slate-500')}>Chat</button>
-            <button onClick={() => setTab('kb')} className={'px-4 py-2 rounded-xl text-[13px] font-bold transition-colors ' + (tab === 'kb' ? 'bg-primary text-white' : 'text-slate-500')}>Knowledge base</button>
+            <button onClick={() => setTab('chat')} className={'px-4 py-2 rounded-xl text-[13px] font-bold transition-colors ' + (tab === 'chat' ? 'bg-primary text-white' : 'text-slate-500')}>Csevegés</button>
+            <button onClick={() => setTab('kb')} className={'px-4 py-2 rounded-xl text-[13px] font-bold transition-colors ' + (tab === 'kb' ? 'bg-primary text-white' : 'text-slate-500')}>Tudásbázis</button>
           </div>
         )}
       </div>
@@ -226,13 +226,13 @@ const AssistantWidget = ({ user }) => {
       {open && (
         <div className="fixed bottom-24 right-6 z-[95] w-[min(400px,calc(100vw-3rem))] bg-white rounded-3xl shadow-2xl border border-slate-100 flex flex-col overflow-hidden animate-in slide-in-from-bottom-4 fade-in duration-200">
           <div className="flex items-center justify-between px-4 py-3 bg-primary text-white">
-            <div className="flex items-center gap-2 font-black"><Lucide.Sparkles size={18} /> NJE Assistant</div>
+            <div className="flex items-center gap-2 font-black"><Lucide.Sparkles size={18} /> NJE Asszisztens</div>
             <button onClick={() => setOpen(false)} className="w-8 h-8 rounded-lg hover:bg-white/20 flex items-center justify-center"><Lucide.X size={17} /></button>
           </div>
           <div className="p-4"><ASSIST_Chat user={user} compact={true} /></div>
         </div>
       )}
-      <button onClick={() => setOpen(o => !o)} className="fixed bottom-6 right-6 z-[95] w-14 h-14 rounded-2xl bg-primary text-white shadow-2xl shadow-primary/30 flex items-center justify-center hover:bg-primary/90 transition-all active:scale-95" title="Ask the NJE Assistant">
+      <button onClick={() => setOpen(o => !o)} className="fixed bottom-6 right-6 z-[95] w-14 h-14 rounded-2xl bg-primary text-white shadow-2xl shadow-primary/30 flex items-center justify-center hover:bg-primary/90 transition-all active:scale-95" title="Kérdezd az NJE Asszisztenst">
         {open ? <Lucide.ChevronDown size={24} /> : <Lucide.Sparkles size={24} />}
       </button>
     </>

@@ -50,6 +50,56 @@ function ECHO_txt(o, lang) {
   return o.hu || o.en || '';
 }
 
+/* A KÉRDŐÍV NYELVE — 3. § (1): a hallgató a KÉPZÉS nyelvén kapja a kérdőívet.
+   Ez NEM ugyanaz, mint a fejléc nyelvválasztója (ECHO_lang): a felület kerete
+   maradhat a felhasználó nyelvén, a szenátus által jóváhagyott kérdés- és
+   opciószövegek viszont a kurzuséhoz kötöttek. Két hallgató ugyanazon a
+   kurzuson ugyanazt a kérdést kell hogy lássa — különben a válaszaik nem
+   ugyanarra a kérdésre adott válaszok.
+
+   A kurzus nyelve az echo.course.lang oszlopból jön, az echo_get_form()
+   'course'.'lang' mezőjén. Ha hiányzik, magyar. */
+function ECHO_courseLang(course) {
+  const raw = String((course && course.lang) || '').trim().toLowerCase();
+  if (raw === 'en' || raw.indexOf('angol') >= 0 || raw.indexOf('english') >= 0) return 'en';
+  return 'hu';
+}
+
+/* Van-e a kérdőívnek használható fordítása az adott nyelven.
+   AZ ÉLESÍTÉS-ELŐTTI ELLENŐRZÉS EZT MÁR GARANTÁLJA: az echo.template_validate()
+   'hianyzo_angol_szakaszcim' / 'hianyzo_angol_forditas' / 'hianyzo_angol_opcio'
+   kóddal HIBÁT ad, és az echo_template_transition() élesítéskor ezt kikényszeríti
+   — vagyis egy 'live' verzióban minden szakasznak, kérdésnek és opciónak VAN
+   angol szövege. Ez a függvény tehát nem a normál út, hanem védőháló: a
+   szerkesztő előnézetében és a régi (1. verziós, még a validátor előtti)
+   kérdőíveknél előfordulhat hiányzó fordítás, és ilyenkor jobb magyarul
+   megmutatni a kérdést, mint üresen. */
+function ECHO_hasTranslation(form, lang) {
+  if (lang !== 'en') return true;                     // magyarul mindig van
+  const secs = (form && Array.isArray(form.sections)) ? form.sections : [];
+  if (!secs.length) return true;                      // nincs mit fordítani
+  for (let i = 0; i < secs.length; i++) {
+    const sec = secs[i];
+    if (!String(sec.en || '').trim()) return false;
+    const qs = Array.isArray(sec.questions) ? sec.questions : [];
+    for (let j = 0; j < qs.length; j++) {
+      if (!String(qs[j].en || '').trim()) return false;
+    }
+  }
+  return true;
+}
+
+/* A kitöltő tényleges nyelve. A kurzusé dönt; ha azon a nyelven nincs
+   fordítás, magyarra esünk vissza. A visszaesés TÉNYE is kell a hívónak,
+   hogy a felület megmondhassa a hallgatónak, miért magyarul látja. */
+function ECHO_formLang(course, form) {
+  const want = ECHO_courseLang(course);
+  return ECHO_hasTranslation(form, want) ? want : 'hu';
+}
+function ECHO_langFellBack(course, form) {
+  return ECHO_courseLang(course) !== ECHO_formLang(course, form);
+}
+
 /* ADATBÓL JÖVŐ SZÖVEG BURKA.
    Az app.jsx-ben futó HU→EN fordító EN módban a DOM szövegcsomópontjait írja
    át reguláris kifejezésekkel. A kérdőív kérdés- és opciószövegei adatból
@@ -85,6 +135,11 @@ const ECHO_ERR = {
   ECHO_CAMPAIGN_CLOSED:    'A kitöltési ablak zárva van.',
   ECHO_GOALS_CLOSED:       'A célmeghatározási ablak zárva van.',
   ECHO_TOO_MANY_GOALS:     'Legfeljebb 3 cél és 3 elvárás adható meg.',
+  /* --- 23_echo_form_rules.sql (1. fázis) hibakódjai --- */
+  ECHO_GOALS_REQUIRED:     'Legalább egy célt meg kell fogalmaznod.',
+  ECHO_INTRO_REQUIRED:     'A célmeghatározás bevezető kérdéseire válaszolni kell.',
+  ECHO_BAD_INTRO:          'A bevezető kérdésekre adott válasz érvénytelen.',
+  ECHO_OTHER_TEXT_REQUIRED:'Az „Egyéb" válasz mellé szöveget is meg kell adni.',
   ECHO_BAD_PAYLOAD:        'A beküldött adat szerkezete hibás.',
   ECHO_BAD_GOALS_MET:      'A célteljesülés értéke érvénytelen.',
   ECHO_PAYLOAD_TOO_LARGE:  'A kitöltés túl hosszú — kérjük, rövidítsd a szöveges válaszokat.',
@@ -109,9 +164,22 @@ const ECHO_ERR = {
   ECHO_SOURCE_NOT_FOUND:   'A klónozás forrásverziója nem található.',
   ECHO_NAME_REQUIRED:      'A sablon/verzió nevét meg kell adni.',
   ECHO_NOT_DRAFT:          'Csak piszkozat állapotban lehet menteni. Készíts új verziót.',
+  ECHO_NAME_EMPTY:         'A kérdőív neve nem lehet üres.',
+  ECHO_NAME_TOO_LONG:      'A kérdőív neve legfeljebb 120 karakter lehet.',
   ECHO_BAD_COMPILED:       'A kérdőív szerkezete hibás (nem JSON objektum).',
   ECHO_VALIDATION_FAILED:  'Az élesítés előtti ellenőrzés hibát talált — élesítés nem engedélyezett.',
   ECHO_BAD_STATE:          'Ismeretlen célállapot.',
+
+  /* --- 19_echo_roles.sql (0.4 szelet) hibakódjai --- */
+  // Az ECHO_FORBIDDEN itt HÁROM különböző okot takarhat (nincs kötés / nincs
+  // grant / nem a te kurzusod), ezért a nyers magyarázatot is kiírjuk — lásd
+  // ECHO_ERR_VERBOSE alább.
+  ECHO_TEACHER_NOT_FOUND:  'Ez az oktatói sor nem található.',
+  ECHO_PROFILE_NOT_FOUND:  'Ez a fiók nem található.',
+  ECHO_PROFILE_TAKEN:      'Ez a fiók már egy másik oktatói sorhoz van kötve.',
+  ECHO_ORG_NOT_FOUND:      'A megadott szervezeti egység nem található.',
+  ECHO_BAD_ROLE:           'Ismeretlen ECHO-szerepkör.',
+  ECHO_PREREQ_MISSING:     'Az ECHO szerepkör-migráció (19_echo_roles.sql) még nem futott le.',
 
   ECHO_FORBIDDEN:          'Ehhez nincs jogosultságod.',
 };
@@ -119,7 +187,12 @@ const ECHO_ERR = {
 // Néhány szerverhiba a KÓDON TÚL is hordoz információt (melyik állapotban
 // lenne látható az eredmény, hány ellenőrzési hiba van). Ezeknél a nyers
 // szöveget is kiírjuk — az emberi mondat önmagában kevesebbet mondana.
-const ECHO_ERR_VERBOSE = ['ECHO_RESULTS_NOT_READY', 'ECHO_VALIDATION_FAILED', 'ECHO_NOT_DRAFT'];
+const ECHO_ERR_VERBOSE = ['ECHO_RESULTS_NOT_READY', 'ECHO_VALIDATION_FAILED', 'ECHO_NOT_DRAFT',
+  // Ezek a szerveren MEGMONDJAK, melyik kerdesnel/mezonel bukott el.
+  'ECHO_OTHER_TEXT_REQUIRED', 'ECHO_INTRO_REQUIRED', 'ECHO_BAD_INTRO',
+  // Az ECHO_FORBIDDEN a 19-es óta MEGMONDJA, mi hiányzik: a kötés, a grant, vagy
+  // a kurzus a másé. Enélkül a felhasználó csak annyit látna, hogy "nem szabad".
+  'ECHO_FORBIDDEN', 'ECHO_PROFILE_TAKEN', 'ECHO_BAD_ROLE'];
 
 function ECHO_msg(e) {
   const raw = (e && (e.message || e.error_description || e.hint)) || '';
@@ -178,11 +251,32 @@ function ECHO_anonClient() {
 
 const ECHO_api = {
   myCourses:   ()               => ECHO_rpc('echo_my_courses'),
+
+  /* ---- PISZKOZAT (22_echo_draft.sql) ----
+     Mind a három AZONOSÍTOTT úton megy, a bejelentkezett munkamenettel — ez
+     az ellentéte a beküldésnek, és szándékosan az. A piszkozat a beküldésig
+     a hallgatóhoz köthető; a szerver a hívó auth.uid()-jára szűr, hallgató-
+     azonosítót egyik hívás sem fogad paraméterként.
+     A drop a SIKERES BEKÜLDÉS UTÁN fut — lásd a 22-es fájl fejlécét arról,
+     miért nem az (anonim) echo_submit törli a piszkozatot. */
+  draftSave:   (campaign, course, payload, step) =>
+                 ECHO_rpc('echo_draft_save', {
+                   p_campaign: campaign, p_course: course,
+                   p_payload: payload, p_step: step | 0,
+                 }),
+  draftGet:    (campaign, course) =>
+                 ECHO_rpc('echo_draft_get', { p_campaign: campaign, p_course: course }),
+  draftDrop:   (campaign, course) =>
+                 ECHO_rpc('echo_draft_drop', { p_campaign: campaign, p_course: course }),
   getForm:     (campaign, course) => ECHO_rpc('echo_get_form', { p_campaign: campaign, p_course: course }),
-  saveGoals:   (campaign, course, goals, expectations) =>
+  // p_intro: a célmeghatározó két BEVEZETŐ kérdésének válasza. Ez az
+  // AZONOSÍTOTT echo.student_goal sorba megy (a hallgató sajátja), és
+  // SOHA nem kerül át a névtelen válaszhalmazba — lásd 23_echo_form_rules.sql.
+  saveGoals:   (campaign, course, goals, expectations, intro) =>
                  ECHO_rpc('echo_save_goals', {
                    p_campaign: campaign, p_course: course,
                    p_goals: goals, p_expectations: expectations,
+                   p_intro: intro || {},
                  }),
   issueTicket: (campaign, course) => ECHO_rpc('echo_issue_ticket', { p_campaign: campaign, p_course: course }),
 
@@ -198,6 +292,30 @@ const ECHO_api = {
   campaigns:  ()          => ECHO_rpc('echo_campaigns'),
   rate:       (campaign)  => ECHO_rpc('echo_rate', { p_campaign: campaign }),
   rebuildEligibility: (campaign) => ECHO_rpc('echo_rebuild_eligibility', { p_campaign: campaign }),
+
+  /* ---- 3. szelet: 18_echo_campaign.sql, betű szerinti szignatúrák ----
+       public.echo_campaign_create(p_nev text, p_term text, p_template_version uuid,
+                                   p_opens_at timestamptz, p_closes_at timestamptz)
+       public.echo_campaign_transition(p_campaign uuid, p_to text, p_force boolean default false)
+       public.echo_campaign_get(p_campaign uuid)
+     Mind is_admin()-hez kötve a függvény TÖRZSÉBEN, 'authenticated' granttal.
+     Enélkül a kampány örökre abban az állapotban maradt, amiben a seed
+     létrehozta — és a 16_echo_reports.sql riportmotorja elérhetetlen volt,
+     mert az echo.results_gate() 'closed' vagy későbbi állapotot követel. */
+  campaignCreate: (nev, term, templateVersion, opensAt, closesAt) =>
+    ECHO_rpc('echo_campaign_create', {
+      p_nev: nev, p_term: term, p_template_version: templateVersion,
+      p_opens_at: opensAt, p_closes_at: closesAt,
+    }),
+  // A p_force KIZÁRÓLAG időzítési és teljességi feltételt old fel (korai zárás,
+  // lejárt ablakkal való nyitás, moderálatlan sor melletti közzététel). Az
+  // állapotgép átugrását és a pecsét utáni visszalépést SEMMI nem oldja fel —
+  // azt az adatbázisban trigger is őrzi (echo.campaign_seal_guard).
+  campaignTransition: (campaign, to, force) =>
+    ECHO_rpc('echo_campaign_transition', {
+      p_campaign: campaign, p_to: to, p_force: !!force,
+    }),
+  campaignGet: (campaign) => ECHO_rpc('echo_campaign_get', { p_campaign: campaign }),
 
   /* ---- 2. szelet: 16_echo_reports.sql 8. szakasz, betű szerinti szignatúrák ----
        public.echo_teacher_results(p_campaign uuid, p_course uuid, p_teacher uuid default null)
@@ -229,8 +347,34 @@ const ECHO_api = {
   templateGet:        (version)        => ECHO_rpc('echo_template_get', { p_version: version }),
   templateCreate:     (name, from)     => ECHO_rpc('echo_template_create', { p_name: name, p_from: from || null }),
   templateSave:       (version, compiled) => ECHO_rpc('echo_template_save', { p_version: version, p_compiled: compiled }),
+  // A kérdőív NEVE a sablonon él (echo.template.name_hu/name_en), nem a verzión,
+  // ezért külön RPC menti — és csak draft állapotban (17_echo_template_rename.sql).
+  templateRename:     (version, nameHu, nameEn) => ECHO_rpc('echo_template_rename',
+                        { p_version: version, p_name_hu: nameHu, p_name_en: nameEn || null }),
   templateValidate:   (version)        => ECHO_rpc('echo_template_validate', { p_version: version }),
   templateTransition: (version, to)    => ECHO_rpc('echo_template_transition', { p_version: version, p_to: to }),
+
+  /* ---- 0.4 szelet: 19_echo_roles.sql — OKTATÓI BELÉPÉS ----
+       public.echo_my_teacher_courses()
+       public.echo_teacher_link(p_teacher uuid, p_profile uuid)
+       public.echo_role_grants()
+       public.echo_role_grant(p_person uuid, p_role text, p_scope uuid,
+                              p_expires timestamptz, p_iktatoszam text)
+       public.echo_my_roles()
+     Mind 'authenticated' granttal, az anon egyiket sem hívhatja. A tényleges
+     szűrés a függvény TÖRZSÉBEN van: echo.can_grant() / echo.can_see_grants() /
+     az echo.teacher.profile_id kötés + élő 'OKTATO' grant. */
+  myTeacherCourses: ()               => ECHO_rpc('echo_my_teacher_courses'),
+  myRoles:          ()               => ECHO_rpc('echo_my_roles'),
+  teacherLink:      (teacher, profile) =>
+    ECHO_rpc('echo_teacher_link', { p_teacher: teacher, p_profile: profile || null }),
+  roleGrants:       ()               => ECHO_rpc('echo_role_grants'),
+  roleGrant:        (person, role, scope, expires, iktatoszam) =>
+    ECHO_rpc('echo_role_grant', {
+      p_person: person, p_role: role,
+      p_scope: scope || null, p_expires: expires || null,
+      p_iktatoszam: iktatoszam || null,
+    }),
 };
 
 /* ------------------------------------------------------------
@@ -292,17 +436,212 @@ function ECHO_answered(q, v) {
   return v !== undefined && v !== null && String(v).trim() !== '';
 }
 
-// A compiled → lépéslista. A repeat:"teacher" kérdéseket tartalmazó szakaszból
-// oktatónként EGY lépés lesz.
-function ECHO_buildSteps(form, teachers) {
+/* ------------------------------------------------------------
+   2/b. Az "EGYÉB" OPCIÓ — bejelölve kötelező mellé szöveget írni
+   ------------------------------------------------------------
+   MI A HELYZET: a többes választású kérdések opciólistájában a prototípus
+   kérdőívében szerepel egy szó szerinti "Egyéb" / "Other" opció (mérve a
+   2. verzió compiled JSONB-jén: a course_strengths_p és a course_improve_p
+   kérdésnél), MELLETTE pedig az allowOther:true miatt megjelenik a szabad
+   szövegmező. Ha a hallgató csak az "Egyéb"-et jelöli be és nem ír semmit,
+   a válasz értelmezhetetlen: azt tudjuk, hogy valami más volt, de azt nem,
+   hogy mi. Ezért az "Egyéb" bejelölése MELLÉ legalább egy saját szöveg kell.
+
+   AZ AZONOSÍTÁS a compiled adatából megy, nem felületi feltételezésből:
+     • elsődlegesen az opció `other: true` jelzője (ezt a kérdőív-verzió
+       viheti magával), másodlagosan a value/hu/en szövege.
+   A második ág azért kell, mert a MA ÉLŐ 2. verzióban nincs `other` jelző —
+   e nélkül a szabály a jelenlegi kérdőíven nem fogna. */
+const ECHO_OTHER_WORDS = ['egyéb', 'egyeb', 'other'];
+function ECHO_isOtherOption(o) {
+  if (!o) return false;
+  if (typeof o === 'object' && o.other === true) return true;
+  const probe = (typeof o === 'object')
+    ? [o.value, o.hu, o.en]
+    : [o];
+  return probe.some(x => ECHO_OTHER_WORDS.indexOf(String(x == null ? '' : x).trim().toLowerCase()) >= 0);
+}
+
+/* Bejelölte-e a hallgató az "Egyéb" opciót ezen a kérdésen. */
+function ECHO_otherPicked(q, value) {
+  const arr = Array.isArray(value) ? value : [];
+  if (!arr.length) return false;
+  const raw = Array.isArray(q && q.options) ? q.options : [];
+  return raw.some(o => ECHO_isOtherOption(o) &&
+    arr.indexOf((o && typeof o === 'object') ? (o.value != null ? o.value : o.hu) : String(o)) >= 0);
+}
+
+/* Írt-e MELLÉ saját szöveget. A saját szöveg definíció szerint az, ami nincs
+   benne az opciólistában — pontosan úgy, ahogy az ECHO_QMulti `extras`-a
+   számolja. */
+function ECHO_otherText(q, value) {
+  const arr = Array.isArray(value) ? value : [];
+  const raw = Array.isArray(q && q.options) ? q.options : [];
+  const known = raw.map(o => (o && typeof o === 'object') ? (o.value != null ? o.value : o.hu) : String(o));
+  return arr.filter(v => known.indexOf(v) < 0 && String(v || '').trim() !== '');
+}
+
+/* A HIÁNY: "Egyéb" bejelölve, de nincs mellé szöveg.
+   Ez a KLIENSOLDALI kapu; ugyanezt a szabályt az echo_submit() is
+   kikényszeríti (ECHO_OTHER_TEXT_REQUIRED), hogy a nyers API-n se lehessen
+   megkerülni. */
+function ECHO_otherMissing(q, value) {
+  if (!q || q.type !== 'multi') return false;
+  return ECHO_otherPicked(q, value) && ECHO_otherText(q, value).length === 0;
+}
+
+/* ------------------------------------------------------------
+   2/c. DINAMIKUS BEHELYETTESÍTÉS — a KÖZÖS út
+   ------------------------------------------------------------
+   A kérdőívszövegek helykitöltőket tartalmazhatnak ("[Oktató neve] erősségei"),
+   amiket a konkrét oktató és kurzus adata tölt ki. Ez KORÁBBAN CSAK a
+   szerkesztő ELŐNÉZETÉBEN történt meg (ECHO_TOKENS + ECHO_tok), a valódi
+   kitöltésben nem — a hallgató szó szerint a "[Oktató neve] erősségei"
+   feliratot látta. Az oktatónkénti ismétlődő kérdéseknél ez zavaró, és
+   ráadásul azt is elrejti, MELYIK oktatóról szól éppen a kérdés.
+
+   Ezért a feloldás innentől EGY helyen van, és a kitöltő is, az előnézet is
+   ugyanezt hívja — csak a környezet (ctx) más: az előnézet mintaértékeket ad,
+   a kitöltő a valódi kurzust és az AKTUÁLIS oktatót. */
+function ECHO_tokenMap(ctx) {
+  const c = (ctx && ctx.course) || {};
+  const t = (ctx && ctx.teacher) || {};
+  const g = (ctx && ctx.goal) || {};
+  const tName = String(t.name || '').trim();
+  const cHu = String(c.name || c.course_name || '').trim();
+  const cEn = String(c.name_en || c.course_name_en || '').trim() || cHu;
+  const gTxt = String(g.text || '').trim();
+  const m = {};
+  // Csak azt a tokent tesszük a térképre, amire van valódi érték — így egy
+  // hiányzó adat nem tünteti el a kérdésszöveg egy darabját, hanem meghagyja
+  // a helykitöltőt, ami legalább látható hiba.
+  if (tName) { m['[Oktató neve]'] = tName; m['[oktató neve]'] = tName; m['[Teacher name]'] = tName; }
+  if (cHu)   { m['[Kurzus neve]'] = cHu; }
+  if (cEn)   { m['[Course name]'] = cEn; }
+  if (gTxt)  { m['[Cél]'] = gTxt; m['[Goal]'] = gTxt; }
+  return m;
+}
+
+function ECHO_applyTokens(s, map) {
+  if (s == null) return s;
+  let out = String(s);
+  if (out.indexOf('[') < 0) return out;          // gyors kiszállás
+  Object.keys(map).forEach(k => { if (out.indexOf(k) >= 0) out = out.split(k).join(map[k]); });
+  return out;
+}
+
+/* Egy kérdés MEGJELENÍTÉSI alakja: a tokenek feloldva a kérdésszövegben, a
+   súgóban és az opciócímkékben is. A `value` mezőket SZÁNDÉKOSAN nem
+   bántjuk: a beküldött érték a compiled szerinti nyers `value`, azt a
+   feloldás nem írhatja át, különben a riportok nem találnának rá. */
+function ECHO_resolveTokens(q, ctx) {
+  const map = ECHO_tokenMap(ctx);
+  if (!q || !Object.keys(map).length) return q;
+  const help = (q.help && typeof q.help === 'object')
+    ? { hu: ECHO_applyTokens(q.help.hu, map), en: ECHO_applyTokens(q.help.en, map) }
+    : ECHO_applyTokens(q.help, map);
+  const opts = Array.isArray(q.options) ? q.options.map(o => (
+    (o && typeof o === 'object')
+      ? Object.assign({}, o, { hu: ECHO_applyTokens(o.hu, map), en: ECHO_applyTokens(o.en, map) })
+      : ECHO_applyTokens(o, map)
+  )) : q.options;
+  return Object.assign({}, q, {
+    hu: ECHO_applyTokens(q.hu, map),
+    en: ECHO_applyTokens(q.en, map),
+    help: help, options: opts,
+  });
+}
+
+/* A félév eleji célok és oktatói elvárások EGYETLEN, sorrendtartó listája.
+   A prototípus a kettőt egymás után, külön lépésként tölti vissza; a
+   `kind` mező őrzi, melyik melyik, mert a felületi címke más
+   ("A célod" / "Az oktatóval szembeni elvárásod").
+   A `key` a válaszkulcs egyedi utótagja — INDEX ALAPÚ, nem szöveg alapú:
+   ha két cél szövege azonos, a kulcsuk akkor sem eshet egybe. */
+function ECHO_goalItems(goals) {
+  const g = (goals && Array.isArray(goals.goals)) ? goals.goals : [];
+  const e = (goals && Array.isArray(goals.expectations)) ? goals.expectations : [];
+  const out = [];
+  g.forEach((t, i) => { const s = String(t || '').trim(); if (s) out.push({ key: 'g' + i, kind: 'goal', text: s }); });
+  e.forEach((t, i) => { const s = String(t || '').trim(); if (s) out.push({ key: 'e' + i, kind: 'exp',  text: s }); });
+  return out;
+}
+
+/* A CÉLMEGHATÁROZÓ (part1) BEVEZETŐ KÉRDÉSEI a compiled JSONB-ből.
+   MIÉRT ONNAN: a fájl fejlécének szabálya szerint kérdésszöveg NEM kerülhet a
+   felületbe — ami itt állna, az szétcsúszhatna a szenátus által jóváhagyott
+   kérdőívtől. A célmeghatározó eddig azért volt kivétel, mert a part1-ben
+   egyetlen kérdés sem volt (mérve: a 2. verzióban 0 db part1 szakasz); a
+   listaszerkesztők címkéi ezért kényszerből a kódban állnak.
+   A két bevezető kérdés viszont VALÓDI kérdőívkérdés, ezért a compiled-ból jön
+   (24_echo_form_v3.sql). Ha a kérdőívben nincs part1 szakasz, ez üres listát ad,
+   és a célmeghatározó pontosan úgy viselkedik, mint eddig. */
+function ECHO_part1Questions(form) {
+  const secs = (form && Array.isArray(form.sections)) ? form.sections : [];
+  const out = [];
+  secs.forEach((sec) => {
+    if (sec.part !== 'part1') return;
+    (sec.questions || []).forEach(q => out.push(q));
+  });
+  return out;
+}
+
+/* Egy repeat:"goal" kérdés válaszkulcsa EGY célra. A kulcs a kitöltő
+   MEMÓRIÁJÁBAN egyedi; a beküldött payloadba EZ SOHA nem kerül bele
+   (lásd ECHO_buildPayload → ECHO_goalsMerge). */
+function ECHO_goalKey(q, item) { return q.id + '@' + item.key; }
+
+/* A célonkénti válaszok ÖSSZEVONÁSA egyetlen értékké.
+   MIÉRT KELL ÖSSZEVONNI: a válaszsor névtelen, a célok SZÁMOSSÁGA viszont
+   kvázi-azonosító — az echo.student_goal tábla a hallgatóhoz van kötve,
+   tehát abból látszik, ki hány célt írt. Ha a payload célonként egy elemet
+   vinne, a tömb hossza leszűkítené a lehetséges kitöltők körét, a célok
+   szövege pedig egyenesen azonosítana. Az echo_submit() ezért NÉV SZERINT
+   levágja a goals / goal_texts / goal_count / expectations kulcsokat, és a
+   'goals_met'-en kívül semmilyen cél-adatot nem enged be (15_echo_core.sql,
+   9.5 szakasz 4. lépése). Ez a függvény ehhez a szerződéshez igazodik.
+   A SZABÁLY:
+     • ha minden cél ugyanazt az értéket kapta → az az érték megy át;
+     • ha mind legalább 'teljesult' (vagy 'tulteljesult') → 'teljesult';
+     • minden más vegyes eset → 'reszben'.
+   Az echo_submit() CHECK-je csak ezt a négy értéket fogadja el. */
+const ECHO_GOAL_RANK = { nem_teljesult: 0, reszben: 1, teljesult: 2, tulteljesult: 3 };
+function ECHO_goalsMerge(values) {
+  const known = (values || []).filter(v => typeof v === 'string' && ECHO_GOAL_RANK[v] !== undefined);
+  if (!known.length) return undefined;
+  let lo = 9, hi = -1;
+  known.forEach(v => { const r = ECHO_GOAL_RANK[v]; if (r < lo) lo = r; if (r > hi) hi = r; });
+  if (lo === hi) return known[0];
+  if (lo >= ECHO_GOAL_RANK.teljesult) return 'teljesult';
+  return 'reszben';
+}
+
+/* A compiled → lépéslista.
+     repeat:"teacher" kérdést tartalmazó szakaszból oktatónként EGY lépés lesz;
+     repeat:"goal"    kérdést tartalmazóból CÉLONKÉNT (és elvárásonként) egy.
+   MÉRT HIBA VOLT (javítva): a repeat:"goal" kérdés korábban egyik ágra sem
+   illett — sem az oktatónkéntire, sem a `!q.repeat` szűrőre —, ezért a
+   szerkesztő felkínálta ugyan a beállítást, de a kitöltőben SOHA nem jelent
+   meg egyetlen ilyen kérdés sem.
+   HA A HALLGATÓNAK NINCS CÉLJA, a szakasz KIESIK — nem üres lépésként
+   marad benne. A prototípus is így viselkedik.
+   SORREND: ha egy szakasz egyszerre tartalmaz oktatónkénti és célonkénti
+   kérdést, az OKTATÓNKÉNTI bontás nyer (a két bontás nem szorozható össze).
+   Ilyen szakaszt a validátor ma nem tilt, de a kérdőív nem is használ. */
+function ECHO_buildSteps(form, teachers, goalItems) {
   const sections = (form && Array.isArray(form.sections)) ? form.sections : [];
+  const items = Array.isArray(goalItems) ? goalItems : [];
   const steps = [];
   sections.forEach((sec) => {
     if (sec.part && sec.part !== 'part2') return;   // a part1 a célmeghatározó, nem itt van
     const qs = Array.isArray(sec.questions) ? sec.questions : [];
     const perTeacher = qs.some(q => q.repeat === 'teacher');
+    const perGoal    = qs.some(q => q.repeat === 'goal');
     if (perTeacher) {
       (teachers || []).forEach((t) => steps.push({ kind: 'teacher', section: sec, teacher: t }));
+    } else if (perGoal) {
+      // Nincs cél → nincs lépés. A szakasz teljesen kimarad.
+      items.forEach((it) => steps.push({ kind: 'goal', section: sec, goal: it }));
     } else {
       steps.push({ kind: 'section', section: sec });
     }
@@ -343,8 +682,26 @@ function ECHO_QSingle({ q, opts, value, onChange }) {
 function ECHO_QMulti({ q, opts, value, onChange }) {
   const arr = Array.isArray(value) ? value : [];
   const max = Number(q.max) > 0 ? Number(q.max) : opts.length;
-  const full = arr.length >= max;
   const [other, setOther] = useState('');
+
+  // Az „Egyéb"-ként beírt, tehát a listában nem szereplő értékek.
+  const extras = arr.filter(v => !opts.some(o => o.value === v));
+  // Van-e egyáltalán „Egyéb" nevű opció a listában, és be van-e jelölve.
+  const otherPicked = ECHO_otherPicked(q, arr);
+
+  /* A KERETSZÁMOLÁS ÉS AZ „EGYÉB" — MÉRT VOLT ZSÁKUTCA.
+     A kurzus-erősségek kérdésnél max=2 (mérve a 2. verzió compiled JSONB-jén).
+     Ha a hallgató bejelöli az „Egyéb"-et ÉS egy másik állítást, a keret betelik.
+     A régi kód ilyenkor letiltotta a szövegmezőt (`disabled={full}`) — vagyis
+     pont azt a mezőt, aminek a kitöltése az új szabály szerint KÖTELEZŐ.
+     Onnan nem volt kiút: se tovább, se kitölteni.
+     A megoldás: ha az „Egyéb" be van jelölve, a MELLÉ írt szöveg nem külön
+     választás, hanem az „Egyéb" TARTALMA — tehát nem fogyaszt keretet.
+     Ha nincs bejelölt „Egyéb", a szabad szöveg a régi módon számít bele. */
+  const used = otherPicked ? (arr.length - extras.length) : arr.length;
+  const full = used >= max;
+  // Bejelölt „Egyéb" mellé EGY szöveg tartozik; e nélkül a régi korlát él.
+  const canAddOther = otherPicked ? (extras.length < 1) : !full;
 
   const toggle = (v) => {
     if (arr.indexOf(v) >= 0) onChange(arr.filter(x => x !== v));
@@ -352,19 +709,22 @@ function ECHO_QMulti({ q, opts, value, onChange }) {
   };
   const addOther = () => {
     const t = other.trim();
-    if (!t || full || arr.indexOf(t) >= 0) return;
+    if (!t || !canAddOther || arr.indexOf(t) >= 0) return;
     onChange(arr.concat([t]));
     setOther('');
   };
-  // Az „Egyéb"-ként beírt, tehát a listában nem szereplő értékek.
-  const extras = arr.filter(v => !opts.some(o => o.value === v));
+  /* Bejelölte az „Egyéb" opciót, de nem írt mellé semmit. A szövegmező ilyenkor
+     KÖTELEZŐ — csupasz „Egyéb"-ből nem derül ki, mi volt az. A Tovább gomb is
+     ezt nézi (ECHO_otherMissing), és az echo_submit() is. Itt, a kérdés
+     mellett mondjuk el, mert itt lehet orvosolni. */
+  const needOther = ECHO_otherMissing(q, arr);
 
   return (
     <div className="space-y-2.5">
       {/* Élő számláló — a korlát nem meglepetés, hanem visszajelzés. */}
       <div className="flex items-center justify-between text-[11px] font-black uppercase tracking-wider mb-1">
         <span className={full ? 'text-primary' : 'text-slate-400'}>
-          kiválasztva {arr.length}/{max}
+          kiválasztva {used}/{max}
         </span>
         {full && <span className="text-slate-400 normal-case tracking-normal font-bold">a keret betelt — vegyél le egyet a cseréhez</span>}
       </div>
@@ -395,13 +755,23 @@ function ECHO_QMulti({ q, opts, value, onChange }) {
       ))}
 
       {q.allowOther && (
-        <div className="flex gap-2 pt-1">
-          <input className={U_input} value={other} disabled={full}
-            onChange={e => setOther(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addOther(); } }}
-            placeholder="Egyéb — saját szöveg" maxLength={120} />
-          <button type="button" onClick={addOther} disabled={full || !other.trim()}
-            className={U_btnGhost + ' flex-none'}><Lucide.Plus size={16} /></button>
+        <div className="pt-1">
+          <div className="flex gap-2">
+            <input className={U_input + (needOther ? ' border-amber-300 bg-amber-50/40' : '')}
+              value={other} disabled={!canAddOther}
+              onChange={e => setOther(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addOther(); } }}
+              placeholder={needOther ? 'Írd le, mi volt az…' : 'Egyéb — saját szöveg'}
+              maxLength={120} />
+            <button type="button" onClick={addOther} disabled={!canAddOther || !other.trim()}
+              className={U_btnGhost + ' flex-none'}><Lucide.Plus size={16} /></button>
+          </div>
+          {needOther && (
+            <p className="mt-1.5 text-[11px] font-bold text-amber-700 flex items-start gap-1.5">
+              <Lucide.AlertTriangle size={13} className="flex-none mt-px" />
+              Az „Egyéb" mellé kötelező szöveget írni — írd be, majd a + gombbal add hozzá.
+            </p>
+          )}
         </div>
       )}
     </div>
@@ -495,9 +865,17 @@ function ECHO_QSkip({ q, opts, value, onChange }) {
   );
 }
 
-// Egy kérdés kerete: sorszám, szöveg, súgó, majd a típusnak megfelelő atom.
-function ECHO_Question({ q, index, value, onChange, lang, seed }) {
+/* Egy kérdés kerete: sorszám, szöveg, súgó, majd a típusnak megfelelő atom.
+   A `ctx` a behelyettesítés környezete (kurzus, aktuális oktató, aktuális cél).
+   A TOKENFELOLDÁS ITT történik — ezért csinálja a kitöltő és a szerkesztő
+   előnézete pontosan ugyanazt: mindkettő ezen a komponensen megy át. */
+function ECHO_Question({ q: rawQ, index, value, onChange, lang, seed, ctx }) {
+  const q = ctx ? ECHO_resolveTokens(rawQ, ctx) : rawQ;
   const opts = ECHO_options(q, lang);
+  // A súgó kétféle alakban jöhet: sztring (a 15-ös seed) vagy {hu,en} pár
+  // (a szerkesztő és a 18b-s, prototípusból származó kérdőív ezt írja).
+  // Objektumot React nem tud gyerekként kirajzolni — feloldjuk.
+  const help = (q.help && typeof q.help === 'object') ? ECHO_txt(q.help, lang) : (q.help || '');
   const shown = q.randomize ? ECHO_shuffle(opts, seed + '|' + q.id) : opts;
   return (
     <div className="py-6 border-b border-slate-50 last:border-0">
@@ -510,9 +888,9 @@ function ECHO_Question({ q, index, value, onChange, lang, seed }) {
             <ECHO_Src>{ECHO_txt(q, lang)}</ECHO_Src>
             {q.required && <span className="text-primary ml-1">*</span>}
           </h4>
-          {q.help && (
+          {help && (
             <p className="text-xs text-slate-400 font-medium mt-1.5 leading-relaxed">
-              <ECHO_Src>{q.help}</ECHO_Src>
+              <ECHO_Src>{help}</ECHO_Src>
             </p>
           )}
         </div>
@@ -540,11 +918,16 @@ function ECHO_Question({ q, index, value, onChange, lang, seed }) {
 // Az echo_my_courses 'allapot' mezője → felületi címke.
 const ECHO_STATE = {
   kitoltve:    { label: 'Kész',          tone: 'green',   icon: 'CheckCircle2', hint: 'Az értékelésed beérkezett.' },
-  // FIGYELEM: nincs piszkozat-tarolas, ezert ez az allapot NEM 'elkezdte'-t
-  // jelent. A naplo 'attempted' jelzojet a jegykiadas teszi fel, azt viszont a
-  // varazslo CSAK a bekuldes pillanataban hivja — vagyis ez azt jelenti, hogy
-  // egy korabbi bekuldes elindult, de nem fejezodott be.
+  // FIGYELEM: ez az allapot NEM 'elkezdte'-t jelent. A naplo 'attempted'
+  // jelzojet a jegykiadas teszi fel, azt viszont a varazslo CSAK a bekuldes
+  // pillanataban hivja — vagyis ez azt jelenti, hogy egy korabbi bekuldes
+  // elindult, de nem fejezodott be. A FELBEHAGYOTT ettol kulon allapot: ott
+  // van mentett piszkozat, es a kitoltes folytathato.
   folyamatban: { label: 'Sikertelen beküldés', tone: 'amber', icon: 'AlertTriangle', hint: 'Egy korábbi beküldés nem fejeződött be. Kérjük, töltsd ki újra.' },
+  // 22_echo_draft.sql: van mentett piszkozat, a kitoltes ott folytathato, ahol
+  // abbamaradt. A piszkozat a bekuldesig visszakeresheto a hallgatohoz — ezt a
+  // felulet a kitoltoben ki is mondja.
+  felbehagyott: { label: 'Félbehagyott', tone: 'blue', icon: 'PauseCircle', hint: 'Van mentett piszkozatod — a kitöltés folytatható.' },
   kitoltheto:  { label: 'Nem kezdett',   tone: 'primary', icon: 'Circle',       hint: 'A kitöltési ablak nyitva.' },
   celkituzes:  { label: 'Célkitűzés',    tone: 'blue',    icon: 'Target',       hint: 'A félév eleji célok adhatók meg.' },
   lezart:      { label: 'Lezárt',        tone: 'slate',   icon: 'Lock',         hint: 'A kitöltési ablak bezárt.' },
@@ -623,10 +1006,12 @@ function ECHO_GoalsView({ course, onBack, onSaved }) {
   const [form, setForm] = useState(null);
   const [goals, setGoals] = useState([]);
   const [exps, setExps] = useState([]);
+  // A két bevezető kérdés válasza: kérdés_id -> érték.
+  const [intro, setIntro] = useState({});
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const [touched, setTouched] = useState(false);
   const [toast, setToast] = useState('');
-  const lang = ECHO_lang();
 
   useEffect(() => {
     let dead = false;
@@ -638,22 +1023,13 @@ function ECHO_GoalsView({ course, onBack, onSaved }) {
         const g = (f && f.goals) || {};
         setGoals(Array.isArray(g.goals) && g.goals.length ? g.goals.map(String) : ['']);
         setExps(Array.isArray(g.expectations) && g.expectations.length ? g.expectations.map(String) : ['']);
+        // A korábban mentett bevezető válaszok visszatöltése (echo_get_form
+        // 'goals'.'intro' — 23_echo_form_rules.sql).
+        setIntro((g.intro && typeof g.intro === 'object') ? g.intro : {});
       } catch (e) { if (!dead) { setForm(false); setErr(ECHO_msg(e)); } }
     })();
     return () => { dead = true; };
   }, [course.campaign_id, course.course_id]);
-
-  const save = async () => {
-    const g = goals.map(s => String(s).trim()).filter(Boolean).slice(0, 3);
-    const x = exps.map(s => String(s).trim()).filter(Boolean).slice(0, 3);
-    setBusy(true); setErr('');
-    try {
-      await ECHO_api.saveGoals(course.campaign_id, course.course_id, g, x);
-      setToast('A célok elmentve.');
-      onSaved && onSaved();
-    } catch (e) { setErr(ECHO_msg(e)); }
-    finally { setBusy(false); }
-  };
 
   if (form === null) {
     return (
@@ -682,6 +1058,40 @@ function ECHO_GoalsView({ course, onBack, onSaved }) {
   const part1 = form && form.form && Array.isArray(form.form.parts)
     ? form.form.parts.find(p => p.id === 'part1') : null;
 
+  const compiled = form.form || {};
+  // A kérdőív nyelve itt is a KURZUSÉ — a célmeghatározó ugyanannak a
+  // kérdőívnek az 1. része (3. § (1)). Lásd ECHO_formLang.
+  const courseMeta = form.course || {};
+  const lang = ECHO_formLang(courseMeta, compiled);
+  const langFellBack = ECHO_langFellBack(courseMeta, compiled);
+
+  // A két BEVEZETŐ kérdés a compiled part1 szakaszából.
+  const introQs = ECHO_part1Questions(compiled);
+  const introMissing = introQs.filter(q => q.required && !ECHO_answered(q, intro[q.id]));
+
+  /* LEGALÁBB EGY CÉL KÖTELEZŐ. A célmeghatározás akkor ér valamit, ha van mit
+     a félév végén értékelni: cél nélkül a "Célok teljesülése" szakasz teljesen
+     kiesik a kitöltőből (ECHO_buildSteps), tehát az üresen mentett
+     célmeghatározás csak látszatlépés lenne.
+     Ugyanezt a szabályt az echo_save_goals() is kikényszeríti
+     (ECHO_GOALS_REQUIRED) — a felület csak előbb szól. */
+  const cleanGoals = goals.map(t => String(t).trim()).filter(Boolean).slice(0, 3);
+  const cleanExps  = exps.map(t => String(t).trim()).filter(Boolean).slice(0, 3);
+  const noGoal = cleanGoals.length === 0;
+  const blocked = noGoal || introMissing.length > 0;
+
+  const save = async () => {
+    if (blocked) { setTouched(true); return; }
+    setBusy(true); setErr(''); setTouched(false);
+    try {
+      await ECHO_api.saveGoals(course.campaign_id, course.course_id,
+                               cleanGoals, cleanExps, intro);
+      setToast('A célok elmentve.');
+      onSaved && onSaved();
+    } catch (e) { setErr(ECHO_msg(e)); }
+    finally { setBusy(false); }
+  };
+
   return (
     <div className="p-4 sm:p-8 max-w-3xl mx-auto">
       <UToast msg={toast} onDone={() => setToast('')} />
@@ -701,6 +1111,13 @@ function ECHO_GoalsView({ course, onBack, onSaved }) {
             <p className="text-sm text-slate-400 font-medium mt-0.5">
               <ECHO_Src>{course.course_code} · {course.course_name}</ECHO_Src>
             </p>
+            {langFellBack && (
+              <p className="mt-1.5 text-[11px] font-bold text-amber-700 inline-flex items-start gap-1.5">
+                <Lucide.Languages size={13} className="flex-none mt-px" />
+                A kurzus nyelvén ({ECHO_courseLang(courseMeta).toUpperCase()}) nincs jóváhagyott
+                fordítás, ezért a kérdőívet magyarul mutatjuk.
+              </p>
+            )}
           </div>
         </div>
 
@@ -713,14 +1130,50 @@ function ECHO_GoalsView({ course, onBack, onSaved }) {
           </p>
         </div>
 
+        {/* A KÉT BEVEZETŐ KÉRDÉS. A prototípus szerint a célmeghatározás ezekkel
+            indul: volt-e szó a célokról az oktatóval, és világosak-e a
+            teljesítési követelmények. A szövegük a compiled part1 szakaszából
+            jön, nem innen — lásd ECHO_part1Questions. */}
+        {introQs.length > 0 && (
+          <div className="mb-2 -mt-2 border-b border-slate-50">
+            {introQs.map((q, i) => (
+              <ECHO_Question key={q.id} q={q} index={i + 1} lang={lang} seed={'goals|' + course.course_id}
+                ctx={{ course: courseMeta }}
+                value={intro[q.id]}
+                onChange={(v) => { setIntro(prev => ({ ...prev, [q.id]: v })); setTouched(false); }} />
+            ))}
+          </div>
+        )}
+
         <div className="space-y-8">
           <ECHO_ListEditor title="Céljaim ezen a kurzuson" max={3} items={goals} setItems={setGoals}
             placeholder="Pl. magabiztosan írjak SQL lekérdezést"
-            hint="Legfeljebb 3 cél. Konkrét, félév végén eldönthető megfogalmazás segít a legtöbbet." />
+            hint="Legalább 1, legfeljebb 3 cél. Konkrét, félév végén eldönthető megfogalmazás segít a legtöbbet." />
           <ECHO_ListEditor title="Elvárásaim az oktatótól" max={3} items={exps} setItems={setExps}
             placeholder="Pl. kapjak érdemi visszajelzést a beadandóra"
-            hint="Legfeljebb 3 elvárás." />
+            hint="Legfeljebb 3 elvárás — ez a rész nem kötelező." />
         </div>
+
+        {/* MEGMONDJUK, MI HIÁNYZIK. Egy letiltott gomb magyarázat nélkül itt
+            azt jelentené, hogy a hallgató nem tudja, mit kellene tennie. */}
+        {touched && blocked && (
+          <div className="mt-6 bg-amber-50 border border-amber-100 rounded-2xl px-4 py-3 text-sm font-bold text-amber-700 flex gap-2">
+            <Lucide.AlertTriangle size={16} className="flex-none mt-0.5" />
+            <div className="space-y-1.5">
+              {noGoal && (
+                <p>Legalább egy célt meg kell fogalmaznod — e nélkül a félév végén
+                   nincs mit értékelni, és a „Célok teljesülése" szakasz kimarad
+                   a kérdőívből.</p>
+              )}
+              {introMissing.map(q => (
+                <p key={'in_' + q.id} className="font-medium">
+                  Válaszolatlan bevezető kérdés:{' '}
+                  <span className="font-bold"><ECHO_Src>{ECHO_txt(q, lang)}</ECHO_Src></span>
+                </p>
+              ))}
+            </div>
+          </div>
+        )}
 
         {err && (
           <div className="mt-6 bg-red-50 border border-red-100 rounded-2xl px-4 py-3 text-sm font-bold text-red-600 flex gap-2">
@@ -751,14 +1204,27 @@ function ECHO_GoalsView({ course, onBack, onSaved }) {
    A szerver ezen felül még LEVÁGJA az azonosító mezőket — a frontend nem
    védvonal, csak jóhiszemű fél. Ide szándékosan nem kerül semmilyen
    időbélyeg, sorszám vagy hallgatói azonosító. */
-function ECHO_buildPayload(compiled, teachers, ans, tans, hasGoals) {
+function ECHO_buildPayload(compiled, teachers, ans, tans, hasGoals, goalItems) {
   const sections = (compiled && compiled.sections) || [];
+  const items = Array.isArray(goalItems) ? goalItems : [];
   const courseAns = {};
   let attendance = null;
 
   sections.forEach((sec) => {
     if (sec.part && sec.part !== 'part2') return;
     (sec.questions || []).forEach((q) => {
+      // repeat:"goal" — a célonként megadott értékek EGY összesített értékké
+      // olvadnak. A tételes cél-adat (szöveg, darabszám, sorrend) SZÁNDÉKOSAN
+      // nem kerül a payloadba: a célok számossága kvázi-azonosító, a szövegük
+      // pedig egyenesen azonosít. Lásd ECHO_goalsMerge magyarázatát és az
+      // echo_submit() 4. lépését, ami ezeket a kulcsokat amúgy is levágja.
+      if (q.repeat === 'goal') {
+        if (!items.length) return;
+        if (!ECHO_condOk(q.cond, { answers: ans, hasGoals })) return;
+        const merged = ECHO_goalsMerge(items.map(it => ans[ECHO_goalKey(q, it)]));
+        if (merged !== undefined) courseAns[q.id] = merged;
+        return;
+      }
       if (q.repeat) return;
       if (!ECHO_condOk(q.cond, { answers: ans, hasGoals })) return;
       const v = ans[q.id];
@@ -794,6 +1260,42 @@ function ECHO_buildPayload(compiled, teachers, ans, tans, hasGoals) {
   return { attendance, course: courseAns, teachers: tArr };
 }
 
+/* A TELJES kitöltésen végigfutó "Egyéb"-ellenőrzés. A lépésenkénti kapu
+   (ECHO_otherMissing a Tovább gombon) elvileg elég — csak úgy lehet eljutni az
+   összegzésig, ha minden lépés átment rajta —, de a beküldés előtt ez a
+   függvény még egyszer végignézi az egészet. Olcsó, és így a hallgató a saját
+   nyelvén kapja meg a hibát, nem szerverhibaként (ECHO_OTHER_TEXT_REQUIRED).
+   Modulszintű, hogy a valódi compiled JSONB-vel önmagában is tesztelhető legyen. */
+function ECHO_otherGaps(compiled, teachers, ans, tans, hasGoals, goalItems) {
+  const sections = (compiled && compiled.sections) || [];
+  const items = Array.isArray(goalItems) ? goalItems : [];
+  const gaps = [];
+  sections.forEach((sec) => {
+    if (sec.part && sec.part !== 'part2') return;
+    (sec.questions || []).forEach((q) => {
+      if (q.type !== 'multi') return;
+      if (q.repeat === 'teacher') {
+        (teachers || []).forEach((t) => {
+          const bag = (tans && tans[t.id]) || {};
+          if (!ECHO_condOk(q.cond, { answers: bag, hasGoals })) return;
+          if (ECHO_otherMissing(q, bag[q.id])) gaps.push({ q, teacher: t });
+        });
+        return;
+      }
+      if (q.repeat === 'goal') {
+        if (!items.length) return;
+        items.forEach((it) => {
+          if (ECHO_otherMissing(q, ans[ECHO_goalKey(q, it)])) gaps.push({ q, goal: it });
+        });
+        return;
+      }
+      if (!ECHO_condOk(q.cond, { answers: ans, hasGoals })) return;
+      if (ECHO_otherMissing(q, ans[q.id])) gaps.push({ q });
+    });
+  });
+  return gaps;
+}
+
 function ECHO_Wizard({ course, onBack, onSubmitted }) {
   const [form, setForm] = useState(null);
   const [err, setErr] = useState('');
@@ -807,9 +1309,23 @@ function ECHO_Wizard({ course, onBack, onSubmitted }) {
   // localStorage-ban): a jegy egy alairt, ervenyes bekuldesi jogosultsag,
   // amit nem teszunk a hallgato gepere. Lasd a submit() magyarazatat.
   const ticketRef = useRef(null);
-  const lang = ECHO_lang();
   // A "randomize" kérdések keverési magja — kitöltésenként egyszer születik.
   const [seed] = useState(() => String(Date.now()) + ':' + Math.random().toString(36).slice(2));
+
+  /* ---------- PISZKOZAT (22_echo_draft.sql) ----------
+     draft:  null = meg toltjuk, false = nincs mentett piszkozat,
+             objektum = van, es a hallgatonak felajanljuk a folytatast.
+     resume: null = meg nem dontott, true/false = dontott. Amig null es van
+             piszkozat, a kitolto helyett a FELAJANLO kepernyo latszik.
+     A mentes NEM billentyuleutesenkent fut, hanem lepesvaltaskor es amikor egy
+     mezo elveszti a fokuszt (lasd az onBlur-t a lepes tartalman) — igy egy
+     kitoltes nagysagrendileg tizes, nem ezres nagysagrendu irast jelent. */
+  const [draft, setDraft] = useState(null);
+  const [resume, setResume] = useState(null);
+  const [savedAt, setSavedAt] = useState(null);
+  const [saving, setSaving] = useState(false);
+  // A legutobb ELMENTETT allapot ujjlenyomata. Ha nem valtozott, nem irunk.
+  const lastSavedRef = useRef('');
 
   useEffect(() => {
     let dead = false;
@@ -818,13 +1334,45 @@ function ECHO_Wizard({ course, onBack, onSubmitted }) {
         const f = await ECHO_api.getForm(course.campaign_id, course.course_id);
         if (!dead) setForm(f);
       } catch (e) { if (!dead) { setForm(false); setErr(ECHO_msg(e)); } }
+      // A piszkozat lekerdezese KULON hibaag: ha ez elszall (pl. a 22-es
+      // migracio meg nem ment fel), a kitoltes akkor is induljon — csak
+      // mentes nelkul. A piszkozat kenyelem, nem elofeltetel.
+      try {
+        const d = await ECHO_api.draftGet(course.campaign_id, course.course_id);
+        if (dead) return;
+        if (d && d.van) { setDraft(d); }
+        else { setDraft(false); setResume(false); }
+      } catch (e) { if (!dead) { setDraft(false); setResume(false); } }
     })();
     return () => { dead = true; };
   }, [course.campaign_id, course.course_id]);
 
   useEffect(() => { window.scrollTo({ top: 0, behavior: 'smooth' }); }, [step]);
 
-  if (form === null) {
+  /* A tenyleges mentes. Csendben bukik: a piszkozat elvesztese kellemetlen, de
+     a kitoltest nem szabad megallitania — a hallgato valaszai a memoriaban
+     tovabb elnek, es a bekuldes utjaban semmi nem all. A hibat a fejlecben
+     megjeleno "nem sikerult menteni" jelzes mondja el, nem egy modalis ablak. */
+  const [saveErr, setSaveErr] = useState(false);
+  const saveDraft = async (aBag, tBag, atStep) => {
+    // Amig a hallgato nem dontott a folytatasrol, NEM irunk felul semmit.
+    if (resume === null) return;
+    const payload = { ans: aBag, tans: tBag };
+    const fp = JSON.stringify(payload) + '|' + atStep;
+    if (fp === lastSavedRef.current) return;      // nem valtozott
+    setSaving(true);
+    try {
+      await ECHO_api.draftSave(course.campaign_id, course.course_id, payload, atStep);
+      lastSavedRef.current = fp;
+      setSavedAt(new Date());
+      setSaveErr(false);
+    } catch (e) { setSaveErr(true); }
+    finally { setSaving(false); }
+  };
+
+  // A piszkozat lekerdezesere is varunk: kulonben egy pillanatra felvillanna az
+  // ures urlap, mielott a folytatast felajanljuk.
+  if (form === null || draft === null) {
     return (
       <div className="p-4 sm:p-8 max-w-3xl mx-auto space-y-4">
         <SkeletonBar w="180px" h={14} />
@@ -844,10 +1392,86 @@ function ECHO_Wizard({ course, onBack, onSubmitted }) {
     );
   }
 
+  /* ---------- A FOLYTATÁS FELAJÁNLÁSA ----------
+     Van mentett piszkozat, és a hallgató még nem döntött. Két út van, és
+     mindkettő visszafordíthatatlan a maga módján — ezért kérdezünk, ahelyett
+     hogy némán visszatöltenénk. */
+  if (draft && resume === null) {
+    const startFresh = async () => {
+      // Az ujrakezdes ELDOBJA a mentett piszkozatot. Ha csak a memoriaban
+      // kezdenenk ujra, a regi payload ott maradna a szerveren addig, amig egy
+      // kesobbi mentes felul nem irja — vagyis a hallgato azt hinne, hogy
+      // eldobta, kozben megvan. Ezert torlunk, es csak utana engedunk tovabb.
+      setResume(false);
+      try { await ECHO_api.draftDrop(course.campaign_id, course.course_id); } catch (e) { /* csendben */ }
+      lastSavedRef.current = '';
+    };
+    return (
+      <div className="p-4 sm:p-8 max-w-2xl mx-auto">
+        <div className="bg-white rounded-3xl border border-slate-100 p-8 sm:p-10">
+          <div className="w-16 h-16 rounded-3xl bg-blue-50 text-blue-500 flex items-center justify-center mb-5">
+            <Lucide.PauseCircle size={32} />
+          </div>
+          <h2 className="text-2xl font-black text-slate-900 tracking-tight">Van egy félbehagyott kitöltésed</h2>
+          <p className="text-sm text-slate-500 font-medium mt-3 leading-relaxed">
+            Ezen a kurzuson <b className="text-slate-700">{ECHO_dateTime(draft.mentve)}</b> mentettünk
+            utoljára{typeof draft.step === 'number' ? ` a ${draft.step + 1}. lépésnél` : ''}.
+            Folytathatod ott, ahol abbahagytad.
+          </p>
+          <div className="mt-5 rounded-2xl bg-amber-50 border border-amber-100 px-4 py-3.5">
+            <p className="text-[11px] font-black uppercase tracking-widest text-amber-600 mb-1.5">
+              Amit a piszkozatról tudnod kell
+            </p>
+            <p className="text-xs text-amber-800 font-medium leading-relaxed">
+              A mentett piszkozat — a beküldésig — <b>visszakereshető hozzád</b>: a kitöltésed
+              a fiókodhoz kötve várakozik. A tartalmát rajtad kívül senki nem látja, sem oktató,
+              sem adminisztrátor. A <b>beküldés pillanatában</b> ez a kapcsolat elszakad: a
+              válaszaid névtelenül kerülnek be, a piszkozat pedig törlődik.
+            </p>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-2 mt-7">
+            <button
+              onClick={() => {
+                const p = draft.payload || {};
+                setAns(p.ans && typeof p.ans === 'object' ? p.ans : {});
+                setTans(p.tans && typeof p.tans === 'object' ? p.tans : {});
+                setStep(Number(draft.step) > 0 ? Number(draft.step) : 0);
+                // A visszatoltott allapot MAR el van mentve — ne irjuk ki ujra.
+                lastSavedRef.current = JSON.stringify({
+                  ans: (draft.payload || {}).ans || {}, tans: (draft.payload || {}).tans || {},
+                }) + '|' + (Number(draft.step) || 0);
+                setSavedAt(new Date(draft.mentve));
+                setResume(true);
+              }}
+              className={U_btnPrimary + ' flex-1 py-3.5'}>
+              <Lucide.PlayCircle size={16} /> Folytatás
+            </button>
+            <button onClick={startFresh} className={U_btnGhost + ' flex-1 py-3.5'}>
+              <Lucide.RotateCcw size={16} /> Újrakezdés üres űrlappal
+            </button>
+          </div>
+          <button onClick={onBack} className="mt-4 text-sm font-bold text-slate-400 hover:text-primary transition-colors">
+            Most nem töltöm ki — a piszkozat megmarad
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   const compiled = form.form || {};
   const teachers = Array.isArray(form.teachers) ? form.teachers : [];
-  const hasGoals = !!(form.goals && Array.isArray(form.goals.goals) && form.goals.goals.length > 0);
-  const steps = ECHO_buildSteps(compiled, teachers);
+  /* A KÉRDŐÍV NYELVE — 3. § (1): a KÉPZÉS nyelve dönt, nem a fejléc
+     nyelvválasztója. A kurzus nyelvét az echo_get_form() 'course'.'lang'
+     mezője hozza. A felület KERETE (gombok, lépésszámláló) marad a
+     felhasználó nyelvén — azt az app.jsx fordítója kezeli. */
+  const courseMeta = form.course || {};
+  const lang = ECHO_formLang(courseMeta, compiled);
+  const langFellBack = ECHO_langFellBack(courseMeta, compiled);
+  // A félév elején mentett célok és oktatói elvárások — az echo_get_form
+  // ezeket a HÍVÓ SAJÁT sorából adja vissza (echo.student_goal).
+  const goalItems = ECHO_goalItems(form.goals);
+  const hasGoals = goalItems.length > 0;
+  const steps = ECHO_buildSteps(compiled, teachers, goalItems);
   const cur = steps[Math.min(step, steps.length - 1)];
 
   // Az aktuális lépés látható kérdései (a cond kiértékelése után).
@@ -858,24 +1482,67 @@ function ECHO_Wizard({ course, onBack, onSubmitted }) {
       const bag = tans[cur.teacher.id] || {};
       return qs.filter(q => q.repeat === 'teacher' && ECHO_condOk(q.cond, { answers: bag, hasGoals }));
     }
+    if (cur.kind === 'goal') {
+      // A célonkénti kérdés válaszai a kurzusszintű `ans` zsákban élnek,
+      // cél-utótaggal ellátott kulcson. A cond kiértékelése ezért a NYERS
+      // `ans`-t kapja: a mai kérdőívben a célkérdésnek nincs feltétele, egy
+      // jövőbeli feltétel viszont csak nem-ismétlődő kérdésre hivatkozhat.
+      return qs.filter(q => q.repeat === 'goal' && ECHO_condOk(q.cond, { answers: ans, hasGoals }));
+    }
     return qs.filter(q => !q.repeat && ECHO_condOk(q.cond, { answers: ans, hasGoals }));
   })();
 
-  const getV = (q) => (cur.kind === 'teacher' ? (tans[cur.teacher.id] || {})[q.id] : ans[q.id]);
+  // A válaszkulcs a lépés fajtájától függ:
+  //   teacher — oktatónkénti zsák (tans[oktató_id]), kulcs a kérdés id-ja;
+  //   goal    — a kurzusszintű zsák, kulcs "<kérdés_id>@<cél_kulcs>", tehát
+  //             célonként EGYEDI (két azonos szövegű cél sem ütközik);
+  //   section — a kurzusszintű zsák, kulcs a kérdés id-ja.
+  const keyOf = (q) => (cur.kind === 'goal' ? ECHO_goalKey(q, cur.goal) : q.id);
+  // A lépés azonosítója a React-kulcshoz és a keverési maghoz. Célonként külön
+  // kell, különben a két cél kérdése ugyanazt a komponenspéldányt kapná, és a
+  // beírt érték átcsordulna a következő célra.
+  const stepKey = cur.kind === 'teacher' ? cur.teacher.id
+                : cur.kind === 'goal'    ? (cur.section.id + '#' + cur.goal.key)
+                : (cur.section ? cur.section.id : 'review');
+  const getV = (q) => (cur.kind === 'teacher' ? (tans[cur.teacher.id] || {})[q.id] : ans[keyOf(q)]);
   const setV = (q, v) => {
     if (cur.kind === 'teacher') {
       const id = cur.teacher.id;
       setTans(prev => ({ ...prev, [id]: { ...(prev[id] || {}), [q.id]: v } }));
     } else {
-      setAns(prev => ({ ...prev, [q.id]: v }));
+      const k = keyOf(q);
+      setAns(prev => ({ ...prev, [k]: v }));
     }
     setTouched(false);
   };
 
   const missing = visibleQs.filter(q => q.required && !ECHO_answered(q, getV(q)));
+  /* "EGYÉB" BEJELÖLVE, DE NINCS MELLÉ SZÖVEG. Ez a kötelezőségtől FÜGGETLEN
+     hiány: egy nem kötelező kérdésnél is értelmetlen a csupasz "Egyéb".
+     Ugyanezt a szabályt az echo_submit() is kikényszeríti — a felület csak
+     azért kapja meg, hogy a hallgató ELŐBB értesüljön róla, mint a beküldésnél. */
+  const otherOpen = visibleQs.filter(q => ECHO_otherMissing(q, getV(q)));
+  const blocked = missing.length + otherOpen.length;
   const isLast = cur && cur.kind === 'review';
 
+  /* A BEHELYETTESÍTÉS KÖRNYEZETE: a kurzus, és — oktatónkénti lépésen — az
+     ÉPPEN értékelt oktató, célonkéntin az éppen értékelt cél. Így oldódik fel
+     az "[Oktató neve] erősségei" a valódi névre. */
+  const tokenCtx = {
+    course: courseMeta,
+    teacher: cur && cur.kind === 'teacher' ? cur.teacher : null,
+    goal: cur && cur.kind === 'goal' ? cur.goal : null,
+  };
+
   const submit = async () => {
+    // Végső ellenőrzés a teljes kitöltésen — lásd ECHO_otherGaps.
+    const gaps = ECHO_otherGaps(compiled, teachers, ans, tans, hasGoals, goalItems);
+    if (gaps.length) {
+      setErr('Egy „Egyéb" válasz mellől hiányzik a szöveg (' +
+             gaps.map(g => ECHO_txt(g.q, lang)).join(' · ') +
+             '). Lépj vissza arra a kérdésre, és írd le, mi volt az.');
+      return;
+    }
     setBusy(true); setErr('');
     try {
       // 1) AZONOSÍTOTT lépés: a részvételi napló megjelöli, hogy próbálkoztunk.
@@ -901,8 +1568,20 @@ function ECHO_Wizard({ course, onBack, onSubmitted }) {
       }
       // 2) ANONIM lépés: külön, munkamenet nélküli klienssel. A JWT nem megy ki.
       await ECHO_api.submit(ticketRef.current.ticket,
-                            ECHO_buildPayload(compiled, teachers, ans, tans, hasGoals));
+                            ECHO_buildPayload(compiled, teachers, ans, tans, hasGoals, goalItems));
       ticketRef.current = null;   // elkoltottuk, tobbe nem hasznalhato
+
+      // 3) A PISZKOZAT ELDOBASA — kulon, AZONOSITOTT keresben, a bekuldes UTAN.
+      //    Miert nem az echo_submit teszi: az anon jogon fut, es szandekosan
+      //    nem tudja, ki kuldott be (lasd 22_echo_draft.sql fejlec). Ez a hivas
+      //    mar semmilyen valasz-tartalmat nem hordoz, csak a kampany/kurzus
+      //    part — a ket keres igy elvalik egymastol.
+      //    Ha ez a hivas elszall, a piszkozat NEM marad orokre: a kampany
+      //    zarasakor egy trigger, lejaratkor a takarito eltakaritja. Ezert
+      //    nyeljuk a hibat — a hallgatonak a bekuldes sikerult, es ez a fontos.
+      try { await ECHO_api.draftDrop(course.campaign_id, course.course_id); }
+      catch (e) { /* csendben — a szerveroldali takaritas elviszi */ }
+
       setDone(true);
       onSubmitted && onSubmitted(course);
     } catch (e) {
@@ -945,7 +1624,7 @@ function ECHO_Wizard({ course, onBack, onSubmitted }) {
   return (
     <div className="p-4 sm:p-8 max-w-3xl mx-auto pb-32">
       <button onClick={onBack} className="inline-flex items-center gap-2 text-sm font-bold text-slate-400 hover:text-primary mb-4 transition-colors">
-        <Lucide.ArrowLeft size={16} /> Kilépés — a válaszaid nem mentődnek
+        <Lucide.ArrowLeft size={16} /> Kilépés — a válaszaid piszkozatként megmaradnak
       </button>
 
       {/* fejléc + lépésjelző */}
@@ -961,6 +1640,26 @@ function ECHO_Wizard({ course, onBack, onSubmitted }) {
             <ECHO_Src>{cur.teacher.name}{cur.teacher.title ? ' · ' + cur.teacher.title : ''}</ECHO_Src>
           </p>
         )}
+        {/* A KURZUS NYELVE DÖNT (3. § (1)). Ha a képzés nyelvén nincs fordítás,
+            magyarra esünk vissza — és ezt MEGMONDJUK, mert különben az angol
+            nyelvű képzés hallgatója azt hinné, elrontott valamit. Az élesítés
+            előtti ellenőrzés miatt ez élő kérdőíven nem fordulhat elő. */}
+        {langFellBack && (
+          <p className="mt-2 text-[11px] font-bold text-amber-700 inline-flex items-start gap-1.5">
+            <Lucide.Languages size={13} className="flex-none mt-px" />
+            A kurzus nyelvén ({ECHO_courseLang(courseMeta).toUpperCase()}) nincs jóváhagyott
+            fordítás, ezért a kérdőívet magyarul mutatjuk.
+          </p>
+        )}
+        {cur.kind === 'goal' && (
+          <div className="mt-2 rounded-2xl bg-primary/5 border border-primary/10 px-4 py-3">
+            <p className="text-[10px] font-black uppercase tracking-widest text-primary/60 mb-1">
+              {cur.goal.kind === 'goal' ? 'A félév elején kitűzött célod' : 'Az oktatóval szemben megfogalmazott elvárásod'}
+            </p>
+            {/* A cél szövegét a HALLGATÓ írta — gépi fordítás nem érintheti. */}
+            <p className="text-sm font-bold text-slate-800 leading-snug"><ECHO_Src>{cur.goal.text}</ECHO_Src></p>
+          </div>
+        )}
         <div className="mt-4">
           <div className="flex items-center justify-between text-[11px] font-black uppercase tracking-wider text-slate-400 mb-1.5">
             <span>{step + 1}. lépés / {steps.length}</span><span>{pct}%</span>
@@ -969,30 +1668,74 @@ function ECHO_Wizard({ course, onBack, onSubmitted }) {
             <div className="h-full bg-primary rounded-full transition-all duration-300" style={{ width: pct + '%' }} />
           </div>
         </div>
+
+        {/* ---------- MENTÉSI ÁLLAPOT + ŐSZINTE KÖZLÉS ----------
+            A piszkozat kényelmes, de nem ingyenes: a beküldésig a fiókhoz
+            kötve áll. Ezt nem elrejteni kell, hanem kimondani — ugyanott,
+            ahol a mentés tényét is közöljük. */}
+        <div className="mt-3 pt-3 border-t border-slate-100 flex items-start gap-2">
+          <span className="flex-none mt-0.5 text-slate-300">
+            {saving ? <Lucide.Loader2 size={13} className="animate-spin" />
+                    : saveErr ? <Lucide.CloudOff size={13} className="text-amber-500" />
+                    : <Lucide.Cloud size={13} />}
+          </span>
+          <p className="text-[11px] font-medium text-slate-400 leading-relaxed">
+            {saving ? <b className="text-slate-500">Mentés…</b>
+             : saveErr ? <b className="text-amber-600">A piszkozatot most nem sikerült menteni — a válaszaid a böngészőben megvannak.</b>
+             : savedAt ? <b className="text-slate-500">Piszkozat mentve {ECHO_dateTime(savedAt)}.</b>
+             : <b className="text-slate-500">A kitöltésed automatikusan mentődik.</b>}
+            {' '}A piszkozat a beküldésig <b className="text-slate-500">visszakereshető hozzád</b>, de
+            a tartalmát rajtad kívül senki nem látja. A beküldés pillanatában ez a kapcsolat
+            elszakad, és a piszkozat törlődik.
+          </p>
+        </div>
       </div>
 
-      {/* a lépés tartalma */}
-      <div className="bg-white rounded-3xl border border-slate-100 px-5 sm:px-8 py-2">
+      {/* a lépés tartalma
+          AUTOMATIKUS MENTÉS: az onBlur a React-ben buborékol (focusout), tehát
+          ez az EGY kezelő elkapja minden beágyazott mező fókuszvesztését — a
+          szövegdobozét is. Szándékosan NEM onChange: billentyűleütésenként
+          menteni feleslegesen terhelné a szervert, és a szabadszöveges válasz
+          minden köztes változatát rögzítené. */}
+      <div className="bg-white rounded-3xl border border-slate-100 px-5 sm:px-8 py-2"
+           onBlur={() => { saveDraft(ans, tans, step); }}>
         {cur.kind === 'review' ? (
           <ECHO_Review compiled={compiled} teachers={teachers} ans={ans} tans={tans}
-            hasGoals={hasGoals} lang={lang} onJump={setStep} steps={steps} />
+            hasGoals={hasGoals} goalItems={goalItems} lang={lang} onJump={setStep} steps={steps}
+            course={courseMeta} />
         ) : visibleQs.length === 0 ? (
           <div className="py-10 text-center text-sm text-slate-400 font-bold">
             Ebben a szakaszban most nincs megválaszolandó kérdés.
           </div>
         ) : (
           visibleQs.map((q, i) => (
-            <ECHO_Question key={(cur.teacher ? cur.teacher.id : cur.section.id) + '|' + q.id}
-              q={q} index={i + 1} lang={lang} seed={seed + '|' + (cur.teacher ? cur.teacher.id : cur.section.id)}
+            <ECHO_Question key={stepKey + '|' + q.id}
+              q={q} index={i + 1} lang={lang} seed={seed + '|' + stepKey}
+              ctx={tokenCtx}
               value={getV(q)} onChange={(v) => setV(q, v)} />
           ))
         )}
       </div>
 
-      {touched && missing.length > 0 && (
+      {touched && blocked > 0 && (
         <div className="mt-3 bg-amber-50 border border-amber-100 rounded-2xl px-4 py-3 text-sm font-bold text-amber-700 flex gap-2">
           <Lucide.AlertTriangle size={16} className="flex-none mt-0.5" />
-          Még {missing.length} kötelező kérdés vár válaszra ezen a lépésen.
+          <div className="space-y-1.5">
+            {missing.length > 0 && (
+              <p>Még {missing.length} kötelező kérdés vár válaszra ezen a lépésen.</p>
+            )}
+            {/* MEGMONDJUK, MELYIK kérdésnél és MIÉRT nem enged tovább — egy
+                puszta "hiányzik valami" itt azt jelentené, hogy a hallgató
+                végigpásztázza a lépést anélkül, hogy tudná, mit keres. */}
+            {otherOpen.map(q => (
+              <p key={'oth_' + q.id} className="font-medium">
+                <span className="font-bold">„Egyéb" bejelölve:</span>{' '}
+                <ECHO_Src>{ECHO_txt(ECHO_resolveTokens(q, tokenCtx), lang)}</ECHO_Src>{' '}
+                — írd is le a szövegmezőbe, mi volt az, majd nyomd meg a + gombot.
+                Enélkül a válasz nem értelmezhető.
+              </p>
+            ))}
+          </div>
         </div>
       )}
       {err && (
@@ -1004,7 +1747,8 @@ function ECHO_Wizard({ course, onBack, onSubmitted }) {
       {/* navigáció — mobilon a hüvelykujj közelében ragad meg */}
       <div className="fixed bottom-0 left-72 right-0 bg-white/95 backdrop-blur border-t border-slate-100 px-4 sm:px-8 py-3 z-40">
         <div className="max-w-3xl mx-auto flex gap-3">
-          <button onClick={() => { setTouched(false); setStep(s => Math.max(0, s - 1)); }}
+          {/* Lepesvaltaskor mentunk — ez a masik automatikus mentesi pont. */}
+          <button onClick={() => { setTouched(false); const n = Math.max(0, step - 1); setStep(n); saveDraft(ans, tans, n); }}
             disabled={step === 0} className={U_btnGhost + ' flex-none'}>
             <Lucide.ChevronLeft size={16} /> Vissza
           </button>
@@ -1015,7 +1759,10 @@ function ECHO_Wizard({ course, onBack, onSubmitted }) {
             </button>
           ) : (
             <button
-              onClick={() => { if (missing.length) { setTouched(true); return; } setTouched(false); setStep(s => s + 1); }}
+              onClick={() => {
+                if (blocked) { setTouched(true); return; }
+                setTouched(false); const n = step + 1; setStep(n); saveDraft(ans, tans, n);
+              }}
               className={U_btnPrimary + ' flex-1'}>
               Tovább <Lucide.ChevronRight size={16} />
             </button>
@@ -1028,19 +1775,42 @@ function ECHO_Wizard({ course, onBack, onSubmitted }) {
 
 // Az összegző lépés: mit fogunk beküldeni. Szándékosan nincs benne
 // semmi, ami a kitöltőt azonosítaná.
-function ECHO_Review({ compiled, teachers, ans, tans, hasGoals, lang, onJump, steps }) {
-  const label = (q) => ECHO_txt(q, lang);
+function ECHO_Review({ compiled, teachers, ans, tans, hasGoals, goalItems, lang, onJump, steps, course }) {
+  /* Az összegzésben is a FELOLDOTT kérdésszöveg áll — különben a hallgató a
+     lépéseken a valódi oktatónevet látná, az összegzésben viszont visszakapná
+     a nyers "[Oktató neve]"-t. A `t` az a környezet, amiben a kérdés elhangzott. */
+  const label = (q, t) => ECHO_txt(ECHO_resolveTokens(q, { course: course, teacher: t || null }), lang);
   const show = (v) => Array.isArray(v) ? v.join(' · ') : (typeof v === 'number' ? String(v) : String(v || '—'));
+  const items = Array.isArray(goalItems) ? goalItems : [];
 
   const courseRows = [];
+  const goalRows = [];       // { q, item, v } — célonként, csak a KÉPERNYŐN
+  const goalMerged = [];     // { q, v }      — ez az, ami TÉNYLEG beküldésre kerül
   (compiled.sections || []).forEach((sec) => {
     if (sec.part && sec.part !== 'part2') return;
     (sec.questions || []).forEach((q) => {
+      if (q.repeat === 'goal') {
+        if (!items.length) return;
+        if (!ECHO_condOk(q.cond, { answers: ans, hasGoals })) return;
+        items.forEach(it => goalRows.push({ q, item: it, v: ans[ECHO_goalKey(q, it)] }));
+        goalMerged.push({ q, v: ECHO_goalsMerge(items.map(it => ans[ECHO_goalKey(q, it)])) });
+        return;
+      }
       if (q.repeat) return;
       if (!ECHO_condOk(q.cond, { answers: ans, hasGoals })) return;
       courseRows.push({ q, v: ans[q.id] });
     });
   });
+
+  // Az összevont érték felületi címkéje. A value-k az echo_submit() CHECK-jéből
+  // valók; ha egy jövőbeli kérdőív mást használ, a nyers értéket írjuk ki.
+  const MERGED_LABEL = { nem_teljesult: 'Nem teljesült', reszben: 'Részben teljesült',
+                         teljesult: 'Teljesült', tulteljesult: 'Túlteljesült' };
+  // A célonkénti válasz felületi címkéje az adott kérdés saját opciólistájából.
+  const optLabel = (q, v) => {
+    const hit = ECHO_options(q, lang).filter(o => o.value === v)[0];
+    return hit ? hit.label : (v === undefined || v === null || v === '' ? '—' : String(v));
+  };
 
   const skipQ = (compiled.sections || [])
     .reduce((acc, s) => acc.concat((s.questions || []).filter(q => q.type === 'skip' && q.repeat === 'teacher')), [])[0];
@@ -1067,6 +1837,42 @@ function ECHO_Review({ compiled, teachers, ans, tans, hasGoals, lang, onJump, st
           ))}
         </div>
       </div>
+
+      {goalRows.length > 0 && (
+        <div>
+          <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">A céljaid teljesülése</h4>
+          <div className="space-y-2.5">
+            {goalRows.map(({ q, item, v }) => {
+              const idx = steps.findIndex(st => st.kind === 'goal' && st.goal.key === item.key
+                                             && st.section && (st.section.questions || []).some(x => x.id === q.id));
+              return (
+                <button key={ECHO_goalKey(q, item)} onClick={() => idx >= 0 && onJump(idx)}
+                  className="w-full flex items-start gap-3 text-sm text-left rounded-2xl border border-slate-100 px-4 py-3 hover:border-slate-200 hover:bg-slate-50 transition-all">
+                  <span className="flex-1 text-slate-400 font-medium">
+                    <ECHO_Src>{item.text}</ECHO_Src>
+                    <span className="block text-[10px] font-black uppercase tracking-widest text-slate-300 mt-0.5">
+                      {item.kind === 'goal' ? 'saját cél' : 'oktatói elvárás'}
+                    </span>
+                  </span>
+                  <span className="flex-1 text-slate-800 font-bold text-right"><ECHO_Src>{optLabel(q, v)}</ECHO_Src></span>
+                </button>
+              );
+            })}
+          </div>
+          {/* ŐSZINTESÉG A KITÖLTŐVEL: a célonkénti válaszokat látja, de a
+              beküldés EGYETLEN összevont értéket visz át. Ezt nem rejtjük el —
+              a cél szövege és darabszáma azonosítana, ezért marad ki. */}
+          <div className="mt-3 bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3">
+            <p className="text-[11px] text-slate-500 font-medium leading-relaxed">
+              A beküldésbe a céljaid szövege és darabszáma <b>nem</b> kerül bele — azok
+              azonosítanának. Egyetlen összevont érték megy át:{' '}
+              {goalMerged.map(({ q, v }) => (
+                <b key={q.id} className="text-slate-800">{MERGED_LABEL[v] || '—'}</b>
+              ))}.
+            </p>
+          </div>
+        </div>
+      )}
 
       <div>
         <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Az oktatók értékelése</h4>
@@ -1150,14 +1956,18 @@ function ECHO_StudentView({ user }) {
     );
   }
 
-  const open   = rows.filter(c => !localDone[key(c)] && (c.allapot === 'kitoltheto' || c.allapot === 'folyamatban'));
+  // A 'felbehagyott' ide tartozik: van mentett piszkozat, es a kitoltes
+  // folytathato — ez a legsurgetobb teendo a listaban.
+  const open   = rows.filter(c => !localDone[key(c)] &&
+    (c.allapot === 'kitoltheto' || c.allapot === 'folyamatban' || c.allapot === 'felbehagyott'));
   const goals  = rows.filter(c => c.allapot === 'celkituzes');
   const rest   = rows.filter(c => open.indexOf(c) < 0 && goals.indexOf(c) < 0);
 
   const Card = ({ c }) => {
     const doneNow = !!localDone[key(c)];
     const allapot = doneNow ? 'kitoltve' : c.allapot;
-    const canFill = !doneNow && c.is_open && (c.allapot === 'kitoltheto' || c.allapot === 'folyamatban');
+    const canFill = !doneNow && c.is_open &&
+      (c.allapot === 'kitoltheto' || c.allapot === 'folyamatban' || c.allapot === 'felbehagyott');
     const canGoals = c.is_goals_open;
     return (
       <div className="bg-white rounded-3xl border border-slate-100 p-5 hover:border-slate-200 transition-all">
@@ -1173,14 +1983,25 @@ function ECHO_StudentView({ user }) {
           <span className="inline-flex items-center gap-1"><Lucide.Users size={12} /> {c.teacher_count} oktató</span>
           {c.closes_at && <span className="inline-flex items-center gap-1"><Lucide.Clock size={12} /> {ECHO_date(c.closes_at)}-ig</span>}
           {c.goals_saved && <span className="inline-flex items-center gap-1 text-primary"><Lucide.Target size={12} /> célok megadva</span>}
+          {/* A piszkozat LETE es a lepesszam latszik, a TARTALMA soha. */}
+          {c.has_draft && (
+            <span className="inline-flex items-center gap-1 text-blue-500">
+              <Lucide.PauseCircle size={12} />
+              {(Number(c.draft_step) || 0) + 1}. lépésnél abbahagyva
+            </span>
+          )}
         </div>
         <div className="flex flex-col sm:flex-row gap-2">
           {canFill && (
             <button onClick={() => setMode({ kind: 'fill', course: c })} className={U_btnPrimary + ' flex-1 py-3.5'}>
               <Lucide.ClipboardList size={16} />
-              {/* Nincs piszkozat-mentes: minden belepes ures urlappal indul, ezert
-                  'folytatas' helyett 'ujrakezdes'. Lasd az ECHO_STATE megjegyzeset. */}
-              {c.allapot === 'folyamatban' ? 'Értékelés újrakezdése' : 'Értékelés kitöltése'}
+              {/* A 22_echo_draft.sql ota a 'felbehagyott' VALODI, folytathato
+                  allapot: a kitolto visszatolti a mentett piszkozatot, es azon a
+                  lepesen nyit, ahol a hallgato abbahagyta. A 'folyamatban' tovabbra
+                  is hibaallapot (elindult, de be nem fejezodott bekuldes). */}
+              {c.allapot === 'felbehagyott' ? 'Kitöltés folytatása'
+                : c.allapot === 'folyamatban' ? 'Értékelés újrakezdése'
+                : 'Értékelés kitöltése'}
             </button>
           )}
           {canGoals && (
@@ -1289,6 +2110,272 @@ function ECHO_Meter({ value, max, tone = 'primary' }) {
   );
 }
 
+/* ------------------------------------------------------------
+   8.a A kampány-életciklus felülete (18_echo_campaign.sql)
+   ------------------------------------------------------------
+   MIÉRT VAN EZ ITT: a 16_echo_reports.sql 2551 sornyi riport- és
+   moderálómotorja addig ELÉRHETETLEN volt a felületről, amíg a kampányt
+   semmi nem tudta 'open'-ből továbbvinni — az echo.results_gate() ugyanis
+   'closed' vagy későbbi állapotot követel. A 18_echo_campaign.sql adta meg
+   a hiányzó két RPC-t; ez a néhány komponens az a kapcsoló, amivel az admin
+   ténylegesen használni tudja őket.
+
+   AMIT A FELÜLET KIMOND, MIELŐTT KATTINTASZ:
+   a pecsételés (processing → sealed) VISSZAFORDÍTHATATLAN. Lefut az
+   echo.shuffle_responses(), és onnantól sem az RPC, sem közvetlen UPDATE nem
+   viszi vissza a kampányt — az adatbázisban trigger őrzi (mérve). */
+
+const ECHO_CAMPAIGN_STEP = {
+  draft:      { igé: 'Vissza előkészítésbe', mit: 'A kampány újra szerkeszthető, kitöltést nem fogad.' },
+  open:       { igé: 'Megnyitás',            mit: 'Ettől kezdve a jogosult hallgatók jegyet kérhetnek és kitölthetnek.' },
+  closed:     { igé: 'Lezárás',              mit: 'A kitöltés véget ér. Az ADMIN innentől lát eredményt, az oktató még nem.' },
+  processing: { igé: 'Feldolgozás indítása', mit: 'Lezárul a részvételi napló, és feltöltődik a moderálási sor.' },
+  sealed:     { igé: 'Pecsételés',           mit: 'Az adat véglegessé válik. Lefut az echo.shuffle_responses().' },
+  published:  { igé: 'Közzététel',           mit: 'Az eredmény megnyílik az oktatóknak is (echo.results_gate).' },
+};
+
+// A <input type="datetime-local"> a helyi idővel dolgozik, a Postgres viszont
+// timestamptz-t vár. A két irányú váltás egy helyen, hogy ne csússzon el.
+function ECHO_toLocalInput(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+function ECHO_fromLocalInput(v) {
+  if (!v) return null;
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+/* --- Új kampány űrlapja ---------------------------------------------------
+   A sablonverzió-választó KIZÁRÓLAG 'live' és 'approved' verziót kínál, mert
+   az echo_campaign_create() is csak ezeket fogadja el. A megnyitáshoz viszont
+   már 'live' kell (ECHO_TEMPLATE_NOT_LIVE) — ezt a lista ki is írja, hogy ne
+   utólag derüljön ki. */
+function ECHO_CampaignCreate({ open, onClose, onDone }) {
+  const [tpls, setTpls]   = useState(null);
+  const [nev, setNev]     = useState('');
+  const [term, setTerm]   = useState('');
+  const [ver, setVer]     = useState('');
+  const [opensAt, setOpensAt]   = useState('');
+  const [closesAt, setClosesAt] = useState('');
+  const [busy, setBusy]   = useState(false);
+  const [err, setErr]     = useState('');
+
+  useEffect(() => {
+    if (!open) return;
+    setErr(''); setBusy(false);
+    ECHO_api.templates()
+      .then(d => {
+        const arr = [];
+        (Array.isArray(d) ? d : []).forEach(t => {
+          (Array.isArray(t.verziok) ? t.verziok : []).forEach(v => {
+            if (v.state === 'live' || v.state === 'approved') {
+              arr.push({ id: v.id, label: `${t.name_hu} · v${v.version}`, state: v.state, kerdesek: v.kerdesek });
+            }
+          });
+        });
+        arr.sort((a, b) => (a.state === 'live' ? -1 : 1) - (b.state === 'live' ? -1 : 1));
+        setTpls(arr);
+        if (arr.length && !ver) setVer(arr[0].id);
+      })
+      .catch(e => { setTpls([]); setErr(ECHO_msg(e)); });
+  }, [open]);
+
+  const save = async () => {
+    setBusy(true); setErr('');
+    try {
+      const r = await ECHO_api.campaignCreate(
+        nev.trim(), term.trim(), ver,
+        ECHO_fromLocalInput(opensAt), ECHO_fromLocalInput(closesAt));
+      onDone(r);
+      setNev(''); setTerm(''); setOpensAt(''); setClosesAt('');
+    } catch (e) { setErr(ECHO_msg(e)); }
+    finally { setBusy(false); }
+  };
+
+  const sel = (tpls || []).find(t => t.id === ver);
+  const ok  = nev.trim() && term.trim() && ver && opensAt && closesAt
+              && ECHO_fromLocalInput(closesAt) > ECHO_fromLocalInput(opensAt);
+
+  return (
+    <UModal open={open} onClose={onClose} max="max-w-2xl"
+      icon={<Lucide.Megaphone size={20} />} title="Új kampány"
+      subtitle="A kampány mindig ELŐKÉSZÍTÉS (draft) állapotban jön létre">
+      {err && (
+        <div className="mb-5 bg-red-50 border border-red-100 rounded-2xl px-4 py-3 text-sm font-bold text-red-600 flex gap-2">
+          <Lucide.AlertCircle size={16} className="flex-none mt-0.5" /> {err}
+        </div>
+      )}
+
+      <div className="space-y-4">
+        <UField label="A kampány neve" hint="Ez látszik a hallgatói és az oktatói felületen is.">
+          <input className={U_input} value={nev} onChange={e => setNev(e.target.value)}
+            placeholder="OMHV 2025/26/2 — tavaszi félév" maxLength={160} />
+        </UField>
+
+        <UField label="Félév"
+          hint="Az alkalmassági lista EBBŐL dolgozik: az echo.eligibility_rebuild() a félév minden kurzusát összegyűjti. Egy félévre egyszerre egy aktív kampány lehet.">
+          <input className={U_input} value={term} onChange={e => setTerm(e.target.value)} placeholder="2025/26/2" />
+        </UField>
+
+        <UField label="Kérdőív (sablonverzió)"
+          hint="Csak jóváhagyott és élesített verzió választható. A MEGNYITÁSHOZ már élesített (live) kell.">
+          {tpls === null ? <SkeletonBar h={44} /> : tpls.length === 0 ? (
+            <div className="bg-amber-50 border border-amber-100 rounded-2xl px-4 py-3 text-[12px] font-bold text-amber-700">
+              Nincs egyetlen jóváhagyott vagy élesített sablonverzió sem. Előbb a
+              „Kérdőívszerkesztő” fülön hagyd jóvá és élesítsd a kérdőívet.
+            </div>
+          ) : (
+            <select className={U_input} value={ver} onChange={e => setVer(e.target.value)}>
+              {tpls.map(t => (
+                <option key={t.id} value={t.id}>
+                  {t.label} · {t.state === 'live' ? 'élesített' : 'jóváhagyott'} · {t.kerdesek} kérdés
+                </option>
+              ))}
+            </select>
+          )}
+        </UField>
+
+        {sel && sel.state !== 'live' && (
+          <div className="bg-amber-50 border border-amber-100 rounded-2xl px-4 py-3 flex gap-2.5">
+            <Lucide.AlertTriangle size={15} className="text-amber-500 flex-none mt-0.5" />
+            <p className="text-[11px] text-amber-700 font-medium leading-relaxed">
+              Ez a verzió még csak <b>jóváhagyott</b>. A kampány létrejön vele, de
+              megnyitni csak azután lehet, hogy a szerkesztőben élesítetted
+              (ECHO_TEMPLATE_NOT_LIVE).
+            </p>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <UField label="Nyitás">
+            <input type="datetime-local" className={U_input} value={opensAt} onChange={e => setOpensAt(e.target.value)} />
+          </UField>
+          <UField label="Zárás">
+            <input type="datetime-local" className={U_input} value={closesAt} onChange={e => setClosesAt(e.target.value)} />
+          </UField>
+        </div>
+        {opensAt && closesAt && !(ECHO_fromLocalInput(closesAt) > ECHO_fromLocalInput(opensAt)) && (
+          <p className="text-[11px] font-black text-red-500">A zárás nem lehet a nyitás előtt (ECHO_WINDOW_INVALID).</p>
+        )}
+
+        <div className="bg-slate-50 rounded-2xl px-4 py-3 flex gap-2.5">
+          <Lucide.Info size={15} className="text-slate-400 flex-none mt-0.5" />
+          <p className="text-[11px] text-slate-500 font-medium leading-relaxed">
+            A létrehozás után a következő lépés az <b>alkalmasság újraépítése</b>:
+            jogosultsági sor nélkül a kampány nem nyitható meg (ECHO_NO_ELIGIBILITY),
+            mert akkor senki nem tudná kitölteni, és a kizárási napló is üres maradna.
+          </p>
+        </div>
+
+        <div className="flex gap-3 pt-1">
+          <button className={U_btnGhost} onClick={onClose}>Mégsem</button>
+          <button className={U_btnPrimary} disabled={!ok || busy} onClick={save}>
+            {busy ? <Lucide.Loader2 size={16} className="animate-spin" /> : <Lucide.Plus size={16} />}
+            {busy ? 'Létrehozás…' : 'Kampány létrehozása'}
+          </button>
+        </div>
+      </div>
+    </UModal>
+  );
+}
+
+/* --- Állapotváltás: gombsor + megerősítés --------------------------------
+   A gombokat az echo_campaign_get() 'kovetkezo' tömbje adja — a szerver
+   mondja meg, mi következhet és mi blokkolja. A felület NEM találgat: ha a
+   szerver szerint egy lépés blokkolt, a gomb letiltva, és mellette OTT ÁLL,
+   miért (a precheck üzenete szó szerint). */
+function ECHO_TransitionConfirm({ step, campaign, busy, onCancel, onConfirm }) {
+  const [force, setForce] = useState(false);
+  useEffect(() => { setForce(false); }, [step && step.to]);
+  if (!step) return null;
+  const meta  = ECHO_CAMPAIGN_STEP[step.to] || { igé: step.to, mit: '' };
+  const seal  = step.to === 'sealed';
+  const back  = step.irany === 'vissza';
+  const blocked = !step.ok;
+
+  return (
+    <UModal open={!!step} onClose={busy ? () => {} : onCancel} max="max-w-lg"
+      icon={seal ? <Lucide.Lock size={20} /> : back ? <Lucide.Undo2 size={20} /> : <Lucide.ArrowRight size={20} />}
+      title={meta.igé}
+      subtitle={campaign.code + ' · ' + ((ECHO_CAMPAIGN_STATE[campaign.state] || {}).label || campaign.state)
+                + ' → ' + ((ECHO_CAMPAIGN_STATE[step.to] || {}).label || step.to)}>
+
+      {seal && (
+        <div className="mb-5 bg-red-50 border-2 border-red-200 rounded-2xl px-4 py-4">
+          <div className="flex items-center gap-2 mb-2">
+            <Lucide.ShieldAlert size={18} className="text-red-500 flex-none" />
+            <p className="text-sm font-black text-red-700">Ez a lépés VISSZAFORDÍTHATATLAN.</p>
+          </div>
+          <p className="text-[12px] text-red-700/90 font-medium leading-relaxed">
+            A pecsételéssel lefut az <code>echo.shuffle_responses()</code>: a válaszsorok
+            fizikai sorrendje véglegesen elbomlik — pont ez az, ami a beküldési
+            sorrendet mint rejtett csatornát megszünteti. Utána a kampányt sem
+            ez az RPC, sem közvetlen adatbázis-módosítás nem viszi vissza: az
+            <code> echo.campaign_seal_guard()</code> trigger elutasítja. A kampány
+            innentől már csak közzétehető.
+          </p>
+        </div>
+      )}
+
+      {back && (
+        <div className="mb-5 bg-amber-50 border border-amber-100 rounded-2xl px-4 py-3 flex gap-2.5">
+          <Lucide.Undo2 size={15} className="text-amber-500 flex-none mt-0.5" />
+          <p className="text-[12px] text-amber-700 font-medium leading-relaxed">
+            Ez VISSZALÉPÉS. A pecsét előtt megengedett, de az echo.campaign_log-ba
+            bekerül, ki és mikor lépett vissza.
+          </p>
+        </div>
+      )}
+
+      <p className="text-sm text-slate-600 font-medium leading-relaxed mb-4">{meta.mit}</p>
+
+      <div className={'rounded-2xl px-4 py-3 mb-5 ' + (blocked ? 'bg-red-50 border border-red-100' : 'bg-slate-50')}>
+        <p className="text-[10px] font-black uppercase tracking-widest mb-1 text-slate-400">
+          {blocked ? 'A szerver szerint ez most blokkolt' : 'Előfeltétel'}
+        </p>
+        <p className={'text-[12px] font-medium leading-relaxed ' + (blocked ? 'text-red-600' : 'text-slate-500')}>
+          {step.uzenet}
+        </p>
+        {blocked && step.kod && (
+          <p className="text-[10px] font-black text-red-400 tracking-wider mt-1.5">{step.kod}</p>
+        )}
+      </div>
+
+      {blocked && step.forcolhato && (
+        <label className="flex items-start gap-3 bg-amber-50 border border-amber-100 rounded-2xl px-4 py-3 mb-5 cursor-pointer">
+          <input type="checkbox" className="mt-0.5" checked={force} onChange={e => setForce(e.target.checked)} />
+          <span className="text-[12px] text-amber-700 font-medium leading-relaxed">
+            <b>Kényszerítem.</b> A kényszerítés KIZÁRÓLAG ezt az időzítési vagy
+            teljességi feltételt oldja fel, és a naplóban külön jelölve marad.
+            Az állapotgép átugrását és a pecsét utáni visszalépést semmi nem oldja fel.
+          </span>
+        </label>
+      )}
+
+      {blocked && !step.forcolhato && (
+        <p className="text-[12px] font-bold text-slate-500 mb-5">
+          Ez a feltétel nem kényszeríthető ki — szerkezeti akadály, nem időzítés.
+        </p>
+      )}
+
+      <div className="flex gap-3">
+        <button className={U_btnGhost} onClick={onCancel} disabled={busy}>Mégsem</button>
+        <button
+          className={(seal ? U_btn + ' bg-red-500 text-white px-5 py-3 shadow-lg shadow-red-500/10 hover:bg-red-600' : U_btnPrimary)}
+          disabled={busy || (blocked && !(step.forcolhato && force))}
+          onClick={() => onConfirm(step.to, blocked && force)}>
+          {busy ? <Lucide.Loader2 size={16} className="animate-spin" /> : seal ? <Lucide.Lock size={16} /> : <Lucide.Check size={16} />}
+          {busy ? 'Folyamatban…' : (blocked && force ? meta.igé + ' (kényszerítve)' : meta.igé)}
+        </button>
+      </div>
+    </UModal>
+  );
+}
+
 function ECHO_CampaignsPanel({ user }) {
   const [rows, setRows] = useState(null);
   const [err, setErr] = useState('');
@@ -1303,6 +2390,13 @@ function ECHO_CampaignsPanel({ user }) {
   const [toast, setToast] = useState('');
   const lang = ECHO_lang();
 
+  /* --- 3. szelet: kampány-életciklus (18_echo_campaign.sql) --- */
+  const [createOpen, setCreateOpen] = useState(false);
+  const [detail, setDetail] = useState(null);   // echo_campaign_get() a kiválasztottra
+  const [detailBusy, setDetailBusy] = useState(false);
+  const [step, setStep] = useState(null);       // a megerősítésre váró állapotváltás
+  const [txBusy, setTxBusy] = useState(false);
+
   const load = async (background) => {
     if (background) setRefreshing(true);
     setErr('');
@@ -1311,7 +2405,8 @@ function ECHO_CampaignsPanel({ user }) {
       const arr = Array.isArray(d) ? d : [];
       setRows(arr);
       setSel(prev => (prev ? arr.find(c => c.id === prev.id) || arr[0] || null : arr[0] || null));
-    } catch (e) { setRows([]); setErr(ECHO_msg(e)); }
+      return arr;
+    } catch (e) { setRows([]); setErr(ECHO_msg(e)); return []; }
     finally { setRefreshing(false); }
   };
   useEffect(() => { load(false); }, []);
@@ -1326,6 +2421,42 @@ function ECHO_CampaignsPanel({ user }) {
       .finally(() => { if (!dead) setRateBusy(false); });
     return () => { dead = true; };
   }, [sel && sel.id]);
+
+  /* A kampány RÉSZLETEI és a lehetséges következő állapotok.
+     A gombokat NEM a kliens találja ki: az echo_campaign_get() 'kovetkezo'
+     tömbje mondja meg, mi következhet, mi blokkolt és miért — ugyanaz az
+     echo.campaign_precheck(), ami a tényleges váltást is engedi vagy nem. */
+  const loadDetail = async (id) => {
+    if (!id) { setDetail(null); return; }
+    setDetailBusy(true);
+    try { setDetail(await ECHO_api.campaignGet(id)); }
+    catch (e) { setDetail(null); setErr(ECHO_msg(e)); }
+    finally { setDetailBusy(false); }
+  };
+  useEffect(() => { loadDetail(sel && sel.id); }, [sel && sel.id]);
+
+  const doTransition = async (to, force) => {
+    setTxBusy(true); setErr('');
+    try {
+      const r = await ECHO_api.campaignTransition(sel.id, to, force);
+      setStep(null);
+      setToast(
+        (ECHO_CAMPAIGN_STEP[to] ? ECHO_CAMPAIGN_STEP[to].igé : to) +
+        ' kész: ' + (ECHO_CAMPAIGN_STATE[to] ? ECHO_CAMPAIGN_STATE[to].label : to) +
+        (r && r.forced ? ' (kényszerítve, naplózva)' : ''));
+      await load(true);
+      await loadDetail(sel.id);
+    } catch (e) { setErr(ECHO_msg(e)); }
+    finally { setTxBusy(false); }
+  };
+
+  const onCreated = async (r) => {
+    setCreateOpen(false);
+    setToast('A(z) ' + (r && r.code ? r.code : 'új') + ' kampány létrejött, előkészítés állapotban.');
+    const arr = await load(true);
+    const hit = (arr || []).find(c => c.id === (r && r.id));
+    if (hit) setSel(hit);
+  };
 
   /* A kérdőív megtekintése.
      A 15_echo_core.sql NEM tartalmaz admin oldali "add vissza a template
@@ -1382,11 +2513,16 @@ function ECHO_CampaignsPanel({ user }) {
         <div>
           <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">ECHO — kampánykezelés</h1>
           <p className="text-sm text-slate-400 font-medium mt-1">
-            Oktatói munka hallgatói véleményezése · kitöltési arány és kizárási napló
+            Oktatói munka hallgatói véleményezése · kampány-életciklus, kitöltési arány, kizárási napló
           </p>
         </div>
         <div className="flex items-center gap-3 flex-none pt-2">
           <RefreshingBadge on={refreshing} />
+          {isAdminRole && (
+            <button onClick={() => setCreateOpen(true)} className={U_btnPrimary + ' py-2.5 px-4 text-sm'}>
+              <Lucide.Plus size={16} /> Új kampány
+            </button>
+          )}
           <button onClick={() => load(true)} className="w-10 h-10 rounded-xl hover:bg-slate-100 text-slate-400 flex items-center justify-center transition-colors" title="Frissítés">
             <Lucide.RefreshCw size={16} />
           </button>
@@ -1401,7 +2537,11 @@ function ECHO_CampaignsPanel({ user }) {
 
       {rows.length === 0 && !err && (
         <UEmpty icon={<Lucide.Megaphone size={28} />} title="Nincs kampány"
-          subtitle="Futtasd le a 15_echo_core.sql-t — a demó seed létrehoz egy nyitott kampányt." />
+          subtitle="Hozz létre egyet, vagy futtasd le a 15_echo_core.sql-t — a demó seed létrehoz egy nyitott kampányt."
+          action={isAdminRole ? (
+            <button className={U_btnPrimary} onClick={() => setCreateOpen(true)}>
+              <Lucide.Plus size={16} /> Új kampány
+            </button>) : null} />
       )}
 
       {/* kampánylista */}
@@ -1464,6 +2604,96 @@ function ECHO_CampaignsPanel({ user }) {
                 <button onClick={openForm} className={U_btnGhost + ' py-2.5 px-4 text-sm flex-none'}>
                   <Lucide.FileText size={15} /> Kérdőív
                 </button>
+              </div>
+
+              {/* --- ÁLLAPOTGÉP (18_echo_campaign.sql) ---
+                  A gombokat az echo_campaign_get() 'kovetkezo' tömbje adja: a
+                  szerver mondja meg, mi következhet, mi blokkolt és miért. Így a
+                  felület és az RPC nem tudnak szétcsúszni. */}
+              <div className="border border-slate-100 rounded-2xl p-4 mb-6">
+                <div className="flex items-center justify-between gap-3 mb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Állapot</span>
+                    <UBadge tone={(ECHO_CAMPAIGN_STATE[sel.state] || {}).tone || 'slate'}>
+                      {(ECHO_CAMPAIGN_STATE[sel.state] || {}).label || sel.state}
+                    </UBadge>
+                    {detail && detail.sealed_at && (
+                      <span className="text-[10px] font-black text-violet-500 tracking-wider flex items-center gap-1">
+                        <Lucide.Lock size={11} /> lepecsételve {ECHO_date(detail.sealed_at)}
+                      </span>
+                    )}
+                  </div>
+                  <RefreshingBadge on={detailBusy} />
+                </div>
+
+                {/* az állapotlánc — hol tartunk */}
+                <div className="flex flex-wrap items-center gap-1 mb-4">
+                  {['draft', 'open', 'closed', 'processing', 'sealed', 'published'].map((st, i, all) => {
+                    const cur  = st === sel.state;
+                    const past = all.indexOf(sel.state) > i;
+                    return (
+                      <React.Fragment key={st}>
+                        {i > 0 && <Lucide.ChevronRight size={12} className="text-slate-300" />}
+                        <span className={'text-[10px] font-black uppercase tracking-wider px-2 py-1 rounded-lg ' +
+                          (cur ? 'bg-primary text-white' : past ? 'text-slate-400' : 'text-slate-300')}>
+                          {(ECHO_CAMPAIGN_STATE[st] || {}).label || st}
+                        </span>
+                      </React.Fragment>
+                    );
+                  })}
+                </div>
+
+                {isAdminRole && detail && Array.isArray(detail.kovetkezo) && detail.kovetkezo.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {detail.kovetkezo.map(k => {
+                      const meta = ECHO_CAMPAIGN_STEP[k.to] || { igé: k.to };
+                      const seal = k.to === 'sealed';
+                      const back = k.irany === 'vissza';
+                      return (
+                        <button key={k.to + k.irany} onClick={() => setStep(k)}
+                          title={k.uzenet}
+                          className={U_btn + ' text-sm py-2.5 px-4 ' + (
+                            seal ? 'bg-red-500 text-white hover:bg-red-600 shadow-lg shadow-red-500/10'
+                                 : back ? 'bg-slate-50 text-slate-500 hover:bg-slate-100'
+                                        : 'bg-primary text-white hover:bg-primary/90 shadow-lg shadow-primary/10') +
+                            (k.ok ? '' : ' opacity-60')}>
+                          {seal ? <Lucide.Lock size={15} /> : back ? <Lucide.Undo2 size={15} /> : <Lucide.ArrowRight size={15} />}
+                          {meta.igé}
+                          {!k.ok && <Lucide.AlertTriangle size={13} />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {detail && Array.isArray(detail.kovetkezo) && detail.kovetkezo.length === 0 && (
+                  <p className="text-[11px] font-bold text-slate-400">
+                    A kampány a lánc végén van: közzétett állapotból nincs továbblépés, és visszaút sincs.
+                  </p>
+                )}
+
+                {detail && (
+                  <p className="text-[11px] text-slate-400 font-medium leading-relaxed mt-3">
+                    Eredményt most {detail.eredmeny_lathato_adminnak ? 'az admin LÁT' : 'az admin sem lát'}
+                    {', '}az oktató {detail.eredmeny_lathato_oktatonak ? 'LÁT' : 'nem lát'}.
+                    {' '}A kaput az echo.results_gate() adja: adminnak a(z){' '}
+                    {(detail.eredmeny_admin_allapotok || []).join(', ')}, oktatónak a(z){' '}
+                    {(detail.eredmeny_oktato_allapotok || []).join(', ')} állapot.
+                  </p>
+                )}
+
+                {detail && Array.isArray(detail.naplo) && detail.naplo.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-slate-100 space-y-1">
+                    {detail.naplo.slice(0, 4).map((l, i) => (
+                      <p key={i} className="text-[10px] font-bold text-slate-400">
+                        {ECHO_dateTime(l.at)} · {l.from || '—'} → {l.to}
+                        {l.irany === 'vissza' ? ' (visszalépés)' : ''}
+                        {l.forced ? ' (kényszerítve)' : ''}
+                        {l.ki ? ' · ' + l.ki : ''}
+                      </p>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
@@ -1610,6 +2840,15 @@ function ECHO_CampaignsPanel({ user }) {
           <ECHO_FormPreview form={preview.form} lang={lang} />
         )}
       </UModal>
+
+      {/* --- kampány-életciklus: létrehozás és állapotváltás --- */}
+      <ECHO_CampaignCreate open={createOpen} onClose={() => setCreateOpen(false)} onDone={onCreated} />
+      {sel && step && (
+        <ECHO_TransitionConfirm
+          step={step} campaign={sel} busy={txBusy}
+          onCancel={() => setStep(null)}
+          onConfirm={doTransition} />
+      )}
     </div>
   );
 }
@@ -1640,7 +2879,12 @@ function ECHO_FormPreview({ form, lang }) {
             </UBadge>
           </div>
           <div className="space-y-2">
-            {(sec.questions || []).map(q => (
+            {(sec.questions || []).map(raw => {
+              // A teljes űrlap előnézetében is a KÖZÖS feloldó fut — különben
+              // ez a nézet mutatna nyers "[Oktató neve]"-t, miközben a
+              // kérdés- és szakaszelőnézet már feloldva mutatja.
+              const q = ECHO_resolveTokens(raw, ECHO_PREVIEW_CTX);
+              return (
               <div key={q.id} className="border border-slate-100 rounded-2xl px-4 py-3">
                 <div className="flex items-start justify-between gap-3">
                   <p className="text-sm font-bold text-slate-700 leading-snug">
@@ -1666,7 +2910,8 @@ function ECHO_FormPreview({ form, lang }) {
                   {q.cond && <span>feltételes</span>}
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       ))}
@@ -1897,19 +3142,36 @@ function ECHO_ResultBlock({ r, lang, cim, ikon, tajekoztato }) {
 /* ------------------------------------------------------------
    10. ECHO_TeacherView — oktatói eredménynézet
    ------------------------------------------------------------
-   MIT MÉRTÜNK A REPLIKÁN, ÉS MI KÖVETKEZIK BELŐLE:
-     • echo_campaigns() és echo_rate() törzse is_admin()-t követel. Oktatói
-       kurzuslistát adó RPC a 16_echo_reports.sql-ben NINCS. Ezért a
-       kampány- és kurzusválasztó ma CSAK adminnak tölthető fel — ezt a
-       felület kimondja, nem találunk ki nem létező végpontot.
-     • echo.teacher.profile_id ma minden soron NULL (a Neptun-szinkron tölti
-       majd), tehát echo.my_teacher_id() NULL-t ad: oktatóként belépve
-       ECHO_FORBIDDEN jön. Ez a biztonságos alapállapot, nem hiba.
-     • Nyitott ('open') kampányra a szerver ECHO_RESULTS_NOT_READY-t dob —
-       ilyenkor CSAK az arányt mutatjuk, és kimondjuk, miért.
+   KÉT ÜZEMMÓD, EGY NÉZET. A különbség CSAK abban van, hogy honnan jön a
+   kampány- és kurzuslista; az eredményblokkok alatta ugyanazok.
+
+     • 'oktato' mód — public.echo_my_teacher_courses() (19_echo_roles.sql).
+       A bejelentkezett fiókhoz kötött echo.teacher sor SAJÁT kurzusai,
+       kampányonként, EREDMÉNY NÉLKÜL (állapot + darabszámok). MÉRVE a
+       replikán: két összekötött oktató közül az egyik 1 kurzust lát
+       (GAMF-INF-101), a másik 2-t (102, 103) — és a másikét egyik sem.
+     • 'admin' mód — echo_campaigns() + echo_rate(), ahogy eddig. MINDKETTŐ
+       törzse public.is_admin()-t követel (15_echo_core.sql 9.6), ezért
+       ADMISSIONS / FINANCE fiókkal továbbra is üres marad — a nézet ezt
+       kimondja, nem hallgat üresen.
+
+   A SORREND SZÁNDÉKOS: ELŐSZÖR az oktatói RPC. Egy fiók lehet EGYSZERRE
+   admin ÉS oktató; ilyenkor a saját kurzusait akarja látni, nem az egész
+   intézményt. A módváltó gomb mindkét irányban ott van, ha van jogosultság.
+
+   MIÉRT NEM A user.echoRoles-BÓL DÖNTÜNK: az app.jsx menüszűrő próbája
+   defenzív (a 19-es migráció lefutása előtt is működnie kell), tehát a
+   hiánya nem bizonyíték. A szerver hívása viszont az — ezért a nézet a
+   TÉNYLEGES válaszból dönt, nem egy kliensoldali jelzőből.
+
+   Nyitott ('open') kampányra a szerver ECHO_RESULTS_NOT_READY-t dob —
+   ilyenkor CSAK az arányt mutatjuk, és kimondjuk, miért.
    ------------------------------------------------------------ */
 
 function ECHO_TeacherView({ user }) {
+  const [mode, setMode] = useState(null);   // null = még próbálkozunk | 'oktato' | 'admin'
+  const [mine, setMine] = useState(null);   // echo_my_teacher_courses() nyers válasza
+  const [adminCamps, setAdminCamps] = useState(null);  // echo_campaigns(); null = nem járható
   const [camps, setCamps] = useState(null);
   const [cid, setCid] = useState('');
   const [rate, setRate] = useState(null);
@@ -1922,18 +3184,71 @@ function ECHO_TeacherView({ user }) {
   const [busy, setBusy] = useState(false);
   const lang = ECHO_lang();
 
+  // MINDKÉT utat EGYSZER megpróbáljuk, betöltéskor. Az admin ágat akkor is,
+  // ha az oktatói sikerült — csak így tudjuk, felkínálhatjuk-e a módváltót.
+  // Két olcsó hívás, és egyik sem ad vissza válasz-tartalmat, csak darabszámot.
   useEffect(() => {
     let dead = false;
-    ECHO_api.campaigns()
-      .then(d => { if (dead) return; const a = Array.isArray(d) ? d : []; setCamps(a); if (a[0]) setCid(a[0].id); })
-      .catch(e => { if (!dead) { setCamps([]); setListErr(ECHO_msg(e)); } });
+    (async () => {
+      let teacherOk = false, teacherErr = '';
+      try {
+        const d = await ECHO_api.myTeacherCourses();
+        if (dead) return;
+        setMine(d);
+        teacherOk = true;
+      } catch (e) { teacherErr = ECHO_msg(e); }
+
+      let ac = null, adminErr = '';
+      try {
+        const d = await ECHO_api.campaigns();
+        ac = Array.isArray(d) ? d : [];
+      } catch (e) { adminErr = ECHO_msg(e); }
+      if (dead) return;
+
+      setAdminCamps(ac);
+      // A SORREND SZÁNDÉKOS: aki oktató IS meg admin IS, alapból a sajátját látja.
+      setMode(teacherOk ? 'oktato' : 'admin');
+      // Ha EGYIK út sem járható, a SZERVER saját mondatát mutatjuk meg —
+      // abból derül ki, mi hiányzik (kötés, grant, vagy admin jog).
+      if (!teacherOk && ac === null) setListErr(adminErr || teacherErr);
+    })();
     return () => { dead = true; };
   }, []);
 
+  // A kampánylista a módból következik. Az oktatói válaszból ugyanolyan alakú
+  // lista lesz, mint amilyet az echo_campaigns() ad — így alatta MINDEN
+  // kirajzoló ág változatlan marad.
+  useEffect(() => {
+    if (mode === null) return;
+    const arr = mode === 'oktato'
+      ? (((mine && mine.kampanyok) || []).map(c => ({
+          id: c.id, code: c.code, name: c.name, term: c.term, state: c.state,
+          opens_at: c.opens_at, closes_at: c.closes_at,
+          eredmeny_lathato: c.eredmeny_lathato, eredmeny_allapotok: c.eredmeny_allapotok,
+        })))
+      : (adminCamps || []);
+    setCamps(arr);
+    setCid(arr[0] ? arr[0].id : '');
+  }, [mode, mine, adminCamps]);
+
+  // A kurzuslista. Oktatói módban NINCS külön hívás: a kurzusok már benne
+  // vannak a myTeacherCourses() válaszában, és a mezőnevek szándékosan
+  // egyeznek az echo_rate().kurzusonkent alakjával (course_id / course_code /
+  // course_name / eligible / attempted / valaszok).
   useEffect(() => {
     if (!cid) { setRate(null); return; }
+    setCres(null); setTres(null); setGate(''); setErr('');
+
+    if (mode === 'oktato') {
+      const c = ((mine && mine.kampanyok) || []).find(x => x.id === cid);
+      const ks = (c && c.kurzusok) || [];
+      setRate({ kurzusonkent: ks });
+      setCourseId(ks[0] ? ks[0].course_id : '');
+      return;
+    }
+
     let dead = false;
-    setCourseId(''); setCres(null); setTres(null); setGate(''); setErr('');
+    setCourseId('');
     ECHO_api.rate(cid)
       .then(d => {
         if (dead) return;
@@ -1943,7 +3258,7 @@ function ECHO_TeacherView({ user }) {
       })
       .catch(e => { if (!dead) { setRate(null); setListErr(ECHO_msg(e)); } });
     return () => { dead = true; };
-  }, [cid]);
+  }, [cid, mode, mine]);
 
   useEffect(() => {
     if (!cid || !courseId) { setCres(null); setTres(null); return; }
@@ -1973,12 +3288,42 @@ function ECHO_TeacherView({ user }) {
 
   return (
     <div className="p-4 sm:p-8 max-w-6xl mx-auto">
-      <div className="mb-7">
-        <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">Oktatói eredmények</h1>
-        <p className="text-sm text-slate-400 font-medium mt-1">
-          Kérdésenkénti visszacsatolás · k-anonimitási küszöbökkel · 28/2023. szenátusi határozat
-        </p>
+      <div className="mb-7 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">Oktatói eredmények</h1>
+          <p className="text-sm text-slate-400 font-medium mt-1">
+            Kérdésenkénti visszacsatolás · k-anonimitási küszöbökkel · 28/2023. szenátusi határozat
+          </p>
+        </div>
+        {/* A MÓDVÁLTÓ csak akkor jelenik meg, ha a fiók MINDKÉT úton járhat.
+            Egy csak-oktató fiók nem lát admin gombot, ami úgysem működne. */}
+        {mode === 'oktato' && adminCamps !== null && (
+          <button onClick={() => { setMode('admin'); setCid(''); setListErr(''); }}
+            className={U_btnGhost + ' py-2.5 px-4 text-sm'}>
+            <Lucide.Building2 size={15} /> Intézményi nézet
+          </button>
+        )}
+        {mode === 'admin' && mine && (
+          <button onClick={() => { setMode('oktato'); setCid(''); setListErr(''); }}
+            className={U_btnGhost + ' py-2.5 px-4 text-sm'}>
+            <Lucide.UserCog size={15} /> Saját kurzusaim
+          </button>
+        )}
       </div>
+
+      {/* KI VAGYOK ÉN A RENDSZER SZERINT — ezt az oktató nem találgatja ki.
+          A név az echo.teacher sorból jön, nem a UniPortal-profilból: ha a
+          kettő nem ugyanaz az ember, itt derül ki, nem az eredménynél. */}
+      {mode === 'oktato' && mine && (
+        <div className="mb-6 bg-slate-900 text-white rounded-2xl px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-1">
+          <Lucide.UserCheck size={16} className="flex-none text-emerald-400" />
+          <p className="text-sm font-black">{mine.teacher_name || '(névtelen oktatói sor)'}</p>
+          <span className="text-[11px] font-bold text-slate-400">
+            saját kurzusok · a listában CSAK azok a kurzusok szerepelnek, amelyekre
+            az alkalmassági motor felvett (echo.eligibility)
+          </span>
+        </div>
+      )}
 
       {listErr && (
         <div className="mb-6 bg-amber-50 border border-amber-100 rounded-2xl px-4 py-3 flex gap-2.5">
@@ -1986,10 +3331,12 @@ function ECHO_TeacherView({ user }) {
           <div>
             <p className="text-sm font-bold text-amber-700">{listErr}</p>
             <p className="text-[11px] text-amber-700/80 font-medium mt-1 leading-relaxed">
-              A kampány- és kurzuslistát az echo_campaigns() és az echo_rate() adja, és
-              MINDKETTŐ törzse public.is_admin()-t követel. Oktatói kurzuslistát adó RPC a
-              16_echo_reports.sql-ben nincs — az ECHO saját szerepkör-dimenziójával
-              (ECHO_MIR / ECHO_DEKAN / OKTATO) jön majd. Addig ez a nézet adminnal használható.
+              Két út vezet ide, és egyik sem járható ezzel a fiókkal. OKTATÓKÉNT a
+              public.echo_my_teacher_courses() ad kurzuslistát — ehhez az echo.teacher
+              sorodhoz kötött fiók ÉS élő 'OKTATO' grant kell (19_echo_roles.sql; a kötést
+              az ECHO kampányok → Szerepkörök fülön lehet létrehozni). INTÉZMÉNYI nézethez
+              az echo_campaigns() és az echo_rate() kell, és MINDKETTŐ törzse
+              public.is_admin()-t követel — ADMISSIONS / FINANCE fiókkal ezért marad üresen.
             </p>
           </div>
         </div>
@@ -1998,7 +3345,11 @@ function ECHO_TeacherView({ user }) {
       {camps === null ? (
         <div className="space-y-3"><SkeletonBar w="50%" h={16} /><SkeletonBar /><SkeletonBar w="80%" /></div>
       ) : camps.length === 0 && !listErr ? (
-        <UEmpty icon={<Lucide.BarChart2 size={28} />} title="Nincs kampány" />
+        <UEmpty icon={<Lucide.BarChart2 size={28} />}
+          title={mode === 'oktato' ? 'Egyetlen kampányban sincs kurzusod' : 'Nincs kampány'}
+          subtitle={mode === 'oktato'
+            ? 'A kötés és a grant rendben van (a szerver nem utasított el), de az alkalmassági motor egyetlen kampányban sem vett fel oktatóként. Ez akkor is így van, ha a kurzus kevés hallgatós, vizsgakurzus, vagy a részesedésed a küszöb alatt van (echo.exclusion_rule).'
+            : undefined} />
       ) : camps.length > 0 && (
         <div className="bg-white rounded-3xl border border-slate-100 p-5 mb-6">
           <div className="grid gap-4 sm:grid-cols-2">
@@ -2395,38 +3746,32 @@ const ECHO_REPEATS = [
 // 'cond_context_keys' sorából mérve: has_goals, attendance_band, lang.
 const ECHO_COND_CTX = ['has_goals', 'attendance_band', 'lang'];
 
-// ELŐNÉZETI TOKENEK. A kérdőívszövegek helykitöltőket tartalmazhatnak, amiket
-// a kitöltéskor a konkrét oktató/kurzus neve tölt ki. Az előnézetben minta
-// értéket teszünk a helyükre, hogy a szerkesztő azt lássa, amit a hallgató.
-const ECHO_TOKENS = {
-  '[Oktató neve]':  'Dr. Példa Anna',
-  '[oktató neve]':  'Dr. Példa Anna',
-  '[Teacher name]': 'Dr. Anna Példa',
-  '[Kurzus neve]':  'Bevezetés a szoftverfejlesztésbe',
-  '[Course name]':  'Introduction to Software Engineering',
-  '[Cél]':          'a félév eleji célod',
-  '[Goal]':         'your goal for the term',
+/* ELŐNÉZETI KÖRNYEZET. A kérdőívszövegek helykitöltőket tartalmazhatnak, amiket
+   a kitöltéskor a konkrét oktató/kurzus neve tölt ki. Az előnézetben minta
+   értéket teszünk a helyükre, hogy a szerkesztő azt lássa, amit a hallgató.
+
+   A BEHELYETTESÍTÉS MAGA NEM ITT VAN: az ECHO_tokenMap/ECHO_resolveTokens
+   (2/c. szakasz) végzi, ugyanaz a kód, amit a kitöltő is használ. Itt csak a
+   MINTAÉRTÉKEK állnak. Így a szerkesztő előnézete és a valódi kitöltés nem
+   csúszhat szét: ha a feloldás megváltozik, mindkettő együtt változik.
+   (Korábban két külön út volt, és a kitöltő NEM oldotta fel a tokeneket —
+   a hallgató szó szerint a "[Oktató neve] erősségei" feliratot látta.) */
+const ECHO_PREVIEW_CTX = {
+  teacher: { name: 'Dr. Példa Anna' },
+  course:  { name: 'Bevezetés a szoftverfejlesztésbe',
+             name_en: 'Introduction to Software Engineering' },
+  goal:    { text: 'a félév eleji célod' },
 };
-function ECHO_tok(s) {
-  if (s == null) return s;
-  let out = String(s);
-  Object.keys(ECHO_TOKENS).forEach(k => { out = out.split(k).join(ECHO_TOKENS[k]); });
-  return out;
-}
+// A felületen kiírt minta ("pl. [Oktató neve] → …") ebből olvas.
+const ECHO_TOKENS = ECHO_tokenMap(ECHO_PREVIEW_CTX);
+function ECHO_tok(s) { return ECHO_applyTokens(s, ECHO_TOKENS); }
 
 // Egy szerkesztett kérdés ELŐNÉZETI alakja: a help {hu,en} párja feloldva
-// (az ECHO_Question sztringet vár, objektumot nem tudna kirajzolni), és
-// minden szövegen tokenbehelyettesítés.
+// (az ECHO_Question sztringet vár, objektumot nem tudna kirajzolni).
+// A tokenfeloldást az ECHO_Question végzi a ctx-ből — lásd ECHO_QPreview.
 function ECHO_previewQuestion(q, lang) {
   const help = (q.help && typeof q.help === 'object') ? ECHO_txt(q.help, lang) : (q.help || '');
-  const opts = Array.isArray(q.options) ? q.options.map(o => (
-    (o && typeof o === 'object')
-      ? Object.assign({}, o, { hu: ECHO_tok(o.hu), en: ECHO_tok(o.en) })
-      : ECHO_tok(o)
-  )) : q.options;
-  return Object.assign({}, q, {
-    hu: ECHO_tok(q.hu), en: ECHO_tok(q.en), help: ECHO_tok(help), options: opts,
-  });
+  return Object.assign({}, q, { help: help });
 }
 
 const ECHO_clone = (o) => JSON.parse(JSON.stringify(o));
@@ -2749,6 +4094,11 @@ function ECHO_Editor({ user }) {
   const [newOpen, setNewOpen] = useState(false);
   const [newName, setNewName] = useState('');
   const [newFrom, setNewFrom] = useState('');
+  // A kérdőív neve draft állapotban szerkeszthető. Külön állapot, mert nem a
+  // 'compiled' része: a sablonon él, és saját RPC menti (echo_template_rename).
+  const [nameHu, setNameHu] = useState('');
+  const [nameBusy, setNameBusy] = useState(false);
+  const [nameMsg, setNameMsg] = useState(null);
   const lang = ECHO_lang();
 
   const loadList = async () => {
@@ -2766,8 +4116,30 @@ function ECHO_Editor({ user }) {
       setVid(id); setDoc(d); setDraft(ECHO_clone(d.compiled || { sections: [] }));
       setChecks(Array.isArray(d.ellenorzes) ? d.ellenorzes : []);
       setDirty(false); setSi(0); setQi(null); setPv(null);
+      setNameHu(d.name_hu || ''); setNameMsg(null);
     } catch (e) { setErr(ECHO_msg(e)); }
     finally { setBusy(false); }
+  };
+
+  // Átnevezés: fókusz elhagyásakor vagy Enterre ment. Csak akkor hív szervert,
+  // ha tényleg változott a név, és üresre nem enged (a szerver is tiltja).
+  const renameNow = async () => {
+    if (!vid || !doc) return;
+    const uj = (nameHu || '').trim();
+    if (uj === (doc.name_hu || '')) { setNameMsg(null); return; }
+    if (!uj) { setNameHu(doc.name_hu || ''); setNameMsg({ ok: false, text: 'A név nem lehet üres.' }); return; }
+    setNameBusy(true); setNameMsg(null);
+    try {
+      const r = await ECHO_api.templateRename(vid, uj, null);
+      setDoc({ ...doc, name_hu: r.name_hu });
+      // A név a SABLONHOZ tartozik: ha több verzió is van, mindegyik címkéje ezzel változik.
+      const tobbi = Number(r.erintett_tovabbi_verzio || 0);
+      setNameMsg({ ok: true, text: tobbi > 0 ? 'Átnevezve — ' + tobbi + ' további verzió címkéje is ez lett.' : 'Átnevezve.' });
+      await loadList();
+    } catch (e) {
+      setNameHu(doc.name_hu || '');
+      setNameMsg({ ok: false, text: ECHO_msg(e) });
+    } finally { setNameBusy(false); }
   };
 
   const save = async () => {
@@ -2962,9 +4334,32 @@ function ECHO_Editor({ user }) {
           <div className="bg-white rounded-3xl border border-slate-100 p-5 mb-6">
             <div className="flex flex-wrap items-start justify-between gap-4 mb-4">
               <div className="min-w-0">
-                <h3 className="font-black text-slate-900">
-                  <ECHO_Src>{doc.name_hu}</ECHO_Src> <span className="text-slate-300">· v{doc.version}</span>
-                </h3>
+                {ro ? (
+                  <h3 className="font-black text-slate-900">
+                    <ECHO_Src>{doc.name_hu}</ECHO_Src> <span className="text-slate-300">· v{doc.version}</span>
+                  </h3>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <input
+                      value={nameHu}
+                      onChange={e => setNameHu(e.target.value)}
+                      onBlur={renameNow}
+                      onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                      maxLength={120}
+                      aria-label="A kérdőív neve"
+                      placeholder="A kérdőív neve"
+                      className="font-black text-slate-900 bg-transparent border-b-2 border-dashed border-slate-200
+                                 focus:border-primary focus:outline-none px-0.5 py-0.5 min-w-[16ch] max-w-[38ch]"
+                    />
+                    <span className="text-slate-300 font-black">· v{doc.version}</span>
+                    {nameBusy && <Lucide.Loader2 size={13} className="animate-spin text-slate-300" />}
+                    {nameMsg && (
+                      <span className={'text-[11px] font-bold ' + (nameMsg.ok ? 'text-emerald-600' : 'text-rose-600')}>
+                        {nameMsg.text}
+                      </span>
+                    )}
+                  </div>
+                )}
                 <div className="flex flex-wrap items-center gap-2 mt-1.5">
                   <UBadge tone={(ECHO_TPL_STATE[doc.state] || {}).tone || 'slate'}>
                     {(ECHO_TPL_STATE[doc.state] || {}).label || doc.state}
@@ -3133,7 +4528,7 @@ function ECHO_Editor({ user }) {
                 <div className="rounded-2xl border border-slate-100 p-3">
                   {pvMode === 'q' && (q
                     ? <ECHO_Question q={ECHO_previewQuestion(q, lang)} index={(qi || 0) + 1}
-                        value={pv} onChange={setPv} lang={lang} seed="preview" />
+                        value={pv} onChange={setPv} lang={lang} seed="preview" ctx={ECHO_PREVIEW_CTX} />
                     : <p className="text-xs font-bold text-slate-400 py-6 text-center">Nincs kiválasztott kérdés.</p>)}
 
                   {pvMode === 'sec' && (sec
@@ -3141,7 +4536,7 @@ function ECHO_Editor({ user }) {
                         <h4 className="text-sm font-black text-slate-800 mb-1"><ECHO_Src>{ECHO_txt(sec, lang)}</ECHO_Src></h4>
                         {(sec.questions || []).map((x, k) => (
                           <ECHO_Question key={x.id || k} q={ECHO_previewQuestion(x, lang)} index={k + 1}
-                            value={undefined} onChange={() => {}} lang={lang} seed="preview" />
+                            value={undefined} onChange={() => {}} lang={lang} seed="preview" ctx={ECHO_PREVIEW_CTX} />
                         ))}
                       </div>
                     : <p className="text-xs font-bold text-slate-400 py-6 text-center">Nincs kiválasztott szakasz.</p>)}
@@ -3252,6 +4647,346 @@ function ECHO_Editor({ user }) {
 }
 
 /* ------------------------------------------------------------
+   12.5 ECHO_RolesPanel — oktatói kötés és ECHO-szerepkörök
+   ------------------------------------------------------------
+   MI VOLT A BAJ, AMIT EZ A PANEL MEGSZÜNTET (mérve a replikán):
+     select count(*) from echo.teacher where profile_id is null;  -->  4 / 4
+   Vagyis az echo.my_teacher_id() minden fiókra NULL-t adott, és az oktatói
+   eredménynézet — bár megépült — senkinek nem működött. A kötést eddig
+   semmilyen felület nem tudta létrehozni.
+
+   A PANEL KÉT DOLGOT CSINÁL, ÉS EZEK NEM UGYANAZ:
+     1. KÖTÉS  (echo_teacher_link) — MELYIK FIÓK ez az oktató.
+        Ez tölti fel az echo.teacher.profile_id-t, és ad hozzá 'OKTATO'
+        grantot a tanszéki hatókörrel.
+     2. GRANT  (echo_role_grant)   — MIT SZABAD NEKI az ECHO-ban.
+        Nyolc szerepkör, hatókörrel és lejárattal.
+   Kötés grant nélkül: látszik a menüpont, a szerver mögötte elutasít.
+   Grant kötés nélkül: az OKTATO szerepkör nem talál kurzust. A panel
+   MINDKÉT hiányt kiírja, nem hagyja csendben.
+
+   AMIT A PANEL NEM CSINÁL: nem hoz létre echo.teacher sort (az a
+   Neptun-szinkron dolga), és nem töröl grantot — a visszavonás lejárati
+   idő beállítása, mert egy megtörtént felhatalmazás nem tehető meg
+   nem történtté (19_echo_roles.sql, 5.2).
+   ------------------------------------------------------------ */
+
+const ECHO_ROLE_INFO = {
+  OKTATO:        { label: 'Oktató',           hint: 'a saját kurzusainak saját bontása' },
+  TANSZEKVEZETO: { label: 'Tanszékvezető',    hint: 'a hatókörébe eső tanszék oktatói' },
+  DEKAN:         { label: 'Dékán',            hint: 'a hatókörébe eső kar' },
+  MIR:           { label: 'Minőségirányítás', hint: 'intézményi szint, jegyzőkönyv' },
+  REKTORI:       { label: 'Rektori',          hint: 'vezetői betekintés' },
+  EHOK:          { label: 'EHÖK',             hint: 'hallgatói önkormányzat, aggregált' },
+  MODERATOR:     { label: 'Moderátor',        hint: 'szöveges válaszok érvényessége (3. § (10))' },
+  SYSADMIN:      { label: 'ECHO üzemeltető',  hint: 'szerepkörök kiosztása' },
+};
+
+function ECHO_roleLabel(r) { return (ECHO_ROLE_INFO[r] && ECHO_ROLE_INFO[r].label) || r; }
+
+function ECHO_RolesPanel({ user }) {
+  const [d, setD] = useState(null);      // echo_role_grants() válasza
+  const [err, setErr] = useState('');
+  const [toast, setToast] = useState('');
+  const [busy, setBusy] = useState('');  // melyik sor dolgozik éppen
+
+  // kötés-szerkesztő: teacher.id -> kiválasztott profile id
+  const [pick, setPick] = useState({});
+  // grant-űrlap
+  const [gPerson, setGPerson] = useState('');
+  const [gRole, setGRole]     = useState('MIR');
+  const [gScope, setGScope]   = useState('');
+  const [gExp, setGExp]       = useState('');
+  const [gIkt, setGIkt]       = useState('');
+
+  const load = () => {
+    setErr('');
+    ECHO_api.roleGrants()
+      .then(x => { setD(x); setPick({}); })
+      .catch(e => { setD({ oktatok: [], grantok: [], profilok: [], egysegek: [], szerepkorok: [] }); setErr(ECHO_msg(e)); });
+  };
+  useEffect(() => { load(); }, []);
+
+  const profiles = (d && d.profilok) || [];
+  const orgs     = (d && d.egysegek) || [];
+  const roles    = (d && Array.isArray(d.szerepkorok) && d.szerepkorok.length) ? d.szerepkorok : Object.keys(ECHO_ROLE_INFO);
+  const mayGrant = !!(d && d.oszthatok);
+
+  const profLabel = (p) => (p.email || '(nincs e-mail)') + (p.name ? ' · ' + p.name : '') + ' [' + p.role + ']';
+  const orgLabel  = (o) => o.code + ' — ' + o.name + ' (' + o.kind + ')';
+
+  const doLink = async (teacherId, profileId) => {
+    setBusy(teacherId); setErr('');
+    try {
+      const r = await ECHO_api.teacherLink(teacherId, profileId || null);
+      setToast(r && r.muvelet === 'bontas'
+        ? 'A kötés bontva — az oktatói grant lejártra állt.'
+        : 'Összekötve. Az OKTATO grant is megvan.');
+      load();
+    } catch (e) { setErr(ECHO_msg(e)); }
+    finally { setBusy(''); }
+  };
+
+  const doGrant = async (revoke) => {
+    if (!gPerson || !gRole) { setErr('Válassz fiókot és szerepkört.'); return; }
+    setBusy('grant'); setErr('');
+    try {
+      const exp = revoke ? new Date().toISOString() : (gExp ? new Date(gExp + 'T23:59:59').toISOString() : null);
+      const r = await ECHO_api.roleGrant(gPerson, gRole, gScope || null, exp, gIkt || null);
+      setToast((r && r.muvelet === 'visszavonas') ? 'Visszavonva (a sor megmarad, lejárt).' : 'Kiosztva.');
+      if (r && r.figyelmeztetes) setErr(r.figyelmeztetes);
+      setGIkt('');
+      load();
+    } catch (e) { setErr(ECHO_msg(e)); }
+    finally { setBusy(''); }
+  };
+
+  const revokeRow = async (g) => {
+    setBusy(g.id); setErr('');
+    try {
+      await ECHO_api.roleGrant(g.person, g.role, g.scope_org || null, new Date().toISOString(), null);
+      setToast('Visszavonva.');
+      load();
+    } catch (e) { setErr(ECHO_msg(e)); }
+    finally { setBusy(''); }
+  };
+
+  if (d === null) {
+    return <div className="space-y-3"><SkeletonBar w="40%" h={16} /><SkeletonBar /><SkeletonBar w="70%" /></div>;
+  }
+
+  const kotetlen = (d.oktatok || []).filter(t => !t.profile_id).length;
+
+  return (
+    <div>
+      <UToast msg={toast} onDone={() => setToast('')} />
+
+      {err && (
+        <div className="mb-5 bg-red-50 border border-red-100 rounded-2xl px-4 py-3 text-sm font-bold text-red-600 flex gap-2">
+          <Lucide.AlertCircle size={16} className="flex-none mt-0.5" /> {err}
+        </div>
+      )}
+
+      {/* MIÉRT NEM A UniPortal SZEREPKÖRBŐL — kimondva, mert ez a panel
+          legkevésbé nyilvánvaló döntése. */}
+      <div className="mb-6 bg-slate-50 rounded-2xl px-4 py-3 flex gap-2.5">
+        <Lucide.Info size={15} className="text-slate-400 flex-none mt-0.5" />
+        <p className="text-[11px] text-slate-500 font-medium leading-relaxed">
+          Az ECHO-jogosultság KÜLÖN dimenzió: nem a UniPortal szerepköréből (SUPERADMIN,
+          ADMIN, STUDENT…) származik, hanem kizárólag az itt kiosztott, iktatható, lejáró
+          grantból. Egy SUPERADMIN fióknak sincs ECHO-szerepköre, amíg nem kap egyet —
+          mérve: <ECHO_Src>echo.has_role('MIR')</ECHO_Src> SUPERADMIN-ként is hamis.
+          A hatókör LEFELÉ nyílik: a karra szóló grant a kar tanszékeit is fedi,
+          a tanszéki a kart nem.
+        </p>
+      </div>
+
+      {/* ---------- 1. OKTATÓ ↔ FIÓK ---------- */}
+      <div className="bg-white rounded-3xl border border-slate-100 p-5 mb-6">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-1">
+          <div className="flex items-center gap-2">
+            <Lucide.Link2 size={16} className="text-slate-400" />
+            <h3 className="font-black text-slate-900 text-sm">Oktató ↔ fiók összekötés</h3>
+          </div>
+          {kotetlen > 0
+            ? <UBadge tone="amber"><Lucide.AlertTriangle size={10} /> {kotetlen} oktató kötés nélkül</UBadge>
+            : <UBadge tone="green"><Lucide.CheckCircle2 size={10} /> mindenki kötve</UBadge>}
+        </div>
+        <p className="text-[11px] text-slate-400 font-medium mb-4 leading-relaxed">
+          Ez tölti fel az <ECHO_Src>echo.teacher.profile_id</ECHO_Src> mezőt, amitől az
+          <ECHO_Src> echo.my_teacher_id()</ECHO_Src> értéket ad — enélkül az oktató minden
+          eredmény-RPC-től ECHO_FORBIDDEN-t kap. Egy fiók legfeljebb EGY oktatói sorhoz
+          köthető (részleges UNIQUE index tiltja a másodikat).
+        </p>
+
+        {(d.oktatok || []).length === 0 ? (
+          <p className="text-sm text-slate-400 font-bold">
+            Nincs oktatói sor. Az echo.teacher sorokat a Neptun-szinkron hozza létre — ez a panel
+            csak a MEGLÉVŐKET köti fiókhoz.
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[820px]">
+              <thead>
+                <tr className="text-left">
+                  {['Oktató', 'Szervezeti egység', 'Kurzus', 'Kötött fiók', 'Grant', ''].map((h, i) => (
+                    <th key={i} className="px-3 py-2 text-[10px] font-black text-slate-400 uppercase tracking-widest">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {(d.oktatok || []).map(t => (
+                  <tr key={t.id} className="border-t border-slate-50 align-top">
+                    <td className="px-3 py-3">
+                      <p className="text-sm font-black text-slate-900"><ECHO_Src>{t.name}</ECHO_Src></p>
+                      <p className="text-[11px] font-mono text-slate-300">{t.code}</p>
+                    </td>
+                    <td className="px-3 py-3 text-xs font-bold text-slate-500">{t.org_name || '—'}</td>
+                    <td className="px-3 py-3 text-xs font-bold text-slate-500">{t.kurzusok}</td>
+                    <td className="px-3 py-3 min-w-[260px]">
+                      {t.profile_id ? (
+                        <div>
+                          <p className="text-xs font-black text-slate-700">{t.profile_email}</p>
+                          {t.profile_name && <p className="text-[11px] font-bold text-slate-400">{t.profile_name}</p>}
+                        </div>
+                      ) : (
+                        <select className={U_input + ' py-2'} disabled={!mayGrant}
+                          value={pick[t.id] || ''}
+                          onChange={e => setPick(Object.assign({}, pick, { [t.id]: e.target.value }))}>
+                          <option value="">— válassz fiókot —</option>
+                          {profiles.map(p => <option key={p.id} value={p.id}>{profLabel(p)}</option>)}
+                        </select>
+                      )}
+                    </td>
+                    <td className="px-3 py-3">
+                      {t.profile_id
+                        ? (t.van_oktato_grant
+                            ? <UBadge tone="green"><Lucide.ShieldCheck size={10} /> OKTATO</UBadge>
+                            : <UBadge tone="amber"><Lucide.ShieldAlert size={10} /> nincs élő grant</UBadge>)
+                        : <span className="text-[11px] font-bold text-slate-300">—</span>}
+                    </td>
+                    <td className="px-3 py-3 text-right whitespace-nowrap">
+                      {t.profile_id ? (
+                        <button disabled={!mayGrant || busy === t.id}
+                          onClick={() => doLink(t.id, null)}
+                          className={U_btnGhost + ' py-2 px-3 text-xs'}>
+                          <Lucide.Unlink size={13} /> Kötés bontása
+                        </button>
+                      ) : (
+                        <button disabled={!mayGrant || busy === t.id || !pick[t.id]}
+                          onClick={() => doLink(t.id, pick[t.id])}
+                          className={U_btnPrimary + ' py-2 px-3 text-xs'}>
+                          <Lucide.Link size={13} /> Összeköt
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* ---------- 2. ECHO-SZEREPKÖRÖK ---------- */}
+      <div className="bg-white rounded-3xl border border-slate-100 p-5 mb-6">
+        <div className="flex items-center gap-2 mb-1">
+          <Lucide.ShieldCheck size={16} className="text-slate-400" />
+          <h3 className="font-black text-slate-900 text-sm">ECHO-szerepkör kiosztása</h3>
+        </div>
+        <p className="text-[11px] text-slate-400 font-medium mb-4 leading-relaxed">
+          A hatókör üresen hagyva intézményi szintű. A lejárat napra pontos; üresen hagyva
+          határozatlan idejű. Az iktatószám a felhatalmazó dokumentum hivatkozása — a
+          jogosultság így visszakereshető marad.
+        </p>
+
+        {!mayGrant && (
+          <div className="mb-4 bg-amber-50 border border-amber-100 rounded-2xl px-4 py-3 text-[12px] font-bold text-amber-700">
+            Ezt a listát olvashatod (MIR jog), de kiosztani nem tudsz — ahhoz admin vagy
+            ECHO SYSADMIN grant kell.
+          </div>
+        )}
+
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 mb-4">
+          <UField label="Fiók">
+            <select className={U_input} value={gPerson} onChange={e => setGPerson(e.target.value)} disabled={!mayGrant}>
+              <option value="">— válassz —</option>
+              {profiles.map(p => <option key={p.id} value={p.id}>{profLabel(p)}</option>)}
+            </select>
+          </UField>
+          <UField label="Szerepkör" hint={(ECHO_ROLE_INFO[gRole] && ECHO_ROLE_INFO[gRole].hint) || ''}>
+            <select className={U_input} value={gRole} onChange={e => setGRole(e.target.value)} disabled={!mayGrant}>
+              {roles.map(r => <option key={r} value={r}>{ECHO_roleLabel(r)} ({r})</option>)}
+            </select>
+          </UField>
+          <UField label="Hatókör" hint="üres = intézményi szint">
+            <select className={U_input} value={gScope} onChange={e => setGScope(e.target.value)} disabled={!mayGrant}>
+              <option value="">— intézményi —</option>
+              {orgs.map(o => <option key={o.id} value={o.id}>{orgLabel(o)}</option>)}
+            </select>
+          </UField>
+          <UField label="Lejárat" hint="üres = határozatlan">
+            <input type="date" className={U_input} value={gExp} onChange={e => setGExp(e.target.value)} disabled={!mayGrant} />
+          </UField>
+          <UField label="Iktatószám">
+            <input className={U_input} value={gIkt} maxLength={64} placeholder="pl. NJE/2026/OMHV-14"
+              onChange={e => setGIkt(e.target.value)} disabled={!mayGrant} />
+          </UField>
+          <div className="flex items-end">
+            <button disabled={!mayGrant || busy === 'grant'} onClick={() => doGrant(false)}
+              className={U_btnPrimary + ' w-full'}>
+              <Lucide.Plus size={15} /> Kiosztás
+            </button>
+          </div>
+        </div>
+
+        {/* a kiosztások */}
+        {(d.grantok || []).length === 0 ? (
+          <p className="text-sm text-slate-400 font-bold">
+            Nincs egyetlen ECHO-grant sem. Ez a rendszer alapállapota: jogosultság csak
+            explicit kiosztásból keletkezik.
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[880px]">
+              <thead>
+                <tr className="text-left">
+                  {['Fiók', 'Szerepkör', 'Hatókör', 'Kiosztva', 'Lejár', 'Iktatószám', ''].map((h, i) => (
+                    <th key={i} className="px-3 py-2 text-[10px] font-black text-slate-400 uppercase tracking-widest">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {(d.grantok || []).map(g => (
+                  <tr key={g.id} className={'border-t border-slate-50 ' + (g.aktiv ? '' : 'opacity-45')}>
+                    <td className="px-3 py-2.5">
+                      <p className="text-xs font-black text-slate-700">{g.person_email}</p>
+                      {g.person_name && <p className="text-[11px] font-bold text-slate-400">{g.person_name}</p>}
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <UBadge tone={g.aktiv ? 'violet' : 'slate'}>{ECHO_roleLabel(g.role)}</UBadge>
+                    </td>
+                    <td className="px-3 py-2.5 text-xs font-bold text-slate-500">{g.scope_name || 'intézményi'}</td>
+                    <td className="px-3 py-2.5 text-[11px] font-bold text-slate-400">
+                      {ECHO_date(g.granted_at)}<br />
+                      <span className="text-slate-300">{g.granted_by_email || '—'}</span>
+                    </td>
+                    <td className="px-3 py-2.5 text-[11px] font-bold text-slate-400">
+                      {g.expires_at ? ECHO_dateTime(g.expires_at) : 'határozatlan'}
+                    </td>
+                    <td className="px-3 py-2.5 text-[11px] font-mono text-slate-400">{g.iktatoszam || '—'}</td>
+                    <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                      {g.aktiv && (
+                        <button disabled={!mayGrant || busy === g.id} onClick={() => revokeRow(g)}
+                          className={U_btnGhost + ' py-2 px-3 text-xs'}>
+                          <Lucide.ShieldOff size={13} /> Visszavonás
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="bg-slate-50 rounded-2xl px-4 py-3 flex gap-2.5">
+        <Lucide.Info size={15} className="text-slate-400 flex-none mt-0.5" />
+        <p className="text-[11px] text-slate-500 font-medium leading-relaxed">
+          A visszavonás NEM sortörlés: a grant lejárati ideje áll a mostani időpontra, és a
+          sor megmarad — a kiosztás ténye, ideje és kiosztója auditálható marad. Minden itteni
+          művelet egy sort ír az <ECHO_Src>echo.access_log</ECHO_Src>-ba. A 16-os migráció
+          eredmény- és moderálási RPC-inek kapuja EGYELŐRE <ECHO_Src>public.is_admin()</ECHO_Src>
+          maradt: ezek hatókörös szerepkörre cserélése külön migráció dolga, MIUTÁN a grantok
+          ki vannak osztva — különben a csere pillanatában senki nem tudna moderálni.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------
    13. ECHO_AdminView — MIR / admin, FÜLEKKEL
    ------------------------------------------------------------
    A kampánykezelés, a kérdőívszerkesztő és a moderálás egy menüpont alatt
@@ -3263,6 +4998,10 @@ const ECHO_ADMIN_TABS = [
   { id: 'campaigns',  label: 'Kampányok',        icon: 'Megaphone' },
   { id: 'editor',     label: 'Kérdőívszerkesztő', icon: 'FileText' },
   { id: 'moderation', label: 'Moderálás',        icon: 'Flag' },
+  // 0.4 szelet (19_echo_roles.sql). Azért IDE kerül, és nem új menüpontba:
+  // a bal oldali menü 17 eleméhez nem teszünk továbbiakat, és a kiosztás
+  // ugyanahhoz a körhöz tartozik, mint a kampánykezelés.
+  { id: 'roles',      label: 'Szerepkörök',      icon: 'ShieldCheck' },
 ];
 
 function ECHO_AdminView({ user }) {
@@ -3284,16 +5023,21 @@ function ECHO_AdminView({ user }) {
       <ECHO_AdminTabs tab={tab} setTab={setTab} />
       <div className="mb-7">
         <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
-          {tab === 'editor' ? 'Kérdőívszerkesztő' : 'Moderálási sor'}
+          {tab === 'editor' ? 'Kérdőívszerkesztő'
+            : tab === 'roles' ? 'ECHO-szerepkörök és oktatói kötés'
+            : 'Moderálási sor'}
         </h1>
         <p className="text-sm text-slate-400 font-medium mt-1">
           {tab === 'editor'
             ? 'Sablonok, verziók, állapotgép · a szerkesztés csak piszkozatban engedett'
+            : tab === 'roles'
+            ? 'Oktató ↔ fiók összekötés · hatókörös, lejáró, iktatható felhatalmazás'
             : 'Szöveges válaszok érvényessége · 3. § (10) · a szöveg nem törlődik'}
         </p>
       </div>
       {tab === 'editor'     && <ECHO_Editor user={user} />}
       {tab === 'moderation' && <ECHO_ModerationView user={user} />}
+      {tab === 'roles'      && <ECHO_RolesPanel user={user} />}
     </div>
   );
 }

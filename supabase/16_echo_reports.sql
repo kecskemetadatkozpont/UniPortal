@@ -6,6 +6,17 @@
 -- ELŐFELTÉTEL: 15_echo_core.sql lefutott (17 tábla, 8 public RPC).
 -- ============================================================
 --
+-- UTÓLAGOS KIEGÉSZÍTÉS (19_echo_roles.sql, 0.4 szelet):
+--   Az ebben a fájlban álló public.is_admin() kapuk ÁTMENETI HIDAK. Az ECHO
+--   saját, HATÓKÖRÖS jogosultsági dimenzióját a 19_echo_roles.sql vezeti be
+--   (echo.role_grant + echo.has_role(role, scope)), és HOSSZÚ TÁVON AZ VÁLTJA
+--   KI ŐKET: az eredmény-RPC-k kapuja MIR / DEKAN / TANSZEKVEZETO, a
+--   moderálásé MODERATOR lesz.
+--   MIÉRT NEM MOST: a csere pillanatában NULLA grant van a rendszerben, tehát
+--   senki nem tudna sem eredményt nézni, sem moderálni. A csere ezért külön
+--   migráció dolga, MIUTÁN a grantok ki vannak osztva. Addig a két kapu
+--   egymás mellett él, és ennek a fájlnak EGYETLEN sora sem változott.
+--
 -- MIT CSINÁL:
 --   • MODERÁLÁS: echo.moderation + a §3 (10) szerinti érvénytelenségi
 --     kategóriák ADATKÉNT (echo.moderation_reason), sorrend-semleges
@@ -1195,6 +1206,25 @@ begin
   end if;
 
   -- Kérdésenkénti kiértékelés
+  --
+  -- AZ 'attendance' KÉRDÉS KIMARAD — ÉS EZ NEM ADATVESZTÉS, HANEM HIBAJAVÍTÁS.
+  -- MÉRT PROBLÉMA (13 valódi beküldésen): az óralátogatás a jegyzőkönyvben
+  -- MINDIG n=0-val és "Keves valasz (0 < k_numeric=5)" üzenettel jelent meg,
+  -- pedig mind a 13 válaszadó kitöltötte. Az ok szerkezeti: az echo_submit()
+  -- az óralátogatást a payload GYÖKERÉBŐL a KÜLÖN echo.response.attendance_band
+  -- OSZLOPBA teszi (15_echo_core.sql, 5. lépés), az answers-be soha nem kerül
+  -- bele — ez a ciklus viszont az r.answers -> v_qid kifejezéssel keresi.
+  -- Vagyis a keresés helye és a tárolás helye sosem esett egybe.
+  -- Az adat nem veszett el: az óralátogatás a 3. § (9) szerinti FŐ/ALACSONY
+  -- kettéosztást vezérli (lásd fent, echo.attendance_low), és az
+  -- 'alacsony_oralatogatas' blokk közli, amennyit a k_low enged. A hamis
+  -- "kevés válasz" sor viszont félrevezette a jegyzőkönyv olvasóját, ezért
+  -- itt kihagyjuk a kérdéslistából.
+  -- MIÉRT ID SZERINT ÉS NEM TÍPUS SZERINT: a 18b seed a prototípus
+  -- type:'attendance' mezőjét 'single'-re fordítja (a renderelő öt típust
+  -- ismer), tehát típusra szűrni nem lehet — mérve.
+  -- HA VALAHA KELL AZ ELOSZLÁS: azt az attendance_band OSZLOPBÓL kell
+  -- aggregálni (echo.suppress_cells-lel, k_dist küszöbbel), nem az answers-ből.
   for q in
     select qq.value
       from jsonb_array_elements(echo.jarr(v_compiled->'sections')) s
@@ -1202,6 +1232,7 @@ begin
      where case when p_scope = 'teacher'
                 then coalesce(qq.value->>'repeat','') = 'teacher'
                 else coalesce(qq.value->>'repeat','') <> 'teacher' end
+       and coalesce(qq.value->>'id','') <> 'attendance'
   loop
     v_qid := q->>'id';
 
@@ -2243,6 +2274,33 @@ begin
     grant execute on function public.echo_template_save(uuid,jsonb)           to authenticated;
     grant execute on function public.echo_template_validate(uuid)             to authenticated;
     grant execute on function public.echo_template_transition(uuid,text)      to authenticated;
+
+    -- 8.4/b UTÓLAGOS MIGRÁCIÓK RPC-INEK VISSZAADÁSA — MÉRT HIBA JAVÍTÁSA.
+    -- A fenti 8.2 hurok MINDEN public.echo\_% függvényről levesz minden jogot,
+    -- a KÉSŐBBI migrációkéiról is. MÉRVE a replikán: a 16-os újrafuttatása
+    -- után az echo_template_rename (17) és az öt szerepkör-RPC (19)
+    -- has_function_privilege('authenticated', …, 'execute') értéke HAMIS lett,
+    -- vagyis a kérdőív átnevezése és az oktatói belépés CSENDBEN elromlott.
+    -- Ezért itt feltételesen visszaadjuk őket. A to_regprocedure() vizsgálat
+    -- azért kell, mert a 17/19 még nem biztos, hogy lefutott.
+    if to_regprocedure('public.echo_template_rename(uuid,text,text)') is not null then
+      grant execute on function public.echo_template_rename(uuid,text,text) to authenticated;
+    end if;
+    if to_regprocedure('public.echo_teacher_link(uuid,uuid)') is not null then
+      grant execute on function public.echo_teacher_link(uuid,uuid) to authenticated;
+    end if;
+    if to_regprocedure('public.echo_my_teacher_courses()') is not null then
+      grant execute on function public.echo_my_teacher_courses() to authenticated;
+    end if;
+    if to_regprocedure('public.echo_role_grants()') is not null then
+      grant execute on function public.echo_role_grants() to authenticated;
+    end if;
+    if to_regprocedure('public.echo_role_grant(uuid,text,uuid,timestamptz,text)') is not null then
+      grant execute on function public.echo_role_grant(uuid,text,uuid,timestamptz,text) to authenticated;
+    end if;
+    if to_regprocedure('public.echo_my_roles()') is not null then
+      grant execute on function public.echo_my_roles() to authenticated;
+    end if;
   end if;
 
   -- 8.5 a beküldés KIZÁRÓLAG anon jogon megy (változatlan a 15. szeletből)
@@ -2324,11 +2382,15 @@ with chk(sorrend, ellenorzes, mert, elvart, rendben) as (
          'true / false',
          echo.attendance_low('0-25%') and not echo.attendance_low('26-50%')
   union all
-  select 9, 'public echo_ RPC-k szama (8 a 15-bol + 10 a 16-bol)',
+  -- A 15+16 egyutt 18 RPC-t ad. A KESOBBI migraciok (17: echo_template_rename,
+  -- 18: kampany-eletciklus, 19: szerepkorok) tovabbiakat tesznek hozza, ezert a
+  -- feltetel ALSO KORLAT, nem egyenloseg — kulonben ez a sor minden uj szelet
+  -- utan HIBA-t jelezne, holott semmi nem romlott el.
+  select 9, 'public echo_ RPC-k szama (legalabb 8 a 15-bol + 10 a 16-bol)',
          (select count(*)::text from pg_proc p join pg_namespace n on n.oid=p.pronamespace
-           where n.nspname='public' and p.proname like 'echo\_%'), '18',
+           where n.nspname='public' and p.proname like 'echo\_%'), '>= 18',
          (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace
-           where n.nspname='public' and p.proname like 'echo\_%') = 18
+           where n.nspname='public' and p.proname like 'echo\_%') >= 18
   union all
   select 10, 'a 16. szelet RPC-i NEM hivhatok anon jogon',
          (select count(*)::text from unnest(array[
