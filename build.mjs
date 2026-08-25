@@ -47,6 +47,7 @@ const FEATURE_FILES = [
   // Ugynoksegi portal (29_agency.sql). Az AgentPortal a render-fuggvenyeibol
   // hivatkozik ra, tehat a modul-kiertekeles sorrendje nem szamit.
   'features/agency.jsx',
+  'features/multiprogram.jsx',
 ];
 
 // `motion` is only referenced by the shim at the top of app.jsx, which renders

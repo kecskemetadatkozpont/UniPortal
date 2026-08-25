@@ -1935,6 +1935,15 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
                 <div><div className="text-[10px] uppercase font-bold text-slate-400">Ügynökség</div><div className="font-bold text-slate-700">{(agencies.find(a => a.id === detailStudent.agentId) || {}).name || 'Egyéni jelentkező'}</div></div>
               </div>
 
+              {/* II/4 — a PROGRAM-szintű állapot szakonként. A személyhez
+                  tartozó lépések (dokumentum, matek, interjú) lentebb
+                  láthatók, egyetlen példányban. */}
+              <div className="border-t border-slate-100 pt-5">
+                <MP_ProgramPanel
+                  studentId={detailStudent.id}
+                  canEdit={['SUPERADMIN','ADMIN','ADMISSIONS'].includes(user.role)} />
+              </div>
+
               <div>
                 <div className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-3">Felvételi állapot</div>
                 {/* C1: a teljes lánc egy pillantásra, a mai állapot kiemelve. */}
