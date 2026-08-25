@@ -478,7 +478,7 @@ const db = {
       ],
       visaApplication: { id: 'V-S0', studentId: 'S0', type: 'D-type', status: 'Approved', submissionDate: '2024.03.15', decisionDate: '2024.03.20', expiryDate: '2025.03.20', visaNumber: 'HUN123456789', consulate: 'Budapest', riskFactors: [] },
     },
-    { id: 'S1', name: 'Al-Farabi Ammar', email: 'ammar@test.com', phone: '+2348012345678', program: 'MSc Computer Science', status: 'Accepted', appliedAt: '2024.03.01', tuitionFee: 5000, agentId: 'A1', country: 'Nigéria',
+    { id: 'S1', name: 'Al-Farabi Ammar', email: 'ammar@test.com', phone: '+2348012345678', program: 'MSc Computer Science', status: 'Accepted', appliedAt: '2024.03.01', tuitionFee: 5000, agentId: 'AG1', country: 'Nigéria',
       visaChecklist: [
         { id: '1', label: 'Érvényes útlevél másolata', required: true, status: 'Verified' },
         { id: '2', label: 'Anyagi fedezet igazolása', required: true, status: 'Uploaded' },
@@ -499,7 +499,7 @@ const db = {
         comments: [{ id: 'C1', author: 'Dr. Szabó Péter', text: 'Kiváló technikai háttér.', timestamp: '10:20' }],
         videos: [{ id: 'V1', question: 'Miért választotta ezt a szakot?', videoUrl: '#', duration: '01:45' }],
       } },
-    { id: 'S2', name: 'Chen Wei', email: 'chen@test.com', phone: '+8613812345678', program: 'BSc Business Admin', status: 'Submitted', appliedAt: '2024.03.18', tuitionFee: 4500, agentId: 'A1', country: 'Kína',
+    { id: 'S2', name: 'Chen Wei', email: 'chen@test.com', phone: '+8613812345678', program: 'BSc Business Admin', status: 'Submitted', appliedAt: '2024.03.18', tuitionFee: 4500, agentId: 'AG1', country: 'Kína',
       visaChecklist: [
         { id: '1', label: 'Érvényes útlevél másolata', required: true, status: 'Pending' },
         { id: '2', label: 'Anyagi fedezet igazolása', required: true, status: 'Pending' },
@@ -515,19 +515,19 @@ const db = {
         comments: [{ id: 'C1', author: 'Dr. Kovács István', text: 'Nagyon erős elméleti tudás.', timestamp: '09:15' }],
         videos: [{ id: 'V1', question: 'Miért választotta ezt a szakot?', videoUrl: '#', duration: '02:10' }],
       } },
-    { id: 'S3', name: 'Elena Rodriguez', email: 'elena@test.com', program: 'MA Visual Arts', status: 'Submitted', appliedAt: '2024.03.10', tuitionFee: 6000, agentId: 'A2', country: 'Brazília', visaChecklist: [{ id: '1', label: 'Érvényes útlevél másolata', required: true, status: 'Uploaded' }] },
-    { id: 'S4', name: 'Lars Svensson', email: 'lars@test.com', program: 'MSc Computer Science', status: 'Accepted', appliedAt: '2024.02.20', tuitionFee: 5000, agentId: 'A1', country: 'Svédország', visaChecklist: [] },
-    { id: 'S5', name: 'Yuki Tanaka', email: 'yuki@test.com', program: 'BSc Engineering', status: 'Draft', appliedAt: '2024.03.21', tuitionFee: 5500, agentId: 'A3', country: 'Japán', visaChecklist: [] },
-    { id: 'S6', name: 'Ahmed Hassan', email: 'ahmed@test.com', program: 'MSc Data Science', status: 'Accepted', appliedAt: '2024.01.15', tuitionFee: 5200, agentId: 'A1', country: 'Egyiptom',
+    { id: 'S3', name: 'Elena Rodriguez', email: 'elena@test.com', program: 'MA Visual Arts', status: 'Submitted', appliedAt: '2024.03.10', tuitionFee: 6000, agentId: 'AG2', country: 'Brazília', visaChecklist: [{ id: '1', label: 'Érvényes útlevél másolata', required: true, status: 'Uploaded' }] },
+    { id: 'S4', name: 'Lars Svensson', email: 'lars@test.com', program: 'MSc Computer Science', status: 'Accepted', appliedAt: '2024.02.20', tuitionFee: 5000, agentId: 'AG1', country: 'Svédország', visaChecklist: [] },
+    { id: 'S5', name: 'Yuki Tanaka', email: 'yuki@test.com', program: 'BSc Engineering', status: 'Draft', appliedAt: '2024.03.21', tuitionFee: 5500, agentId: 'AG3', country: 'Japán', visaChecklist: [] },
+    { id: 'S6', name: 'Ahmed Hassan', email: 'ahmed@test.com', program: 'MSc Data Science', status: 'Accepted', appliedAt: '2024.01.15', tuitionFee: 5200, agentId: 'AG1', country: 'Egyiptom',
       visaChecklist: [
         { id: '1', label: 'Érvényes útlevél másolata', required: true, status: 'Verified' },
         { id: '2', label: 'Anyagi fedezet igazolása', required: true, status: 'Verified' },
       ],
       visaApplication: { id: 'V-S6', studentId: 'S6', type: 'Residence Permit', status: 'Submitted', submissionDate: '2024.03.01', consulate: 'Cairo', riskFactors: [] } },
-    { id: 'S7', name: 'Sofia Bianchi', email: 'sofia@test.com', program: 'MA Architecture', status: 'Submitted', appliedAt: '2024.03.19', tuitionFee: 5800, agentId: 'A2' },
-    { id: 'S8', name: 'Igor Petrov', email: 'igor@test.com', program: 'BSc Physics', status: 'Accepted', appliedAt: '2024.02.28', tuitionFee: 4800, agentId: 'A3' },
-    { id: 'S9', name: 'Maria Garcia', email: 'maria@test.com', program: 'LLM International Law', status: 'Submitted', appliedAt: '2024.03.05', tuitionFee: 6500, agentId: 'A2' },
-    { id: 'S10', name: 'John Smith', email: 'john@test.com', program: 'BSc Business Admin', status: 'Accepted', appliedAt: '2023.12.10', tuitionFee: 4500, agentId: 'A1' },
+    { id: 'S7', name: 'Sofia Bianchi', email: 'sofia@test.com', program: 'MA Architecture', status: 'Submitted', appliedAt: '2024.03.19', tuitionFee: 5800, agentId: 'AG2' },
+    { id: 'S8', name: 'Igor Petrov', email: 'igor@test.com', program: 'BSc Physics', status: 'Accepted', appliedAt: '2024.02.28', tuitionFee: 4800, agentId: 'AG3' },
+    { id: 'S9', name: 'Maria Garcia', email: 'maria@test.com', program: 'LLM International Law', status: 'Submitted', appliedAt: '2024.03.05', tuitionFee: 6500, agentId: 'AG2' },
+    { id: 'S10', name: 'John Smith', email: 'john@test.com', program: 'BSc Business Admin', status: 'Accepted', appliedAt: '2023.12.10', tuitionFee: 4500, agentId: 'AG1' },
   ],
   payments: [
     { id: 'P1', studentName: 'Al-Farabi Ammar', type: 'Tuition', amount: 5000, currency: 'EUR', status: 'Paid', date: '2024.03.20', method: 'Bank Transfer' },
@@ -661,7 +661,14 @@ const api = {
   setStudentStatus: (id, status) => sbUpdate('students', id, { status }),
   // C2: a három beiratkozás utáni sáv egymástól függetlenül állítható.
   setStudentTrack: (id, field, value) => sbUpdate('students', id, { [field]: value }),
-  addAgency: (agency) => sbInsert('agencies', { ...agency, id: uid('AG') }),
+  // Az adminnak a FUGGOBEN LEVO ugynoksegek is kellenek (29_agency.sql,
+  // 1./7. tetel) — a getAgencies ugyanezt adja, az RLS dont arrol, ki mit lat.
+  addAgency: (agency) => sbInsert('agencies', {
+    ...agency,
+    id: uid('AG'),
+    approval_status: agency.approval_status || 'approved',
+    self_registered: false,
+  }),
   updateAgency: (id, data) => sbUpdate('agencies', id, data),
   bookInterviewSlot: (slotId, studentId, studentName) => sbUpdate('interviewSlots', slotId, { status: 'Booked', studentId, studentName, teamsMeetingUrl: 'https://teams.microsoft.com/l/meetup-join/mock-meeting-id' }),
   processPayment: async ({ studentId, amount, method, type }) => {
@@ -1565,7 +1572,7 @@ interface AgentPortalProps {
 
 const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
   const isAgent = user.role === 'AGENT';
-  const [activeTab, setActiveTab] = useState<'overview' | 'students' | 'commission' | 'hierarchy' | 'resources' | 'agencies'>(isAgent ? 'overview' : 'overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'students' | 'commission' | 'hierarchy' | 'resources' | 'agencies' | 'registrations' | 'documents'>('overview');
   const [searchTerm, setSearchTerm] = useState('');
   const [students, setStudents] = useState<Student[]>([]);
   const [agencies, setAgencies] = useState<Agency[]>([]);
@@ -1577,8 +1584,10 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
   const [newAgency, setNewAgency] = useState<Partial<Agency>>({ name: '', commissionRate: 0, contactPerson: '', email: '', status: 'Active' });
   const [editAgencyData, setEditAgencyData] = useState<Partial<Agency>>({});
 
-  useEffect(() => {
-    const fetchData = async () => {
+  // Kiemelve a useEffect-bol, hogy az ugynoksegi dontes (elfogadas/elutasitas)
+  // utan ujra lehessen tolteni a listat — kulonben a ful a dontes elotti
+  // allapotot mutatna.
+  const fetchData = React.useCallback(async () => {
       try {
         const [studentData, agencyData] = await Promise.all([
           api.getStudents(),
@@ -1586,9 +1595,11 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
         ]);
         
         if (isAgent && user.agencyId) {
-          setStudents(studentData.filter(s => s.agencyId === user.agencyId));
+          setStudents(studentData.filter(s => s.agentId === user.agencyId));
           setAgencies(agencyData.filter(a => a.id === user.agencyId));
         } else {
+          // Az ugyintezo MINDEN ugynokseget lat, a fuggoben levoket is —
+          // ezek jelennek meg az "Ugynoksegi regisztraciok" fulon (1./7. tetel).
           setStudents(studentData);
           setAgencies(agencyData);
         }
@@ -1597,11 +1608,13 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
       } finally {
         setIsLoading(false);
       }
-    };
-    fetchData();
   }, [isAgent, user.agencyId]);
 
+  useEffect(() => { fetchData(); }, [fetchData]);
+
   const myAgency = isAgent ? agencies.find(a => a.id === user.agencyId) : null;
+  // Hany ugynokseg var elbiralasra? A ful jelvenye ebbol jon (1./7. tetel).
+  const pendingAgencyCount = agencies.filter(a => (a.approval_status || 'approved') === 'pending').length;
 
   const handleAddAgency = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1617,7 +1630,10 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
 
   const handleAssignAgency = async (studentId: string, agencyId: string) => {
     try {
-      const updated = await api.updateStudent(studentId, { agencyId });
+      // A students tabla ugynokseg-mezoje az "agentId" (29_agency.sql 1. szakasz
+      // ota az agencies.id-ra mutat). A regi "agencyId" nev nem letezett a tablan,
+      // ezert a hozzarendeles csendben elveszett.
+      const updated = await api.updateStudent(studentId, { agentId: agencyId || null });
       setStudents(students.map(s => s.id === studentId ? updated : s));
     } catch (error) {
       console.error('Failed to assign agency:', error);
@@ -1650,7 +1666,7 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
         ? s.status === 'Accepted'
         : (s.status === 'Conditionally accepted' || s.status === 'Nominated' || s.status === 'Documents checked' || s.status === 'Submitted'))
       .reduce((acc, s) => {
-        const agency = agencies.find(a => a.id === s.agencyId);
+        const agency = agencies.find(a => a.id === s.agentId);
         const rate = agency ? agency.commissionRate : 0;
         return acc + (s.tuitionFee * (rate / 100));
       }, 0);
@@ -1662,12 +1678,6 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
     // 'Submitted'-be, a hiányzó dokumentum a dokumentumlista ténye).
     pendingApps: students.filter(s => s.status === 'Submitted' || s.status === 'Documents checked').length,
     commissionTotal: calculateCommission(students, true),
-  };
-
-  const commissions: Commission = {
-    payable: stats.commissionTotal,
-    pending: calculateCommission(students, false),
-    paid: 0, // In a real app, this would come from a 'payouts' table
   };
 
   const contracts: Contract[] = [
@@ -1687,8 +1697,8 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
     const matchesSearch = s.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
                          s.program.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesAgency = selectedAgencyFilter === 'All' || 
-                         (selectedAgencyFilter === 'Individual' && !s.agencyId) ||
-                         s.agencyId === selectedAgencyFilter;
+                         (selectedAgencyFilter === 'Individual' && !s.agentId) ||
+                         s.agentId === selectedAgencyFilter;
     const matchesStatus = statusFilter === 'All' || s.status === statusFilter;
     return matchesSearch && matchesAgency && matchesStatus;
   });
@@ -1864,7 +1874,7 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
                       <span className="text-xs font-medium text-slate-600">{myAgency?.name}</span>
                     ) : (
                       <select 
-                        value={student.agencyId || ''} 
+                        value={student.agentId || ''} 
                         onChange={(e) => handleAssignAgency(student.id, e.target.value)}
                         className="text-xs bg-slate-50 border border-slate-100 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                       >
@@ -1922,7 +1932,7 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
               <div className="grid sm:grid-cols-3 gap-3 text-sm">
                 <div><div className="text-[10px] uppercase font-bold text-slate-400">Szak</div><div className="font-bold text-slate-700">{detailStudent.program || '—'}</div></div>
                 <div><div className="text-[10px] uppercase font-bold text-slate-400">Tandíj</div><div className="font-bold text-slate-700">{detailStudent.tuitionFee ? detailStudent.tuitionFee + ' EUR' : '—'}</div></div>
-                <div><div className="text-[10px] uppercase font-bold text-slate-400">Ügynökség</div><div className="font-bold text-slate-700">{(agencies.find(a => a.id === detailStudent.agencyId) || {}).name || 'Egyéni jelentkező'}</div></div>
+                <div><div className="text-[10px] uppercase font-bold text-slate-400">Ügynökség</div><div className="font-bold text-slate-700">{(agencies.find(a => a.id === detailStudent.agentId) || {}).name || 'Egyéni jelentkező'}</div></div>
               </div>
 
               <div>
@@ -1962,6 +1972,24 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
                   : <div className="rounded-xl bg-slate-50 border border-slate-100 p-4 text-xs text-slate-400">A beiratkozás utáni sávok a „Felvéve" státusztól érhetők el.</div>}
               </div>
 
+              {/* 4. tetel — a BEIRATKOZAS TENYE. Ez a jutalek egyetlen alapja:
+                  amig ez ures, a hallgato nem kerul be egyetlen jutaleklistaba
+                  sem. Csak ugyintezo irhatja (student_set_enrolled RPC). */}
+              <div className="border-t border-slate-100 pt-5">
+                <div className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-1">Beiratkozás ténye</div>
+                <p className="text-[11px] text-slate-400 mb-3">
+                  A jutalék alapja. Amíg nincs rögzítve, a hallgató egyetlen jutaléklistában sem szerepel.
+                </p>
+                <EnrollmentControl
+                  student={detailStudent}
+                  canEdit={canEditStatus}
+                  onSaved={(row) => {
+                    setStudents(prev => prev.map(x => x.id === row.id ? { ...x, ...row } : x));
+                    setDetailStudent(cur => (cur && cur.id === row.id) ? { ...cur, ...row } : cur);
+                  }}
+                />
+              </div>
+
               {trackError && (
                 <div className="rounded-xl bg-red-50 border border-red-200 p-3 text-xs text-red-700 flex items-start gap-2">
                   <ICONS.AlertCircle size={15} className="shrink-0 mt-0.5" /><span>{trackError}</span>
@@ -1974,86 +2002,19 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
     </div>
   );
 
-  const renderCommission = () => {
-    // C1: a jutalék alapja a véglegesen felvett hallgató (lásd calculateCommission).
-    const paidStudents = students.filter(s => s.status === 'Accepted');
-    const totalCalculatedCommission = paidStudents.reduce((acc, s) => {
-      const agency = agencies.find(a => a.id === s.agencyId);
-      const rate = agency ? agency.commissionRate : 0;
-      return acc + (s.tuitionFee * (rate / 100));
-    }, 0);
-
-    return (
-      <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-        <div className="bg-indigo-900 rounded-3xl p-5 sm:p-8 text-white relative overflow-hidden shadow-2xl shadow-indigo-200">
-          <div className="absolute top-0 right-0 p-6 sm:p-12 opacity-10">
-            <ICONS.Wallet size={180} />
-          </div>
-          <div className="relative z-10">
-            <p className="text-indigo-200 text-sm font-medium uppercase tracking-widest mb-2">Jutalék egyenleg (kalkulált)</p>
-            <h2 className="text-5xl font-bold mb-8">€{totalCalculatedCommission.toLocaleString()}</h2>
-            <div className="grid grid-cols-2 gap-8 max-w-md">
-              <div>
-                <p className="text-indigo-300 text-xs mb-1">Várható (Függő)</p>
-                <p className="text-xl font-semibold">€{commissions.pending.toLocaleString()}</p>
-              </div>
-              <div>
-                <p className="text-indigo-300 text-xs mb-1">Már kifizetve</p>
-                <p className="text-xl font-semibold">€{commissions.paid.toLocaleString()}</p>
-              </div>
-            </div>
-            <button className="mt-8 bg-white text-indigo-900 px-6 py-3 rounded-xl font-bold hover:bg-indigo-50 transition-colors shadow-lg">
-              Kifizetés igénylése
-            </button>
-          </div>
-        </div>
-        
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-          <div className="p-6 border-b border-slate-50">
-            <h3 className="font-bold text-slate-800 text-lg">Jutalék Előzmények (Ügynökségi Kulcsok Alapján)</h3>
-          </div>
-          <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead className="bg-slate-50 text-slate-400 text-[10px] font-bold uppercase tracking-wider">
-              <tr>
-                <th className="px-6 py-4">Diák / Időpont</th>
-                <th className="px-6 py-4">Ügynökség</th>
-                <th className="px-6 py-4">Tandíj</th>
-                <th className="px-6 py-4">Jutalék %</th>
-                <th className="px-6 py-4">Összeg</th>
-                <th className="px-6 py-4 text-right">Státusz</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {paidStudents.map((s) => {
-                const agency = agencies.find(a => a.id === s.agencyId);
-                const rate = agency ? agency.commissionRate : 0;
-                const amount = s.tuitionFee * (rate / 100);
-                return (
-                  <tr key={s.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-6 py-4">
-                      <p className="font-semibold text-slate-800">{s.name}</p>
-                      <p className="text-xs text-slate-400">{s.appliedAt}</p>
-                    </td>
-                    <td className="px-6 py-4 text-xs font-medium text-slate-600">
-                      {agency ? agency.name : <span className="text-slate-300 italic">Egyéni</span>}
-                    </td>
-                    <td className="px-6 py-4 text-slate-600">€{s.tuitionFee.toLocaleString()}</td>
-                    <td className="px-6 py-4 text-slate-600">{rate}%</td>
-                    <td className="px-6 py-4 font-bold text-slate-800">€{amount.toLocaleString()}</td>
-                    <td className="px-6 py-4 text-right">
-                      <span className="px-2 py-1 bg-emerald-50 text-emerald-600 rounded text-[10px] font-bold uppercase">Kész</span>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          </div>
-        </div>
-      </div>
-    );
-  };
+  // 3./4. tétel — a régi "Kifizetés igénylése" gomb helyére a számlázási
+  // folyamat került (features/agency.jsx · AgencyBilling). A jutalékot innentől
+  // az ADMIN küldi ki, és csak a beiratkozási időszak LEZÁRÁSA után; a lista a
+  // ténylegesen beiratkozott hallgatókból áll össze. A kalkulált egyenleg csak
+  // tájékoztat — a kötelező érvényű összeg a kiküldött számlán van.
+  const renderCommission = () => (
+    <AgencyBilling
+      user={user}
+      agencies={agencies}
+      myAgencyId={isAgent ? user.agencyId : ''}
+      onChanged={fetchData}
+    />
+  );
 
   const renderAgencies = () => (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -2106,6 +2067,19 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
                 value={newAgency.email}
                 onChange={e => setNewAgency({...newAgency, email: e.target.value})}
                 className="w-full bg-slate-50 border border-slate-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+              />
+            </div>
+            {/* 6. tetel — country of origin (egy ertek) es countries of
+                recruitment (tobb ertek, text[] tomb az adatbazisban). */}
+            <div className="sm:col-span-2 lg:col-span-3 2xl:col-span-4">
+              <AgencyCountryFields
+                origin={newAgency.country_of_origin}
+                countries={newAgency.countries_of_recruitment}
+                onChange={v => setNewAgency({
+                  ...newAgency,
+                  country_of_origin: v.origin,
+                  countries_of_recruitment: v.countries,
+                })}
               />
             </div>
             <div className="md:col-span-2 lg:col-span-3 flex justify-end gap-2 mt-2">
@@ -2170,6 +2144,16 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
                     className="w-full bg-slate-50 border border-slate-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
                   />
                 </div>
+                <AgencyCountryFields
+                  compact
+                  origin={editAgencyData.country_of_origin}
+                  countries={editAgencyData.countries_of_recruitment}
+                  onChange={v => setEditAgencyData({
+                    ...editAgencyData,
+                    country_of_origin: v.origin,
+                    countries_of_recruitment: v.countries,
+                  })}
+                />
                 <div className="flex justify-end gap-2 pt-2">
                   <button 
                     type="button"
@@ -2197,9 +2181,27 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
                   </span>
                 </div>
                 <h4 className="font-bold text-slate-800 text-lg mb-1">{agency.name}</h4>
-                <p className="text-xs text-slate-400 mb-4">{agency.contactPerson} • {agency.email}</p>
-                <div className="pt-4 border-t border-slate-50 flex justify-between items-center">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase">Státusz: {agency.status}</span>
+                <p className="text-xs text-slate-400 mb-3">{agency.contactPerson} • {agency.email}</p>
+                {/* 6. tetel — a ket uj adatlap-mezo a kartyan is latszik. */}
+                <div className="space-y-2 mb-4">
+                  <p className="text-xs text-slate-500">
+                    <span className="font-bold text-slate-400 uppercase text-[10px] tracking-wider mr-1.5">Származás:</span>
+                    {agency.country_of_origin || <span className="text-slate-300 italic">nincs megadva</span>}
+                  </p>
+                  <div className="flex flex-wrap gap-1.5 items-center">
+                    <span className="font-bold text-slate-400 uppercase text-[10px] tracking-wider">Toborzás:</span>
+                    {(agency.countries_of_recruitment || []).length === 0
+                      ? <span className="text-xs text-slate-300 italic">nincs megadva</span>
+                      : (agency.countries_of_recruitment || []).map(c => (
+                          <span key={c} className="px-2 py-0.5 rounded-lg bg-slate-50 border border-slate-100 text-[11px] font-semibold text-slate-600">{c}</span>
+                        ))}
+                  </div>
+                </div>
+                <div className="pt-4 border-t border-slate-50 flex justify-between items-center gap-2">
+                  <AGENCY_Badge
+                    text={AGENCY_APPROVAL_LABEL[agency.approval_status || 'approved'] || agency.status}
+                    cls={AGENCY_APPROVAL_CLASS[agency.approval_status || 'approved']}
+                  />
                   <button 
                     onClick={() => handleEditAgency(agency)}
                     className="text-indigo-600 text-xs font-bold hover:underline"
@@ -2285,8 +2287,30 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
           onClick={() => setActiveTab('commission')}
           className={`px-6 py-3 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'commission' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
         >
-          Jutalék egyenleg
+          Jutalék és számlázás
         </button>
+        {/* 5. tetel — szerzodes, meghatalmazas az ugynoksegehez kotve. */}
+        <button 
+          onClick={() => setActiveTab('documents')}
+          className={`px-6 py-3 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'documents' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
+        >
+          Dokumentumok
+        </button>
+        {/* 1./7. tetel — a fuggoben levo (koztuk az onregisztralt) ugynoksegek.
+            A dontes joga SUPERADMIN/ADMIN; a szamlalo elore jelzi a teendot. */}
+        {['SUPERADMIN', 'ADMIN'].indexOf(user.role) >= 0 && (
+          <button 
+            onClick={() => setActiveTab('registrations')}
+            className={`px-6 py-3 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'registrations' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
+          >
+            Ügynökségi regisztrációk
+            {pendingAgencyCount > 0 && (
+              <span className="ml-2 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-lg bg-amber-500 text-white text-[10px] font-black">
+                {pendingAgencyCount}
+              </span>
+            )}
+          </button>
+        )}
         {!isAgent && (
           <>
             <button 
@@ -2316,6 +2340,20 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
         {activeTab === 'overview' && renderOverview()}
         {activeTab === 'students' && renderStudentsList()}
         {activeTab === 'commission' && renderCommission()}
+        {activeTab === 'documents' && (
+          <AgencyDocuments
+            user={user}
+            agencies={agencies}
+            myAgencyId={isAgent ? user.agencyId : ''}
+          />
+        )}
+        {activeTab === 'registrations' && (
+          <AgencyRegistrations
+            user={user}
+            agencies={agencies}
+            onChanged={fetchData}
+          />
+        )}
         {activeTab === 'agencies' && renderAgencies()}
         {activeTab === 'resources' && renderResources()}
         {activeTab === 'hierarchy' && (
@@ -2327,7 +2365,7 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
               <div className="p-6">
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4 sm:gap-6">
                   {agencies.map(agency => {
-                    const agencyStudents = students.filter(s => s.agencyId === agency.id);
+                    const agencyStudents = students.filter(s => s.agentId === agency.id);
                     const paidCount = agencyStudents.filter(s => s.status === 'Accepted').length;
                     const conversionRate = agencyStudents.length > 0 ? (paidCount / agencyStudents.length * 100).toFixed(1) : 0;
                     
@@ -2414,11 +2452,11 @@ const AdmissionsCore = ({ user }) => {
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
         if (k && k.indexOf('nje_processes_') === 0) {
-          try { const arr = JSON.parse(localStorage.getItem(k)); if (Array.isArray(arr)) arr.forEach(p => out.push({ ...p, _owner: k.replace('nje_processes_', '') })); } catch (e) {}
+          try { const arr = JSON.parse(localStorage.getItem(k)); if (Array.isArray(arr)) arr.forEach(p => out.push(migrateStepOrder({ ...p, _owner: k.replace('nje_processes_', '') }))); } catch (e) {}
         }
       }
     } catch (e) {}
-    setJourneyProcs(out.length ? out : (JourneyShared.seedProcesses ? JourneyShared.seedProcesses().map(p => ({ ...p, _owner: 'demo' })) : []));
+    setJourneyProcs(out.length ? out : (JourneyShared.seedProcesses ? JourneyShared.seedProcesses().map(p => migrateStepOrder({ ...p, _owner: 'demo' })) : []));
     // Megosztott (Supabase) folyamatok + automatikus frissítés (realtime + lekérdezés).
     let alive = true;
     // `first` distinguishes the initial load (show a skeleton — the local seed
@@ -5149,7 +5187,11 @@ return Finance;
 
 /* ===== ImmigrationCompliance ===== */
 const ImmigrationCompliance = (() => {
-type ImmigrationSubView = 'checklist' | 'interview' | 'risk';
+/* Az 'interview' fül (interjú-felkészítő) INNEN KIKERÜLT: az „Interjú Foglalás”
+   nézetbe költözött (II/1.3), mert a jelentkezők a FELVÉTELI interjúra
+   készülnek vele, és a foglalás mellett keresik. Itt már csak a vízumügyintézés
+   két füle marad. */
+type ImmigrationSubView = 'checklist' | 'risk';
 
 const mockRiskFactors: RiskFactor[] = [
   { label: 'Tanulmányi hézag (Study Gap)', impact: 'High', description: 'A diák 4 évet hagyott ki a középiskola és az egyetem között magyarázat nélkül.' },
@@ -5381,68 +5423,6 @@ const ImmigrationCompliance: React.FC = () => {
     );
   };
 
-  const renderInterviewPrep = () => (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="space-y-6">
-        <div className="bg-white p-5 sm:p-8 rounded-3xl border border-slate-100 shadow-sm h-full">
-          <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center mb-6">
-            <ICONS.Mic size={24} />
-          </div>
-          <h3 className="text-xl font-bold text-slate-800 mb-2">Vízum Interjú Felkészítő</h3>
-          <p className="text-sm text-slate-500 leading-relaxed mb-8">
-            Ez a modul segít a diákoknak felkészülni a nagykövetségi interjúra. A rendszer rögzíti a válaszokat, és AI vagy mentor segítségével pontozza azokat.
-          </p>
-          
-          <div className="space-y-4">
-            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Gyakori Kérdések</h4>
-            {[
-              'Miért pont ezt az egyetemet választotta?',
-              'Hogyan fogja finanszírozni a tanulmányait?',
-              'Mik a tervei a diploma megszerzése után?',
-              'Vannak-e rokonai az országban?'
-            ].map((q, i) => (
-              <div key={i} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between group cursor-pointer hover:bg-white hover:shadow-md transition-all">
-                <p className="text-sm font-semibold text-slate-700">{q}</p>
-                <button className="w-8 h-8 bg-indigo-600 text-white rounded-lg flex items-center justify-center shadow-lg shadow-indigo-100 scale-0 group-hover:scale-100 transition-transform">
-                  <ICONS.ChevronRight size={16} />
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      <div className="space-y-6">
-        <div className="bg-slate-900 rounded-3xl p-5 sm:p-8 text-white relative overflow-hidden h-full">
-          <div className="absolute top-0 right-0 p-6 sm:p-12 opacity-10">
-            <ICONS.Video size={120} />
-          </div>
-          <div className="relative z-10 flex flex-col h-full">
-            <div className="mb-auto">
-              <div className="flex items-center gap-2 mb-6">
-                <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
-                <span className="text-[10px] font-bold uppercase tracking-widest">Gyakorló Mód Aktív</span>
-              </div>
-              <h4 className="text-2xl font-bold mb-4">"Miért pont ezt a szakot választotta?"</h4>
-              <p className="text-slate-400 text-sm italic mb-8">Válasz rögzítése a visszajelzéshez...</p>
-            </div>
-            
-            <div className="bg-white/5 rounded-2xl p-6 border border-white/10 mb-8">
-              <p className="text-xs text-slate-300 font-medium">Mentori Tipp:</p>
-              <p className="text-sm text-slate-200 mt-2 leading-relaxed">
-                "A válaszában ne csak a szak nevét említse, hanem kapcsolja össze a korábbi tanulmányaival és a jövőbeli karriercéljaival."
-              </p>
-            </div>
-
-            <button className="w-full bg-white text-slate-900 py-4 rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-slate-100 transition-all shadow-xl">
-              <ICONS.Mic size={20} /> Válasz rögzítése
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
   const renderRiskAnalysis = () => {
     if (!selectedStudent) return null;
     
@@ -5548,12 +5528,6 @@ const ImmigrationCompliance: React.FC = () => {
               Vízum Checklist
             </button>
             <button 
-              onClick={() => setActiveSubView('interview')}
-              className={`px-6 py-3 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${activeSubView === 'interview' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
-            >
-              Interjú Felkészítő
-            </button>
-            <button 
               onClick={() => setActiveSubView('risk')}
               className={`px-6 py-3 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${activeSubView === 'risk' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
             >
@@ -5564,7 +5538,6 @@ const ImmigrationCompliance: React.FC = () => {
           {/* Dynamic Content */}
           <div className="mt-8">
             {activeSubView === 'checklist' && renderChecklist()}
-            {activeSubView === 'interview' && renderInterviewPrep()}
             {activeSubView === 'risk' && renderRiskAnalysis()}
           </div>
         </div>
@@ -6315,6 +6288,12 @@ interface InterviewSchedulerProps {
   user: User;
 }
 
+/* A nézet két füle (II/1.3): a foglalás mellé ide került át az interjú-
+   felkészítő, amely korábban a „Vízum és Compliance” alatt lakott. Ott a
+   vízuminterjú mellett állt, holott a jelentkezők a FELVÉTELI interjúra
+   készülnek vele — a foglalás mellett keresik. */
+type InterviewSubView = 'booking' | 'free' | 'availability' | 'prep';
+
 const InterviewScheduler: React.FC<InterviewSchedulerProps> = ({ user }) => {
   const isAgent = user.role === 'AGENT';
   const { data: slots, isLoading, refresh } = useApi(api.getInterviewSlots);
@@ -6323,16 +6302,32 @@ const InterviewScheduler: React.FC<InterviewSchedulerProps> = ({ user }) => {
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [booking, setBooking] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [activeSubView, setActiveSubView] = useState<InterviewSubView>('booking');
+  // A szerveroldali kapu (27_interview_gate.sql) hibaüzenete, ha mégis idáig jut.
+  const [bookError, setBookError] = useState('');
+  /* II/2 — a 28_interview_availability.sql felülete (features/interview.jsx).
+     DEFENZÍV: ha a migráció még nem futott le, az RPC hibát ad vissza, az
+     `ivCtx` null marad, és a nézet betűre a régi. */
+  const { ctx: ivCtx, reload: ivReload } = IV_useContext();
 
+  // A students tabla ugynokseg-mezoje az "agentId" (nem "agencyId") — a regi
+  // nev mindig undefined volt, ezert az ugynok itt MINDEN diakot latta.
   const students = isAgent && user.agencyId 
-    ? allStudents?.filter(s => s.agencyId === user.agencyId) 
+    ? allStudents?.filter(s => s.agentId === user.agencyId) 
     : allStudents;
 
   const selectedStudent = students?.find(s => s.id === selectedStudentId);
 
+  // A kapu OKA a KIVÁLASZTOTT JELENTKEZŐ tulajdonsága, nem a hívóé: az
+  // ügyintézőre ugyanúgy vonatkozik, mint a jelentkezőre — különben a kapu
+  // csak egy kattintással lenne odébb. Ugyanígy dönt a 27-es migráció is.
+  const gateReason = selectedStudent ? interviewBookingBlockReason(selectedStudent) : null;
+
   const handleBook = async () => {
     if (!selectedSlot || !selectedStudent) return;
+    if (gateReason) { setBookError(gateReason); return; }
     setBooking(true);
+    setBookError('');
     try {
       await api.bookInterviewSlot(selectedSlot.id, selectedStudent.id, selectedStudent.name);
       setSuccess(true);
@@ -6343,10 +6338,78 @@ const InterviewScheduler: React.FC<InterviewSchedulerProps> = ({ user }) => {
       }, 3000);
     } catch (error) {
       console.error('Booking failed:', error);
+      setBookError(interviewBookingErrorText(error));
     } finally {
       setBooking(false);
     }
   };
+
+  /* ÁTHELYEZVE (II/1.3) a „Vízum és Compliance” nézetből. A tartalom
+     változatlan, két kivétellel: a fejléc és a bevezető a FELVÉTELI interjúról
+     szól (nem a nagykövetségiről), és a negyedik mintakérdés — amely tisztán
+     konzuli volt — felvételi kérdésre cserélődött. */
+  const renderInterviewPrep = () => (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      <div className="space-y-6">
+        <div className="bg-white p-5 sm:p-8 rounded-3xl border border-slate-100 shadow-sm h-full">
+          <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center mb-6">
+            <ICONS.Mic size={24} />
+          </div>
+          <h3 className="text-xl font-bold text-slate-800 mb-2">Felvételi Interjú Felkészítő</h3>
+          <p className="text-sm text-slate-500 leading-relaxed mb-8">
+            Ez a modul segít a jelentkezőknek felkészülni a felvételi beszélgetésre. A rendszer rögzíti a válaszokat, és AI vagy mentor segítségével pontozza azokat.
+          </p>
+          
+          <div className="space-y-4">
+            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Gyakori Kérdések</h4>
+            {[
+              'Miért pont ezt az egyetemet választotta?',
+              'Hogyan fogja finanszírozni a tanulmányait?',
+              'Mik a tervei a diploma megszerzése után?',
+              'Milyen szakmai tapasztalata van a választott területen?'
+            ].map((q, i) => (
+              <div key={i} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between group cursor-pointer hover:bg-white hover:shadow-md transition-all">
+                <p className="text-sm font-semibold text-slate-700">{q}</p>
+                <button className="w-8 h-8 bg-indigo-600 text-white rounded-lg flex items-center justify-center shadow-lg shadow-indigo-100 scale-0 group-hover:scale-100 transition-transform">
+                  <ICONS.ChevronRight size={16} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-6">
+        <div className="bg-slate-900 rounded-3xl p-5 sm:p-8 text-white relative overflow-hidden h-full">
+          <div className="absolute top-0 right-0 p-6 sm:p-12 opacity-10">
+            <ICONS.Video size={120} />
+          </div>
+          <div className="relative z-10 flex flex-col h-full">
+            <div className="mb-auto">
+              <div className="flex items-center gap-2 mb-6">
+                <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+                <span className="text-[10px] font-bold uppercase tracking-widest">Gyakorló Mód Aktív</span>
+              </div>
+              <h4 className="text-2xl font-bold mb-4">"Miért pont ezt a szakot választotta?"</h4>
+              <p className="text-slate-400 text-sm italic mb-8">Válasz rögzítése a visszajelzéshez...</p>
+            </div>
+            
+            <div className="bg-white/5 rounded-2xl p-6 border border-white/10 mb-8">
+              <p className="text-xs text-slate-300 font-medium">Mentori Tipp:</p>
+              <p className="text-sm text-slate-200 mt-2 leading-relaxed">
+                "A válaszában ne csak a szak nevét említse, hanem kapcsolja össze a korábbi tanulmányaival és a jövőbeli karriercéljaival."
+              </p>
+            </div>
+
+            <button className="w-full bg-white text-slate-900 py-4 rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-slate-100 transition-all shadow-xl">
+              <ICONS.Mic size={20} /> Válasz rögzítése
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
 
   const availableSlots = slots?.filter(s => s.status === 'Available') || [];
 
@@ -6365,6 +6428,59 @@ const InterviewScheduler: React.FC<InterviewSchedulerProps> = ({ user }) => {
         </div>
       </div>
 
+      {/* Helyi fülek — a felkészítő a „Vízum és Compliance” alól került ide.
+          A gombokon a `shrink-0` MÉRT javítás: 390 px-en a négy fül flex-alapon
+          összenyomódott és a feliratok egymásra csúsztak; így viszont a sáv
+          (overflow-x-auto) vízszintesen görgethető marad. */}
+      <div className="flex items-center gap-1 p-1 bg-white border border-slate-100 rounded-2xl w-fit shadow-sm overflow-x-auto max-w-full">
+        <button
+          onClick={() => setActiveSubView('booking')}
+          className={`px-6 py-3 rounded-xl text-sm font-bold transition-all whitespace-nowrap shrink-0 ${activeSubView === 'booking' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
+        >
+          Időpontfoglalás
+        </button>
+        <button
+          onClick={() => setActiveSubView('prep')}
+          className={`px-6 py-3 rounded-xl text-sm font-bold transition-all whitespace-nowrap shrink-0 ${activeSubView === 'prep' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
+        >
+          Interjú Felkészítő
+        </button>
+        {ivCtx && (
+          <button
+            onClick={() => setActiveSubView('free')}
+            className={`px-6 py-3 rounded-xl text-sm font-bold transition-all whitespace-nowrap shrink-0 ${activeSubView === 'free' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
+          >
+            Szabad időpontok
+          </button>
+        )}
+        {ivCtx && (ivCtx.admin || ivCtx.interviewer) && (
+          <button
+            onClick={() => setActiveSubView('availability')}
+            className={`px-6 py-3 rounded-xl text-sm font-bold transition-all whitespace-nowrap shrink-0 ${activeSubView === 'availability' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
+          >
+            Elérhetőség
+          </button>
+        )}
+      </div>
+
+      {activeSubView === 'prep' && renderInterviewPrep()}
+
+      {/* II/2.1–3 — a SZERVER által generált, ténylegesen szabad sávok. A régi
+          („Időpontfoglalás") fül a magvetett sorokon dolgozik és megmarad;
+          ez itt az elérhetőségből generált, 15 perces bontású lista. */}
+      {activeSubView === 'free' && ivCtx && (
+        <div className="space-y-6">
+          <IV_StaffBooking ctx={ivCtx} students={students || []} onBooked={() => { refresh(); ivReload(); }} />
+          <IV_BookedList slots={slots || []} tz={ivCtx.timezone} />
+        </div>
+      )}
+
+      {/* II/2.2–3 — az interjúztató a SAJÁT elérhetőségét, az admin bárkiét. */}
+      {activeSubView === 'availability' && ivCtx && (
+        <IV_AvailabilityPanel ctx={ivCtx} reloadCtx={ivReload} />
+      )}
+
+      {activeSubView === 'booking' && (
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 space-y-6">
           {isLoading ? (
@@ -6427,8 +6543,12 @@ const InterviewScheduler: React.FC<InterviewSchedulerProps> = ({ user }) => {
                     className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
                   >
                     <option value="">Válasszon diákot...</option>
+                    {/* A státusz ott áll a név mellett, ahol a választás történik —
+                        így a kapu nem a gomb megnyomásakor derül ki. */}
                     {students?.map(s => (
-                      <option key={s.id} value={s.id}>{s.name}</option>
+                      <option key={s.id} value={s.id}>
+                        {s.status === INTERVIEW_GATE_STATUS ? s.name : s.name + ' — ' + statusLabel(s.status) + ' (nem foglalhat)'}
+                      </option>
                     ))}
                   </select>
                 </div>
@@ -6461,6 +6581,24 @@ const InterviewScheduler: React.FC<InterviewSchedulerProps> = ({ user }) => {
                   </p>
                 </div>
 
+                {/* NEM néma tiltás: a kapu OKA a gomb fölött áll. */}
+                {gateReason && (
+                  <div className="bg-amber-50 p-4 rounded-2xl border border-amber-200 flex gap-3" role="status">
+                    <ICONS.Lock size={18} className="text-amber-600 flex-shrink-0" />
+                    <div>
+                      <p className="text-[11px] font-bold text-amber-800">A foglalás zárolva</p>
+                      <p className="text-[11px] text-amber-700 leading-relaxed mt-1">{gateReason}</p>
+                      <p className="text-[11px] text-amber-700 leading-relaxed mt-1">A felvételi státusz a Jelentkezők nézetben állítható „Dokumentumok ellenőrizve” értékre.</p>
+                    </div>
+                  </div>
+                )}
+                {bookError && (
+                  <div className="bg-red-50 p-4 rounded-2xl border border-red-200 flex gap-3" role="alert">
+                    <ICONS.AlertTriangle size={18} className="text-red-600 flex-shrink-0" />
+                    <p className="text-[11px] text-red-700 leading-relaxed">{bookError}</p>
+                  </div>
+                )}
+
                 {success ? (
                   <div className="bg-emerald-50 text-emerald-600 p-4 rounded-2xl border border-emerald-100 flex items-center gap-3 animate-in zoom-in duration-300">
                     <ICONS.CheckCircle size={20} />
@@ -6469,11 +6607,15 @@ const InterviewScheduler: React.FC<InterviewSchedulerProps> = ({ user }) => {
                 ) : (
                   <button 
                     onClick={handleBook}
-                    disabled={booking}
-                    className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-indigo-100 hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                    disabled={booking || !selectedStudent || !!gateReason}
+                    title={gateReason || 'Foglalás megerősítése'}
+                    aria-disabled={!!gateReason}
+                    className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-indigo-100 hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {booking ? (
                       <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    ) : gateReason ? (
+                      <>Foglalás zárolva</>
                     ) : (
                       <>Foglalás Megerősítése</>
                     )}
@@ -6506,6 +6648,7 @@ const InterviewScheduler: React.FC<InterviewSchedulerProps> = ({ user }) => {
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 };
@@ -6514,6 +6657,101 @@ return InterviewScheduler;
 
 /* ===== AdmissionsHub + AdmissionsJourney (Felvételi folyamatok) ===== */
 let JourneyShared = {};
+
+/* ---------------------------------------------------------------------------
+   A LÉPÉSSORREND ÁTVEZETÉSE (II/1.1)
+   ---------------------------------------------------------------------------
+   A tesztelői kérés: a matematika szintfelmérő az interjú UTÁN jöjjön.
+
+       régi (v1): programs → documents → check → math → interview → letter
+       új  (v2): programs → documents → check → interview → math → letter
+
+   A felület minden feltétele a lépés AZONOSÍTÓJÁRA hivatkozik (STEP_DEFS[step].id),
+   ezért a tömb átrendezése önmagában elég lenne — EGY dolgot kivéve: a mentett
+   folyamatok `step` és `maxReached` mezője INDEX. Ezek a számok a régi
+   sorrendhez igazodnak, tehát a csere pillanatában elcsúsznának: a 3-as index
+   eddig a matekot jelentette, mostantól az interjút. Egy matekon ülő jelentkező
+   némán átkerülne az interjúra.
+
+   Ezért van átvezetés. A régi indexből azonosítót képez, és az azonosítót
+   keresi vissza az ÚJ sorrendben — így a folyamat ott marad, AHOL VOLT
+   (aki matekon állt, matekon marad; aki interjún, interjún).
+
+   A `maxReached` nem egyszerű átképzés: a régi „eddig eljutott az i. lépésig”
+   az összes 0..maxReached indexet jelenti, ezért az ÚJ maximumot ezek
+   átképzett indexeinek maximumaként számoljuk — különben a csere elvehetne
+   egy már megnyitott lépést.
+
+   A `data._stepOrder` bélyeg jelzi, hogy a sor már átesett az átvezetésen.
+   Szándékosan a data jsonb-ben utazik: így a localStorage és az
+   admission_processes tábla is viszi magával, ÚJ oszlop nélkül (a 04-es
+   migrációhoz nem kell hozzányúlni). Ha a bélyeg lemaradna, az átvezetés a
+   következő betöltéskor ugyanabból a RÉGI értékből újra ugyanazt számolja —
+   nem duplázódik.
+   --------------------------------------------------------------------------- */
+const STEP_ORDER_VERSION = 2;
+const STEP_IDS_V1 = ['programs', 'documents', 'check', 'math', 'interview', 'letter'];
+const STEP_IDS_V2 = ['programs', 'documents', 'check', 'interview', 'math', 'letter'];
+
+function migrateStepOrder(proc) {
+  if (!proc || typeof proc !== 'object') return proc;
+  const data = proc.data || {};
+  if ((Number(data._stepOrder) || 1) >= STEP_ORDER_VERSION) return proc;
+  const remap = (i) => {
+    const id = STEP_IDS_V1[i];
+    if (id === undefined) return Number(i) || 0;
+    const n = STEP_IDS_V2.indexOf(id);
+    return n < 0 ? (Number(i) || 0) : n;
+  };
+  const oldStep = Number(proc.step) || 0;
+  const oldMax = Number(proc.maxReached) || 0;
+  let newMax = 0;
+  for (let i = 0; i <= oldMax && i < STEP_IDS_V1.length; i++) newMax = Math.max(newMax, remap(i));
+  const newStep = remap(oldStep);
+  return {
+    ...proc,
+    step: newStep,
+    maxReached: Math.max(newMax, newStep),
+    data: { ...data, _stepOrder: STEP_ORDER_VERSION },
+  };
+}
+function migrateStepOrderAll(list) {
+  return Array.isArray(list) ? list.map(migrateStepOrder) : list;
+}
+
+/* ---------------------------------------------------------------------------
+   INTERJÚ-FOGLALÁSI KAPU (II/1.2) — a felületi fele
+   ---------------------------------------------------------------------------
+   A kényszer a szerveren van (27_interview_gate.sql, interviewslots_gate_trg),
+   mert a nyers PostgREST-végpont a böngészőből közvetlenül is hívható. Ez itt
+   csak azt a célt szolgálja, hogy a jelentkező NE egy szerverhibába fusson
+   bele: a gomb előre tiltva van, és MEGMONDJA, miért — néma tiltás nincs.
+
+   A státuszkód a 25_status_model.sql katalógusából való ('Documents checked'),
+   nem új találmány.
+   --------------------------------------------------------------------------- */
+const INTERVIEW_GATE_STATUS = 'Documents checked';
+const INTERVIEW_GATE_STATUS_HU = 'Dokumentumok ellenőrizve';
+
+function interviewBookingBlockReason(student) {
+  if (!student) {
+    return 'Az időpontfoglaláshoz előbb ki kell választani a jelentkezőt.';
+  }
+  if (student.status === INTERVIEW_GATE_STATUS) return null;
+  // A 25-ös katalógus MAGYAR címkéje (statusLabel), nem a nyers kód és nem az
+  // ENUM_HU — az utóbbi a vízum/fizetés enumokat fedi, a felvételi státuszokat
+  // nem, tehát MÉRVE „Accepted” maradt volna a felületen.
+  const cur = (typeof statusLabel === 'function' ? statusLabel(student.status) : student.status) || student.status || 'ismeretlen';
+  return 'Interjú-időpontot csak a dokumentum-ellenőrzésen túljutott jelentkező foglalhat. Jelenlegi státusz: „' + cur + '”, a foglaláshoz szükséges: „' + INTERVIEW_GATE_STATUS_HU + '”.';
+}
+
+/* A szerver hibaüzenete (27_interview_gate.sql) magyarul, teljes mondatban
+   érkezik — ezt mutatjuk meg, nem nyeljük el. Ha mégsem jön szöveg, marad egy
+   értelmes tartalék. */
+function interviewBookingErrorText(e) {
+  const m = (e && (e.message || e.details || e.hint)) || '';
+  return m || 'Az időpontfoglalás nem sikerült. Kérjük, próbálja újra, vagy forduljon a Külügyi Irodához.';
+}
 /* Supabase szinkron a folyamatokhoz (megosztott tárolás eszközök/munkamenetek között) */
 async function spSaveProc(ownerEmail, proc) {
   if (!window.sb || !proc || !proc.id) return;
@@ -6525,7 +6763,10 @@ async function spSaveProc(ownerEmail, proc) {
   } catch (e) {}
 }
 async function spDeleteProc(id) { if (!window.sb || !id) return; try { await sb.from('admission_processes').delete().eq('id', id); } catch (e) {} }
-const spRow = (r) => ({ id: r.id, createdAt: r.created_at, step: r.step || 0, maxReached: r.max_reached || 0, done: !!r.done, data: r.data || {}, _owner: r.owner_email || 'demo', updatedAt: r.updated_at });
+// Minden Supabase-ből olvasott folyamat ITT megy át a lépéssorrend
+// átvezetésén (II/1.1) — így a lista, a részletnézet és a realtime frissítés
+// is ugyanazt az indexet látja.
+const spRow = (r) => migrateStepOrder({ id: r.id, createdAt: r.created_at, step: r.step || 0, maxReached: r.max_reached || 0, done: !!r.done, data: r.data || {}, _owner: r.owner_email || 'demo', updatedAt: r.updated_at });
 
 /* Lists read from admission_process_list (migration 09), a view identical to
    the table except that embedded file bytes are stripped out of data.docs.
@@ -6732,14 +6973,25 @@ const AdmissionsHub = (() => {
   }
   const makeFileNumber = (k) => 'NJE/2026/' + k + '/' + String(rnd(1, 9999)).padStart(4, '0');
 
+  /* A lépések SORRENDJE (II/1.1) — a matematika szintfelmérő az interjú UTÁN
+     következik. A régi sorrend (…→ check → math → interview → letter) a
+     STEP_IDS_V1 tömbben maradt meg; a mentett folyamatok átvezetését a
+     migrateStepOrder() végzi, a lépés AZONOSÍTÓJA (nem az indexe) alapján.
+     A sorrend egyetlen forrása ez a tömb: minden feltétel a `.id` mezőre
+     hivatkozik, ezért a csere sehol nem igényelt indexátírást. */
   const STEP_DEFS = [
     { id: 'programs', label: 'Szakok', Icon: Lucide.GraduationCap },
     { id: 'documents', label: 'Dokumentumok', Icon: Lucide.Upload },
     { id: 'check', label: 'Ellenőrzés', Icon: Lucide.ShieldCheck },
-    { id: 'math', label: 'Matek', Icon: Lucide.Calculator },
     { id: 'interview', label: 'Interjú', Icon: Lucide.Video },
+    { id: 'math', label: 'Matek', Icon: Lucide.Calculator },
     { id: 'letter', label: 'Felvételi levél', Icon: Lucide.FileCheck },
   ];
+  /* Őrszem: ha valaki átrendezi a STEP_DEFS-et, de elfelejti a STEP_IDS_V2-t
+     követni, az átvezetés némán rossz indexre mutatna. Inkább kiabáljon. */
+  if (typeof STEP_IDS_V2 !== 'undefined' && STEP_DEFS.map(s => s.id).join(',') !== STEP_IDS_V2.join(',')) {
+    console.warn('STEP_DEFS és STEP_IDS_V2 eltér — a mentett folyamatok átvezetése elcsúszhat.');
+  }
   const SLOTS = [
     { id: 's1', day: '2026. szept. 2.', time: '09:00', who: 'Dr. Kovács István' },
     { id: 's2', day: '2026. szept. 2.', time: '10:30', who: 'Dr. Kovács István' },
@@ -7112,7 +7364,15 @@ const AdmissionsHub = (() => {
       if (id === 'interview') {
         const book = (s) => set({ interview: { slotId: s.id, slot: s, booked: true, teamsUrl: 'https://teams.microsoft.com/l/meetup-join/19%3ameeting_' + Math.random().toString(36).slice(2, 11) } });
         if (!iv.booked) return (
-          <div><p className="text-slate-500 text-sm mb-4">A foglaláskor automatikusan létrejön a Microsoft Teams meeting.</p>
+          <div>
+            {/* A kapu (II/1.2) itt a lépéssorrendből következik: az „Ellenőrzés”
+                lépés csak akkor enged tovább, ha minden kötelező dokumentum
+                jóváhagyott. A szerveroldali pár: 27_interview_gate.sql. */}
+            <div className="mb-4 rounded-2xl bg-emerald-50 border border-emerald-200 p-3 flex items-start gap-2.5">
+              <Lucide.ShieldCheck size={16} className="text-emerald-600 shrink-0 mt-0.5" />
+              <p className="text-xs text-emerald-800 leading-relaxed">A dokumentum-ellenőrzés lezárult, ezért nyílt meg az időpontfoglalás. A matematika szintfelmérő az interjú után következik.</p>
+            </div>
+            <p className="text-slate-500 text-sm mb-4">A foglaláskor automatikusan létrejön a Microsoft Teams meeting.</p>
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {SLOTS.map(s => (<div key={s.id} onClick={() => book(s)} className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm hover:border-primary/40 cursor-pointer transition-all"><div className="flex items-center gap-2 text-primary font-bold"><Lucide.Calendar size={16} /> {s.day}</div><div className="text-2xl font-black text-slate-800 mt-1">{s.time}</div><div className="text-xs text-slate-400 mt-1">{s.who}</div></div>))}
             </div></div>
@@ -7291,7 +7551,10 @@ const AdmissionsHub = (() => {
   };
   function seedProcesses() {
     return [
+      // A seed adatok MÁR az új sorrend szerint íródnak (`_stepOrder`), ezért a
+      // migrateStepOrder() nem nyúl hozzájuk. Így a demó nem hordoz v1 maradékot.
       { id: 'PROC-demo1', createdAt: '2026.06.20', step: 5, maxReached: 5, done: true, data: {
+        _stepOrder: STEP_ORDER_VERSION,
         account: { fullName: 'Adaeze Okonkwo', email: 'adaeze.okonkwo@example.com', phone: '+2348021234567', country: 'Nigeria', birthDate: '2003-02-14' },
         programs: ['ibe'],
         docs: { school: { fileName: 'iskolai_tanulmanyi_adatok.pdf', status: 'uploaded' }, passport: { fileName: 'utlevel.pdf', status: 'uploaded' }, language: { fileName: 'nyelvvizsga.pdf', status: 'uploaded' }, motivation: { fileName: 'motivacios_level.pdf', status: 'uploaded' }, internship: { fileName: 'szakmai_gyakorlat.pdf', status: 'uploaded' } },
@@ -7301,7 +7564,10 @@ const AdmissionsHub = (() => {
         interview: { slotId: 's1', slot: { id: 's1', day: '2026. szept. 2.', time: '09:00', who: 'Dr. Kovács István' }, booked: true, teamsUrl: 'https://teams.microsoft.com/l/meetup-join/19%3ameeting_adaeze01' },
         letter: { fileNumber: 'NJE/2026/CAL/0042', issuedAt: '2026.06.29', programId: 'ibe' },
       } },
+      // A 3-as index az ÚJ sorrendben az interjú: a dokumentum-ellenőrzésen
+      // túljutott, most időpontot kell foglalnia — a matek ezután jön.
       { id: 'PROC-demo2', createdAt: '2026.06.24', step: 3, maxReached: 3, done: false, data: {
+        _stepOrder: STEP_ORDER_VERSION,
         account: { fullName: 'Mehmet Yılmaz', email: 'mehmet.yilmaz@example.com', phone: '+905321234567', country: 'Turkey', birthDate: '2002-09-30' },
         programs: ['cse', 'mech'],
         docs: { school: { fileName: 'iskolai_tanulmanyi_adatok.pdf', status: 'uploaded' }, passport: { fileName: 'utlevel.pdf', status: 'uploaded' }, language: { fileName: 'nyelvvizsga.pdf', status: 'uploaded' }, motivation: { fileName: 'motivacios_level.pdf', status: 'uploaded' } },
@@ -7310,6 +7576,7 @@ const AdmissionsHub = (() => {
         math: { answers: {}, submitted: false },
       } },
       { id: 'PROC-demo3', createdAt: '2026.06.27', step: 1, maxReached: 1, done: false, data: {
+        _stepOrder: STEP_ORDER_VERSION,
         account: { fullName: 'Linh Nguyen', email: 'linh.nguyen@example.com', phone: '+84901234567', country: 'Vietnam', birthDate: '2004-05-08' },
         programs: ['tour', 'ibe'],
         docs: { school: { fileName: 'iskolai_tanulmanyi_adatok.pdf', status: 'uploaded' }, passport: { fileName: 'utlevel.pdf', status: 'uploaded' } },
@@ -7320,7 +7587,7 @@ const AdmissionsHub = (() => {
 
   const AdmissionsHub = ({ user }) => {
     const LS = 'nje_processes_' + ((user && user.email) || 'guest');
-    const loadAll = () => { try { const v = JSON.parse(localStorage.getItem(LS)); return Array.isArray(v) ? v : null; } catch (e) { return null; } };
+    const loadAll = () => { try { const v = JSON.parse(localStorage.getItem(LS)); return Array.isArray(v) ? migrateStepOrderAll(v) : null; } catch (e) { return null; } };
     const [processes, setProcesses] = useState(() => { const s = loadAll(); return Array.isArray(s) ? s.filter(p => !String(p.id || '').startsWith('PROC-demo') && !(p.data && p.data._cancelled)) : []; });
     const [openId, setOpenId] = useState(null);
     const [procsLoading, setProcsLoading] = useState(true);
@@ -7447,8 +7714,16 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
   const [payments, setPayments] = useState<Payment[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [interviewSlots, setInterviewSlots] = useState<InterviewSlot[]>([]);
+  /* II/2 — a 28-as migráció felülete. Ha az RPC nincs meg, `ivCtx` null marad,
+     és a jelentkező a régi, magvetett sávlistát látja (lásd lentebb). */
+  const { ctx: ivCtx } = IV_useContext();
   const [isLoading, setIsLoading] = useState(true);
   const [showVideoInterview, setShowVideoInterview] = useState(false);
+  // Az interjú-foglalás visszajelzései. A szerver kapuja (27_interview_gate.sql)
+  // beszédes magyar hibát ad — azt MUTATJUK, nem nyeljük el a konzolba.
+  const [bookError, setBookError] = useState('');
+  const [bookedSlotId, setBookedSlotId] = useState('');
+  const [bookingSlotId, setBookingSlotId] = useState('');
   const [uploadingDocId, setUploadingDocId] = useState<string | null>(null);
   const [messages, setMessages] = useState([]);
   const [journeyProcs, setJourneyProcs] = useState([]);
@@ -7520,13 +7795,17 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
 
   const journeyKey = 'nje_processes_' + ((user && user.email) || 'guest');
   const messagesKey = 'nje_messages_' + ((user && user.email) || 'guest');
-  const loadProcs = () => { try { const v = JSON.parse(localStorage.getItem(journeyKey)); return Array.isArray(v) ? v.filter(p => !String(p.id || '').startsWith('PROC-demo')) : []; } catch (e) { return []; } };
+  const loadProcs = () => { try { const v = JSON.parse(localStorage.getItem(journeyKey)); return Array.isArray(v) ? migrateStepOrderAll(v.filter(p => !String(p.id || '').startsWith('PROC-demo'))) : []; } catch (e) { return []; } };
   const buildDefaultMessages = (procs) => {
     const out = [];
     procs.forEach(p => {
       const nm = (p.data && p.data.extracted && p.data.extracted.name) || (p.data && p.data.account && p.data.account.fullName) || 'Jelentkező';
       if (p.done) out.push({ id: 'msg-' + p.id, processId: p.id, applicant: nm, sender: 'Felvételi Iroda', subject: 'Feltételes felvételi levél kiállítva', preview: 'A Conditional Acceptance Letter (' + ((p.data.letter || {}).fileNumber || '') + ') elkészült és iktatva lett.', date: (p.data.letter || {}).issuedAt || '2026.06.29', read: false, tone: 'success' });
-      else if ((p.step || 0) >= 4) out.push({ id: 'msg-' + p.id, processId: p.id, applicant: nm, sender: 'Felvételi Iroda', subject: 'Dokumentumok jóváhagyva — szintfelmérő következik', preview: 'A dokumentumellenőrzés sikeres. Kérjük, töltse ki a matematika szintfelmérőt.', date: p.createdAt || '2026.06.24', read: false, tone: 'action' });
+      // A korábbi `p.step >= 4` INDEXRE hivatkozott, ezért a lépéscsere (II/1.1)
+      // után rossz üzenetet küldött volna. Mostantól a lépés AZONOSÍTÓJA dönt.
+      else if (STEP_IDS_V2[Number(p.step) || 0] === 'interview') out.push({ id: 'msg-' + p.id, processId: p.id, applicant: nm, sender: 'Felvételi Iroda', subject: 'Dokumentumok jóváhagyva — interjúfoglalás következik', preview: 'A dokumentumellenőrzés sikeres. Kérjük, foglaljon időpontot a felvételi interjúra.', date: p.createdAt || '2026.06.24', read: false, tone: 'action' });
+      else if (STEP_IDS_V2[Number(p.step) || 0] === 'math') out.push({ id: 'msg-' + p.id, processId: p.id, applicant: nm, sender: 'Felvételi Iroda', subject: 'Interjú lefoglalva — szintfelmérő következik', preview: 'Kérjük, töltse ki a matematika szintfelmérőt.', date: p.createdAt || '2026.06.24', read: false, tone: 'action' });
+      else if (STEP_IDS_V2[Number(p.step) || 0] === 'letter') out.push({ id: 'msg-' + p.id, processId: p.id, applicant: nm, sender: 'Felvételi Iroda', subject: 'A felvételi levél kiállítás alatt', preview: 'A folyamat utolsó lépéséhez ért: a feltételes felvételi levél kiállítása következik.', date: p.createdAt || '2026.06.24', read: false, tone: 'action' });
       else out.push({ id: 'msg-' + p.id, processId: p.id, applicant: nm, sender: 'Felvételi Iroda', subject: 'Hiányzó dokumentum', preview: 'Kérjük, töltse fel a hiányzó dokumentumokat a folyamat folytatásához.', date: p.createdAt || '2026.06.27', read: false, tone: 'warning' });
     });
     out.push({ id: 'msg-welcome', processId: null, applicant: '', sender: 'UniPortal Rendszer', subject: 'Üdvözöljük a felvételi rendszerben', preview: 'Itt nyomon követheti az összes felvételi folyamatát és a kapcsolódó üzeneteket.', date: '2026.06.20', read: true, tone: 'info' });
@@ -7574,12 +7853,21 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
   };
 
   const handleBookInterview = async (slotId: string) => {
-    if (!student) return;
+    if (!student) { setBookError(interviewBookingBlockReason(null)); return; }
+    // Felületi kapu: a gomb amúgy is tiltott, de a billentyűzetes/programozott
+    // hívást is itt fogjuk meg — a szerveroldali kényszer mögötte áll.
+    const blocked = interviewBookingBlockReason(student);
+    if (blocked) { setBookError(blocked); setBookedSlotId(''); return; }
+    setBookingSlotId(slotId); setBookError(''); setBookedSlotId('');
     try {
       const updatedSlot = await api.bookInterviewSlot(slotId, student.id, student.name);
-      setInterviewSlots(interviewSlots.map(s => s.id === slotId ? updatedSlot : s));
+      setInterviewSlots(interviewSlots.map(s => s.id === slotId ? (updatedSlot || { ...s, status: 'Booked' }) : s));
+      setBookedSlotId(slotId);
     } catch (error) {
       console.error('Failed to book interview:', error);
+      setBookError(interviewBookingErrorText(error));
+    } finally {
+      setBookingSlotId('');
     }
   };
 
@@ -8185,7 +8473,10 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
     );
   };
 
-  const renderInterviews = () => (
+  const renderInterviews = () => {
+  // A kapu OKA (II/1.2). null = szabad a foglalás.
+  const gateReason = interviewBookingBlockReason(student);
+  return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
       {showVideoInterview ? (
         <div className="space-y-6">
@@ -8214,9 +8505,42 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
                 <p className="text-sm text-slate-500 mt-1 max-w-[70ch]">Válassz egy számodra megfelelő időpontot a felvételi beszélgetéshez (Teams/Zoom). A felvételi döntés kizárólag ezen az interjún alapul.</p>
               </div>
             </div>
-            <div className="mb-8" />
-            
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4">
+            <div className="mb-6" />
+
+            {/* NEM néma tiltás: ha a kapu zár, itt áll, hogy miért és mi a teendő. */}
+            {gateReason && (
+              <div className="mb-6 bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-start gap-3" role="status">
+                <ICONS.Lock size={18} className="text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-bold text-amber-800">Az időpontfoglalás még nem nyílt meg</p>
+                  <p className="text-xs text-amber-700 mt-1 leading-relaxed">{gateReason}</p>
+                  <p className="text-xs text-amber-700 mt-1 leading-relaxed">A dokumentum-ellenőrzés lezárultáról a Külügyi Iroda értesíti; utána a gombok azonnal aktívvá válnak.</p>
+                </div>
+              </div>
+            )}
+            {bookError && (
+              <div className="mb-6 bg-red-50 border border-red-200 rounded-2xl p-4 flex items-start gap-3" role="alert">
+                <ICONS.AlertTriangle size={18} className="text-red-600 shrink-0 mt-0.5" />
+                <p className="text-xs text-red-700 leading-relaxed">{bookError}</p>
+              </div>
+            )}
+            {bookedSlotId && !bookError && (
+              <div className="mb-6 bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex items-center gap-3" role="status">
+                <ICONS.CheckCircle size={18} className="text-emerald-600 shrink-0" />
+                <p className="text-xs font-bold text-emerald-700">Az időpontot lefoglaltuk. A Teams-linket e-mailben is elküldjük.</p>
+              </div>
+            )}
+
+            {/* II/2 — a ténylegesen szabad sávok a SZERVERRŐL jönnek
+                (interview_free_slots): az elérhetőségből generálva, az
+                ebédszünet, a szabadság és a már kiadott időpontok kivonva.
+                A `gateReason` (27-es kapu) továbbra is elöl áll: amíg a
+                dokumentum-ellenőrzés nincs kész, nincs mit felkínálni. */}
+            {ivCtx && !gateReason && (
+              <IV_ApplicantBooking ctx={ivCtx} onBooked={() => { setBookedSlotId('IV'); setBookError(''); }} />
+            )}
+
+            <div className={'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4 ' + (ivCtx ? 'hidden' : '')}>
               {interviewSlots.filter(s => s.status === 'Available').map((slot) => (
                 <div key={slot.id} className="p-6 border border-slate-100 rounded-2xl hover:border-primary/30 transition-all group">
                   <div className="flex items-center gap-3 mb-4">
@@ -8231,9 +8555,12 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
                   <p className="text-[10px] text-slate-400 font-bold uppercase mb-4">Vizsgáztató: {slot.interviewerName}</p>
                   <button 
                     onClick={() => handleBookInterview(slot.id)}
-                    className="w-full py-2 bg-slate-50 text-slate-600 group-hover:bg-primary group-hover:text-white rounded-xl text-xs font-bold transition-all"
+                    disabled={!!gateReason || bookingSlotId === slot.id}
+                    title={gateReason || 'Időpont lefoglalása'}
+                    aria-disabled={!!gateReason}
+                    className={'w-full py-2 rounded-xl text-xs font-bold transition-all ' + (gateReason ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-slate-50 text-slate-600 group-hover:bg-primary group-hover:text-white')}
                   >
-                    Foglalás
+                    {gateReason ? 'Foglalás zárolva' : (bookingSlotId === slot.id ? 'Foglalás folyamatban…' : 'Foglalás')}
                   </button>
                 </div>
               ))}
@@ -8281,6 +8608,7 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
       )}
     </div>
   );
+  };
 
   const renderMessages = () => {
     const SD = JourneyShared.STEP_DEFS || [];
@@ -11083,6 +11411,332 @@ HU_EN_PHRASES.push(
   [/(\d+)\s*nap múlva lejár/g, 'Ends in $1 day(s)'],
   [/(\d+)\s*nap van hátra/g, '$1 days left'],
   [/(\d+)\s*szemeszter\b/g, '$1 semesters'],
+);
+
+/* --------------------------------------------------------------------------
+   II/1 — a felvételi sorrend, az interjú-kapu és az áthelyezett felkészítő
+   ÚJ feliratai. Angol módban a setupI18n DOM-fordítója ezekből dolgozik;
+   ami nem szerepel itt, az magyarul maradna a felületen.
+   -------------------------------------------------------------------------- */
+Object.assign(HU_EN, {
+  // --- interjú-foglalási kapu (II/1.2) ---
+  'Az időpontfoglalás még nem nyílt meg':'Booking is not open yet',
+  'A foglalás zárolva':'Booking is locked',
+  'Foglalás zárolva':'Booking locked',
+  'Foglalás folyamatban…':'Booking…',
+  'Időpont lefoglalása':'Book this slot',
+  'Foglalás megerősítése':'Confirm booking',
+  'A dokumentum-ellenőrzés lezárultáról a Külügyi Iroda értesíti; utána a gombok azonnal aktívvá válnak.':'The International Office will notify you when the document check is complete; the buttons become active immediately afterwards.',
+  'A felvételi státusz a Jelentkezők nézetben állítható „Dokumentumok ellenőrizve” értékre.':'The admission status can be set to "Documents checked" in the Applicants view.',
+  'Az időpontot lefoglaltuk. A Teams-linket e-mailben is elküldjük.':'The slot is booked. We will also email you the Teams link.',
+  'Az időpontfoglaláshoz előbb ki kell választani a jelentkezőt.':'Select the applicant first to book a slot.',
+  'Az időpontfoglalás nem sikerült. Kérjük, próbálja újra, vagy forduljon a Külügyi Irodához.':'Booking failed. Please try again or contact the International Office.',
+  'A dokumentum-ellenőrzés lezárult, ezért nyílt meg az időpontfoglalás. A matematika szintfelmérő az interjú után következik.':'The document check is complete, which is why booking is now open. The mathematics placement test follows the interview.',
+  // --- lépéssorrend (II/1.1): a folyamat-üzenetek ---
+  'Dokumentumok jóváhagyva — interjúfoglalás következik':'Documents approved — the interview booking is next',
+  'A dokumentumellenőrzés sikeres. Kérjük, foglaljon időpontot a felvételi interjúra.':'The document check was successful. Please book a slot for the admission interview.',
+  'Interjú lefoglalva — szintfelmérő következik':'Interview booked — the placement test is next',
+  'Kérjük, töltse ki a matematika szintfelmérőt.':'Please complete the mathematics placement test.',
+  'A felvételi levél kiállítás alatt':'The acceptance letter is being issued',
+  'A folyamat utolsó lépéséhez ért: a feltételes felvételi levél kiállítása következik.':'You have reached the last step: the conditional acceptance letter is issued next.',
+  // --- áthelyezett interjú-felkészítő (II/1.3) ---
+  'Időpontfoglalás':'Slot booking',
+  'Felvételi Interjú Felkészítő':'Admission interview preparation',
+  'Ez a modul segít a jelentkezőknek felkészülni a felvételi beszélgetésre. A rendszer rögzíti a válaszokat, és AI vagy mentor segítségével pontozza azokat.':'This module helps applicants prepare for the admission interview. The system records the answers and scores them with AI or a mentor.',
+  'Mentori Tipp:':'Mentor tip:',
+  'Miért pont ezt az egyetemet választotta?':'Why did you choose this university?',
+  'Hogyan fogja finanszírozni a tanulmányait?':'How will you finance your studies?',
+  'Mik a tervei a diploma megszerzése után?':'What are your plans after graduation?',
+  'Milyen szakmai tapasztalata van a választott területen?':'What professional experience do you have in the chosen field?',
+});
+/* A kapu indoklása a jelentkező STÁTUSZÁT is tartalmazza, ezért egyetlen
+   szótári kulcsként nem fogható meg — mintával fordítjuk. */
+HU_EN_PHRASES.push(
+  [/Interjú-időpontot csak a dokumentum-ellenőrzésen túljutott jelentkező foglalhat\./g, 'Only an applicant who has passed the document check can book an interview slot.'],
+  [/Jelenlegi státusz: /g, 'Current status: '],
+  [/a foglaláshoz szükséges: /g, 'required for booking: '],
+  [/ \(nem foglalhat\)/g, ' (cannot book)'],
+);
+
+/* --------------------------------------------------------------------------
+   II/3 — az ÜGYNÖKSÉGI PORTÁL új feliratai (features/agency.jsx + AgentPortal).
+   Külön Object.assign hívásban, hogy a párhuzamos i18n-munkával ne ütközzön.
+   Ami nem szerepel itt, az angol módban magyarul maradna a felületen.
+   -------------------------------------------------------------------------- */
+Object.assign(HU_EN, {
+  // --- fülek és fejlécek ---
+  'Jutalék és számlázás':'Commission & invoicing',
+  'Ügynökségi regisztrációk':'Agency registrations',
+  'Ügynökségi dokumentumok':'Agency documents',
+  'Ügynökségek Kezelése':'Manage agencies',
+  'Ügynökség':'Agency',
+  'Minden ügynökség':'All agencies',
+  'Nincs ügynökség kiválasztva.':'No agency selected.',
+  'Válasszon ügynökséget.':'Select an agency.',
+  'Előbb válasszon ügynökséget.':'Select an agency first.',
+  // --- 1./7. tétel: regisztráció elbírálása ---
+  'Elbírálásra vár':'Awaiting decision',
+  'Jóváhagyva':'Approved',
+  'Elutasítva':'Rejected',
+  'Mind':'All',
+  'Önregisztráció':'Self-registered',
+  'Döntés meghozatala':'Make a decision',
+  'Elfogadás':'Accept',
+  'Elutasítás':'Reject',
+  'Jutalék kulcs (%) — jóváhagyáskor':'Commission rate (%) — on approval',
+  'Indoklás — elutasításhoz kötelező':'Reason — required to reject',
+  'Miért utasítja el?':'Why are you rejecting it?',
+  'Az elutasításhoz indoklás kell.':'A reason is required to reject.',
+  'A döntés nem sikerült.':'The decision failed.',
+  'Nincs ilyen állapotú ügynökség':'No agency in this state',
+  'Az önregisztrált ügynökségek automatikusan „elbírálásra vár” állapotban érkeznek ide.':'Self-registered agencies arrive here automatically in the "awaiting decision" state.',
+  'Az önregisztrált ügynökségek itt jelennek meg, elbírálásra várva. A jóváhagyás a hozzá tartozó ügynöki fiókot is aktiválja, az elutasítás pedig indoklással és naplózva történik.':'Self-registered agencies appear here awaiting a decision. Approval also activates the linked agent account; rejection requires a reason and is logged.',
+  'Ehhez a nézethez nincs jogosultsága':'You do not have access to this view',
+  'Ügynökségi regisztrációról SUPERADMIN vagy ADMIN dönthet.':'Only a SUPERADMIN or ADMIN can decide on an agency registration.',
+  'Jelentkezés ideje':'Requested at',
+  'Kapcsolattartó':'Contact person',
+  'Jutalék kulcs':'Commission rate',
+  // --- 6. tétel: a két új adatlap-mező ---
+  'Származási ország':'Country of origin',
+  'Toborzási országok':'Countries of recruitment',
+  'Származás:':'Origin:',
+  'Toborzás:':'Recruitment:',
+  'nincs megadva':'not provided',
+  'Még nincs megadva ország':'No country added yet',
+  'Ország, majd Enter':'Country, then Enter',
+  'Több ország is megadható — Enter vagy vessző zárja le a beírt nevet.':'You can add several countries — Enter or a comma commits the name.',
+  'Pl. Nigéria':'e.g. Nigeria',
+  // --- 4. tétel: beiratkozás és időszak ---
+  'Beiratkozási időszak':'Enrolment period',
+  'Beiratkozás lezárva':'Enrolment closed',
+  'Beiratkozás nyitva':'Enrolment open',
+  'Beiratkozás lezárása':'Close enrolment',
+  'Időszak újranyitása':'Reopen period',
+  'Nincs időszak':'No period',
+  'Beiratkozás ténye':'Enrolment recorded',
+  'Beiratkozás dátuma':'Date of enrolment',
+  'Beiratkozás rögzítése':'Record enrolment',
+  'Beiratkozott':'Enrolled',
+  'Visszavonás':'Undo',
+  'Elszámolható beiratkozott hallgatók':'Enrolled students eligible for commission',
+  'Elszámolható':'Eligible',
+  'Számlázva':'Invoiced',
+  'Még nem számlázott':'Not yet invoiced',
+  'Nincs elszámolható beiratkozott hallgató':'No enrolled student is eligible',
+  'Csak azok a hallgatók szerepelnek, akiknél az ügyintéző rögzítette a beiratkozás tényét, a felvételi állapotuk „Felvéve”, és a beiratkozás dátuma az időszakba esik.':'Only students whose enrolment an officer has recorded, whose admission status is "Admitted", and whose enrolment date falls inside the period.',
+  'A jutalék alapja a beiratkozás ténye. Amíg az ügyintéző nem rögzíti, a hallgató nem jelenik meg itt.':'Commission is based on the fact of enrolment. Until an officer records it, the student does not appear here.',
+  'A jutalék alapja. Amíg nincs rögzítve, a hallgató egyetlen jutaléklistában sem szerepel.':'The basis of the commission. Until it is recorded, the student appears on no commission list.',
+  'Még nem iratkozott be. A beiratkozás tényét felvételi ügyintéző rögzíti.':'Not enrolled yet. An admissions officer records the fact of enrolment.',
+  'A beiratkozás rögzítése nem sikerült.':'Recording the enrolment failed.',
+  'Év közben jutalék nem igényelhető. A számlaigénylés csak azután küldhető ki, hogy az admin lezárta a beiratkozási időszakot — ezt a szerver is kikényszeríti.':'Commission cannot be claimed mid-year. An invoice request can only go out after an administrator has closed the enrolment period — the server enforces this too.',
+  'A beiratkozási időszak lezárva. A jutalék innentől kiküldhető.':'The enrolment period is closed. Commission can now be issued.',
+  'A beiratkozási időszak újra nyitva. Jutalék innentől nem küldhető ki.':'The enrolment period is open again. Commission can no longer be issued.',
+  'Az időszak állapota nem változott.':'The period state did not change.',
+  'Előbb le kell zárni a beiratkozási időszakot.':'The enrolment period must be closed first.',
+  'A jutalék kiküldése nem sikerült.':'Issuing the commission failed.',
+  'Számla igénylése az ügynökségtől':'Request an invoice from the agency',
+  'A kiküldés pillanatképet készít a tandíjból és a jutalékkulcsból, majd felszólítja az ügynökséget a saját számlája csatolására.':'Issuing takes a snapshot of the tuition fee and the commission rate, then asks the agency to attach its own invoice.',
+  'A számlaigénylés kiküldéséhez válasszon egy konkrét ügynökséget.':'Select a specific agency to issue an invoice request.',
+  // --- 3. tétel: számlázási folyamat ---
+  'Számlázási folyamat':'Invoicing workflow',
+  'Az admin számlát kér · az ügynökség csatolja a saját számláját · a pénzügy elfogadja, visszaküldi vagy kifizetettre állítja. Kifizetést igényelni nem lehet.':'The administrator requests an invoice · the agency attaches its own invoice · finance accepts it, sends it back, or marks it paid. Payouts cannot be requested.',
+  'Nincs számlaigénylés':'No invoice request',
+  'A folyamat az admin oldaláról indul, a beiratkozási időszak lezárása után.':'The workflow starts on the administrator side, after the enrolment period is closed.',
+  'Számla igényelve':'Invoice requested',
+  'Számla beérkezett':'Invoice received',
+  'Elfogadva':'Accepted',
+  'Visszaküldve':'Sent back',
+  'Kifizetve':'Paid',
+  'Számla csatolása':'Attach invoice',
+  'Számla cseréje':'Replace invoice',
+  'Számla beküldése':'Submit invoice',
+  'Számla elfogadása':'Accept invoice',
+  'Számlaszám':'Invoice number',
+  'Számla kelte':'Invoice date',
+  'Számla fájlja (PDF, max. 20 MB)':'Invoice file (PDF, max 20 MB)',
+  'Beküldött számla megnyitása':'Open the submitted invoice',
+  'A számlaszám kötelező.':'The invoice number is required.',
+  'Töltse fel a számla fájlját.':'Upload the invoice file.',
+  'A számla csatolása nem sikerült.':'Attaching the invoice failed.',
+  'Visszaküldés':'Send back',
+  'Visszaküldés indoklással':'Send back with a reason',
+  'Miért küldi vissza? (kötelező)':'Why are you sending it back? (required)',
+  'Kifizetettre állítás':'Mark as paid',
+  'Tételek megtekintése':'Show items',
+  'Tételek elrejtése':'Hide items',
+  'Nincs tétel.':'No items.',
+  'A jutaléktételek nem tölthetők be.':'The commission items cannot be loaded.',
+  'A számlázási adatok betöltése nem sikerült.':'Loading the invoicing data failed.',
+  'Az előnézet nem tölthető be.':'The preview cannot be loaded.',
+  // --- 5. tétel: ügynökségi dokumentumtár ---
+  'Dokumentum csatolása':'Attach a document',
+  'Szerződés, meghatalmazás és egyéb okirat az ügynökséghez csatolva.':'Contract, power of attorney and other records attached to the agency.',
+  'Nincs csatolt dokumentum':'No document attached',
+  'A szerződés és a meghatalmazás itt tárolható, az ügynökséghez kötve.':'The contract and the power of attorney can be stored here, bound to the agency.',
+  'Szerződés':'Contract',
+  'Meghatalmazás':'Power of attorney',
+  'Cégkivonat / igazolás':'Company extract / certificate',
+  'Számla':'Invoice',
+  'Egyéb':'Other',
+  'Megnevezés':'Title',
+  'Pl. Együttműködési szerződés 2024':'e.g. Cooperation agreement 2024',
+  'Érvényes ettől':'Valid from',
+  'Érvényes eddig':'Valid until',
+  'Fájl (max. 20 MB)':'File (max 20 MB)',
+  'A megnevezés kötelező.':'The title is required.',
+  'Válasszon fájlt.':'Choose a file.',
+  'A feltöltés nem sikerült.':'The upload failed.',
+  'A törlés nem sikerült.':'The deletion failed.',
+  'A dokumentumok betöltése nem sikerült.':'Loading the documents failed.',
+  'A fájl nagyobb 20 MB-nál.':'The file is larger than 20 MB.',
+  'Feltöltés…':'Uploading…',
+  'Letöltés':'Download',
+  'Megnyitás':'Open',
+  'Típus':'Type',
+  // --- közös ---
+  'A hivatkozott sor nem létezik (ügynökség vagy időszak).':'The referenced row does not exist (agency or period).',
+  'A munkamenet lejárt. Jelentkezzen be újra.':'Your session has expired. Please sign in again.',
+  'Ez a tétel már létezik.':'This item already exists.',
+  'Nincs adatbázis-kapcsolat.':'No database connection.',
+  'Nincs kapcsolat a kiszolgálóval.':'No connection to the server.',
+  'Ehhez a művelethez nincs jogosultsága.':'You are not authorised for this action.',
+  'A modul táblái hiányoznak — a 29_agency.sql migráció még nem futott le.':'The module tables are missing — migration 29_agency.sql has not run yet.',
+  'A modul függvényei hiányoznak — a 29_agency.sql migráció még nem futott le.':'The module functions are missing — migration 29_agency.sql has not run yet.',
+  'A modul még nem érhető el — a 29_agency.sql migráció nem futott le az adatbázison.':'The module is not available yet — migration 29_agency.sql has not run on the database.',
+  'Ismeretlen feltöltő — jelentkezzen be újra.':'Unknown uploader — please sign in again.',
+  'Betöltés…':'Loading…',
+  'Mentés…':'Saving…',
+  'Megjegyzés':'Note',
+  'Hallgató':'Student',
+  'Tandíj':'Tuition fee',
+  'Kulcs':'Rate',
+  'Jutalék':'Commission',
+  'Szak':'Programme',
+});
+/* Az összegző sorok számot hordoznak, ezért mintával fordítjuk. */
+HU_EN_PHRASES.push(
+  [/(\d+)\s*hallgató · összesen/g, '$1 students · total'],
+  [/(\d+)\s*beiratkozott hallgató/g, '$1 enrolled student(s)'],
+  [/(\d+)\s*hallgató · igényelve/g, '$1 students · requested'],
+  [/Számlaigénylés kiküldve:/g, 'Invoice request issued:'],
+  [/Beiratkozott:/g, 'Enrolled:'],
+  [/Számlaszám:/g, 'Invoice number:'],
+  [/Elutasítva:/g, 'Rejected:'],
+  [/Visszaküldve:/g, 'Sent back:'],
+  [/Kifizetve:/g, 'Paid:'],
+  [/Érvényes:/g, 'Valid:'],
+  [/Döntés:/g, 'Decided:'],
+  [/feltöltve /g, 'uploaded '],
+  [/határidő /g, 'due '],
+  [/kelt /g, 'dated '],
+);
+
+/* --------------------------------------------------------------------------
+   II/2 — az interjú-elérhetőség, a 15 perces idősávok és a kizárások
+   ÚJ feliratai (features/interview.jsx + 28_interview_availability.sql).
+   A setupI18n DOM-fordítója ebből dolgozik: ami nem szerepel itt, az angol
+   módban is magyarul maradna.
+   -------------------------------------------------------------------------- */
+Object.assign(HU_EN, {
+  // --- fülek és fejlécek ---
+  'Szabad időpontok':'Available slots',
+  'Elérhetőség':'Availability',
+  'Heti elérhetőség':'Weekly availability',
+  'Ismétlődő sávok, amelyekből a foglalható időpontok generálódnak. Ami nincs itt, azt nem lehet lefoglalni.':'Recurring blocks the bookable slots are generated from. Anything not listed here cannot be booked.',
+  'Kiadott időpontok':'Booked slots',
+  'Minden lefoglalt interjú, a régi és az újonnan generált sávokból egyaránt.':'Every booked interview, from both the old and the newly generated slots.',
+  'Még nincs kiadott időpont':'No slots have been booked yet',
+  'Foglalt':'Booked',
+  // --- heti elérhetőség ---
+  'Új sáv':'New block',
+  'Nincs felvett elérhetőség':'No availability set',
+  'Amíg nincs egyetlen sáv sem, a jelentkezők nem látnak foglalható időpontot.':'While there is not a single block, applicants see no bookable slot.',
+  'Érvényes: visszavonásig':'Valid: until revoked',
+  'Elérhetőségi sáv szerkesztése':'Edit availability block',
+  'Új elérhetőségi sáv':'New availability block',
+  'A sávot a rendszer a beállított idősáv-hosszra bontja fel.':'The block is split into slots of the configured length.',
+  'Nap':'Day',
+  'Kezdés':'Start',
+  'Befejezés':'End',
+  'Érvényes ettől':'Valid from',
+  'Érvényes eddig':'Valid until',
+  'Üresen hagyva: azonnal':'Leave empty for: immediately',
+  'Üresen hagyva: visszavonásig':'Leave empty for: until revoked',
+  'pl. csak online':'e.g. online only',
+  'Minden nap':'Every day',
+  'Hétfő':'Monday','Kedd':'Tuesday','Szerda':'Wednesday','Csütörtök':'Thursday',
+  'Péntek':'Friday','Szombat':'Saturday','Vasárnap':'Sunday',
+  // --- ismétlődő kizárás (ebédszünet) ---
+  'Ismétlődő kizárás':'Recurring exclusion',
+  'Az ebédszünet és minden más visszatérő szünet. A kizárt időre a szerver sem enged foglalni, nem csak a felület rejti el.':'The lunch break and every other recurring pause. The server itself refuses bookings in excluded time — the interface does not merely hide them.',
+  'Új kizárás':'New exclusion',
+  'Nincs ismétlődő kizárás':'No recurring exclusion',
+  'Az ebédszünetet a rendszergazda veszi fel, és mindenkire vonatkozik.':'The lunch break is set by the administrator and applies to everyone.',
+  'Kizárt idősáv':'Excluded slot',
+  'Mindenkire':'Everyone',
+  'Mindenkire vonatkozik':'Applies to everyone',
+  'Kizárás szerkesztése':'Edit exclusion',
+  'Új ismétlődő kizárás':'New recurring exclusion',
+  'Az itt megadott időre senki nem tud interjút foglalni.':'Nobody can book an interview for the time set here.',
+  // 'Megnevezés' SZÁNDÉKOSAN kimarad: a szótárban már szerepel ('Title'),
+  // és egy második, eltérő fordítás a másik helyen írná felül a feliratot.
+  'Ebédszünet':'Lunch break',
+  'Üresen hagyva a hét minden napjára vonatkozik.':'Left empty it applies to every day of the week.',
+  // --- szabadság ---
+  'Szabadság és távollét':'Leave and absence',
+  'Egyszeri kizárás dátumtartománnyal. Az indoklást csak te és a rendszergazda látja — a jelentkező nem.':'One-off exclusion with a date range. Only you and the administrator see the reason — applicants never do.',
+  'Új távollét':'New absence',
+  'Nincs bejelentett távollét':'No absence recorded',
+  'Szabadság, kiküldetés vagy betegség idejére vedd fel a tartományt.':'Record the range for leave, a business trip or sickness.',
+  'Nincs megadva indoklás':'No reason given',
+  'Távollét szerkesztése':'Edit absence',
+  'A tartományba eső időpontokra nem lehet interjút foglalni.':'Slots inside the range cannot be booked for an interview.',
+  'Kezdő dátum':'Start date',
+  'Kezdés időpontja':'Start time',
+  'Záró dátum':'End date',
+  'Befejezés időpontja':'End time',
+  'Indoklás':'Reason',
+  'Belső mező — a jelentkezők nem látják.':'Internal field — applicants do not see it.',
+  'pl. Szabadság':'e.g. Annual leave',
+  'Szabadság':'Annual leave',
+  // --- beállítások és névsor ---
+  'Foglalási beállítások':'Booking settings',
+  'Az idősáv hossza itt állítható — nincs hozzá se migráció, se telepítés.':'The slot length is set here — no migration and no deployment needed.',
+  'A beállítás elmentve. A már kiadott időpontok hossza nem változik.':'Setting saved. The length of already booked slots does not change.',
+  'Idősáv hossza (perc)':'Slot length (minutes)',
+  'Időzóna':'Time zone',
+  'Előre foglalható napok száma':'Days bookable in advance',
+  'Legkorábbi foglalás mostantól (óra)':'Earliest booking from now (hours)',
+  'Interjúztatók':'Interviewers',
+  'Aki itt aktív, annak a naptárából generálódnak a foglalható időpontok.':'Bookable slots are generated from the calendars of those active here.',
+  'Inaktiválás':'Deactivate',
+  'Aktiválás':'Activate',
+  'Munkatárs hozzáadása':'Add a colleague',
+  'Hozzáadás':'Add',
+  'Kinek a naptára':'Whose calendar',
+  'Nincs saját interjú-naptárad':'You have no interview calendar',
+  'Az elérhetőségi naptárat az interjúztatók és a rendszergazda szerkeszti. Ha interjúztatnál, szólj a rendszergazdának.':'The availability calendar is edited by the interviewers and the administrator. If you would like to interview, ask the administrator.',
+  'Alapértelmezett munkarend':'Default working hours',
+  // --- foglalás ---
+  'Mindegy, aki ráér':'Anyone who is free',
+  'Interjúztató':'Interviewer',
+  'Foglalás…':'Booking…',
+  'Sikeres foglalás! Az időpontot rögzítettük, a Teams-link elkészült.':'Booked successfully! The slot is recorded and the Teams link is ready.',
+  'Az interjúztatók még nem adtak meg elérhetőséget, vagy minden sáv foglalt. Nézz vissza később.':'The interviewers have not set any availability yet, or every slot is taken. Please check back later.',
+  'Interjú-időpontot csak a dokumentum-ellenőrzésen túljutott jelentkező kaphat.':'Only an applicant past document verification can be given an interview slot.',
+  // --- hibaüzenetek, amiket a felület a szervertől kap ---
+  'Ez a funkció még nincs élesítve ebben a környezetben (28-as migráció).':'This feature is not live in this environment yet (migration 28).',
+  'Nincs adatbázis-kapcsolat.':'No database connection.',
+  'Ismeretlen hiba.':'Unknown error.',
+});
+/* Számot hordozó feliratok — ezek egyetlen szövegcsomópontként állnak elő
+   (lásd features/interview.jsx: 'Idősáv: ' + n + ' perc'), így a minta rájuk fut. */
+HU_EN_PHRASES.push(
+  [/Idősáv: (\d+) perc/g, 'Slot: $1 min'],
+  [/Időzóna: /g, 'Time zone: '],
+  [/Előre foglalható: (\d+) nap/g, 'Bookable up to $1 days ahead'],
+  [/(\d+)\s*szabad időpont\b/g, '$1 free slot(s)'],
+  [/(\d+)\s*szabad sáv\b/g, '$1 free slot(s)'],
 );
 
 (function setupI18n(){

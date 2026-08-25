@@ -36,11 +36,17 @@ const FEATURE_FILES = [
   'features/programs.jsx',
   'features/assistant.jsx',
   'features/registrations.jsx',
+  // Interjú-elérhetőség és 15 perces idősávok (28_interview_availability.sql).
+  // A data-layer UTÁN kell állnia: onnan veszi a UModal/UField/U_input atomokat.
+  'features/interview.jsx',
   // Kollégiumi modul (26_dorm.sql). A SORREND KÖTÖTT: a dorm.jsx viszi a közös
   // réteget (DORM_rpc, DORM_api, DORM_Tabs, DORM_Stat, DORM_Empty, DORM_Hidden)
   // és a Kollégium nézetet, a dorm-views.jsx pedig erre épül.
   'features/dorm.jsx',
   'features/dorm-views.jsx',
+  // Ugynoksegi portal (29_agency.sql). Az AgentPortal a render-fuggvenyeibol
+  // hivatkozik ra, tehat a modul-kiertekeles sorrendje nem szamit.
+  'features/agency.jsx',
 ];
 
 // `motion` is only referenced by the shim at the top of app.jsx, which renders

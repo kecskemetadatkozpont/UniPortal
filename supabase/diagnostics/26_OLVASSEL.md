@@ -6,6 +6,33 @@ mit mértünk meg ténylegesen.
 
 ---
 
+## ⚠️ KÖTELEZŐ DASHBOARD-BEÁLLÍTÁS — az SQL önmagában nem elég
+
+**Supabase → Project Settings → API → „Data API" → Exposed schemas**
+
+Vedd fel a `dorm` sémát a meglévők mellé:
+
+```
+public, graphql_public, dorm
+```
+
+**Miért kell.** A `dorm` séma — az `echo`-val ELLENTÉTBEN — szándékosan kitett.
+Itt nem anonimitást védünk, hanem hozzáférést szabályozunk: az `anon` szerepkör
+nulla jogot kap, az `authenticated` pedig csak azt látja, amit az RLS és a
+hatókörös grant enged. A felület ezért közvetlenül olvassa a sémát
+(`window.sb.schema('dorm')`), és csak az írási/összetett műveletekhez hív RPC-t.
+
+**Ha ez a beállítás hiányzik**, a felület minden kollégiumi képernyőn ezt írja:
+
+```
+Invalid schema: dorm
+```
+
+**Az `echo` séma MARADJON KINT a listáról.** Ott a rejtés maga a védelem — a
+válaszhalmaz a publikálható kulccsal sem lehet címezhető.
+
+---
+
 ## 1. Mit futtass
 
 ```bash

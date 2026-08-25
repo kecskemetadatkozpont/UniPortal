@@ -485,6 +485,28 @@
           <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Full name</label>
           <input id="regName" type="text" required placeholder="e.g. Anna Kovács" class="w-full bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-300 transition-all" />
         </div>
+        <!-- Ügynökségi önregisztráció (29_agency.sql, 1./7. tétel).
+             Ezek a mezők a signUp metaadatába kerülnek, és a handle_new_user()
+             trigger ebből nyitja meg a FÜGGŐBEN LÉVŐ agencies sort — enélkül
+             az önregisztrált ügynökség nem jelenik meg az admin listájában. -->
+        <div id="agencyFields" class="hidden space-y-4 rounded-2xl border border-primary-100 bg-primary-50/40 p-4">
+          <p class="text-[11px] font-semibold text-primary-700 leading-relaxed">
+            Your agency is created in a pending state. An administrator reviews it before you can see any applicant.
+          </p>
+          <div>
+            <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Agency name</label>
+            <input id="regAgencyName" type="text" placeholder="e.g. Global Study Ltd." class="w-full bg-white border border-slate-100 rounded-2xl px-4 py-3.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-300 transition-all" />
+          </div>
+          <div>
+            <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Country of origin</label>
+            <input id="regAgencyCountry" type="text" placeholder="e.g. Nigeria" class="w-full bg-white border border-slate-100 rounded-2xl px-4 py-3.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-300 transition-all" />
+          </div>
+          <div>
+            <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Countries of recruitment</label>
+            <input id="regAgencyCountries" type="text" placeholder="e.g. Nigeria, Ghana, Kenya" class="w-full bg-white border border-slate-100 rounded-2xl px-4 py-3.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-300 transition-all" />
+            <p class="text-[10px] text-slate-400 mt-1.5">Separate several countries with commas.</p>
+          </div>
+        </div>
         <div>
           <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Email address</label>
           <input id="regEmail" type="email" required placeholder="e.g. anna@example.com" class="w-full bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-300 transition-all" />
@@ -632,6 +654,9 @@
         b.className = 'persona-btn py-2.5 rounded-xl text-sm font-bold border transition-all ' +
           (on ? 'bg-primary-50 border-primary-300 text-primary-700' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300');
       });
+      // Az ügynökségi blokk csak az 'agent' személynél látszik.
+      const af = document.getElementById('agencyFields');
+      if (af) af.classList.toggle('hidden', p !== 'agent');
     }
     document.querySelectorAll('.persona-btn').forEach(b => b.addEventListener('click', () => setPersona(b.dataset.persona)));
     async function doLogin(e){
@@ -659,8 +684,19 @@
       const role = persona === 'agent' ? 'AGENT' : 'STUDENT';
       const btn = document.getElementById('regBtn');
       btn.disabled = true; const label = btn.textContent; btn.textContent = 'Creating…';
+      // Az ügynökségi mezők a signUp metaadatába mennek; a handle_new_user()
+      // trigger (29_agency.sql, 6. szakasz) ebből nyitja a pending agencies sort.
+      const meta = { name, role };
+      if (role === 'AGENT') {
+        const agName = (document.getElementById('regAgencyName') || {}).value || '';
+        const agCountry = (document.getElementById('regAgencyCountry') || {}).value || '';
+        const agCountries = (document.getElementById('regAgencyCountries') || {}).value || '';
+        meta.agencyName = agName.trim() || name;
+        meta.agencyCountry = agCountry.trim();
+        meta.agencyCountries = agCountries.split(',').map(s => s.trim()).filter(Boolean);
+      }
       try {
-        const { data, error } = await window.sb.auth.signUp({ email, password, options: { data: { name, role }, emailRedirectTo: new URL('app.html', window.location.href).href } });
+        const { data, error } = await window.sb.auth.signUp({ email, password, options: { data: meta, emailRedirectTo: new URL('app.html', window.location.href).href } });
         if (error) { showErr('regError', error.message || 'Sign-up failed.'); btn.disabled = false; btn.textContent = label; return false; }
         document.getElementById('regSuccessName').textContent = name.split(' ')[0];
         document.getElementById('formRegister').classList.add('hidden');

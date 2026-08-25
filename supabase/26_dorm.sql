@@ -103,7 +103,12 @@
 -- érintetlen (párhuzamos reszponzív munka folyik rajtuk).
 -- ============================================================================
 
-\set ON_ERROR_STOP on
+-- MEGJEGYZÉS: itt korábban egy \set ON_ERROR_STOP on sor állt. Az psql
+-- meta-parancs, amit a Supabase SQL Editor NEM ismer ('syntax error at or
+-- near "\"'). Nincs is rá szükség: az egész migráció EGYETLEN tranzakcióban
+-- fut (begin ... commit), tehát bármelyik utasítás hibája a TELJES migrációt
+-- visszagörgeti — félkész séma nem maradhat.
+-- Parancssorból futtatva a védelmet a psql -v ON_ERROR_STOP=1 kapcsoló adja.
 
 begin;
 
