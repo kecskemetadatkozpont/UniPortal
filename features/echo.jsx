@@ -290,6 +290,18 @@ const ECHO_api = {
   },
 
   campaigns:  ()          => ECHO_rpc('echo_campaigns'),
+  campaignUpdate: (id, p) => ECHO_rpc('echo_campaign_update', {
+    p_campaign: id,
+    p_nev: p.nev ?? null, p_name_en: p.nameEn ?? null, p_term: p.term ?? null,
+    p_template_version: p.ver ?? null,
+    p_opens_at: p.opensAt ?? null, p_closes_at: p.closesAt ?? null,
+    p_goals_open_at: p.goalsOpenAt ?? null, p_goals_close_at: p.goalsCloseAt ?? null,
+    p_clear: (p.clear && p.clear.length) ? p.clear : null }),
+  audience:       (id)          => ECHO_rpc('echo_campaign_audience', { p_campaign: id }),
+  audienceSet:    (id, items)   => ECHO_rpc('echo_campaign_audience_set',
+                                    { p_campaign: id, p_items: items }),
+  audienceOptions:(id, kind, q) => ECHO_rpc('echo_audience_options',
+                                    { p_campaign: id, p_kind: kind, p_q: q || null, p_limit: 60 }),
   rate:       (campaign)  => ECHO_rpc('echo_rate', { p_campaign: campaign }),
   rebuildEligibility: (campaign) => ECHO_rpc('echo_rebuild_eligibility', { p_campaign: campaign }),
 
@@ -2260,7 +2272,9 @@ function ECHO_CampaignCreate({ open, onClose, onDone, campaigns }) {
         });
         arr.sort((a, b) => (a.state === 'live' ? -1 : 1) - (b.state === 'live' ? -1 : 1));
         setTpls(arr);
-        if (arr.length && !ver) setVer(arr[0].id);
+        // Szandekosan NEM valasztunk automatikusan: a kerdoiv utolag is
+        // megadhato, es a csendben elovalasztott sablon rosszabb, mint a
+        // kimondottan ures allapot.
       })
       .catch(e => { setTpls([]); setErr(ECHO_msg(e)); });
   }, [open]);
@@ -2269,17 +2283,23 @@ function ECHO_CampaignCreate({ open, onClose, onDone, campaigns }) {
     setBusy(true); setErr('');
     try {
       const r = await ECHO_api.campaignCreate(
-        nev.trim(), term.trim(), ver,
-        ECHO_fromLocalInput(opensAt), ECHO_fromLocalInput(closesAt));
+        nev.trim(), term.trim(), ver || null,
+        opensAt  ? ECHO_fromLocalInput(opensAt)  : null,
+        closesAt ? ECHO_fromLocalInput(closesAt) : null);
       onDone(r);
-      setNev(''); setTerm(''); setOpensAt(''); setClosesAt('');
+      setNev(''); setTerm(''); setOpensAt(''); setClosesAt(''); setVer('');
     } catch (e) { setErr(ECHO_msg(e)); }
     finally { setBusy(false); }
   };
 
   const sel = (tpls || []).find(t => t.id === ver);
-  const ok  = nev.trim() && term.trim() && ver && opensAt && closesAt
-              && ECHO_fromLocalInput(closesAt) > ECHO_fromLocalInput(opensAt);
+  // Vazkampanyhoz eleg a nev es a felev. Az ablak viszont csak EGYBEN
+  // ertelmes: fel ablakot a szerver is elutasit (ECHO_HALF_WINDOW), de jobb
+  // itt megfogni. A kerdoiv teljesen szabadon hagyhato.
+  const felAblak   = (!!opensAt) !== (!!closesAt);
+  const rosszAblak = opensAt && closesAt
+                     && ECHO_fromLocalInput(closesAt) <= ECHO_fromLocalInput(opensAt);
+  const ok  = nev.trim() && term.trim() && !felAblak && !rosszAblak;
 
   return (
     <UModal open={open} onClose={onClose} max="max-w-2xl"
@@ -2320,6 +2340,7 @@ function ECHO_CampaignCreate({ open, onClose, onDone, campaigns }) {
             </div>
           ) : (
             <select className={U_input} value={ver} onChange={e => setVer(e.target.value)}>
+              <option value="">Később adom meg — most csak a kampány váza jöjjön létre</option>
               {tpls.map(t => (
                 <option key={t.id} value={t.id}>
                   {t.label} · {t.state === 'live' ? 'élesített' : 'jóváhagyott'} · {t.kerdesek} kérdés
@@ -2466,11 +2487,360 @@ function ECHO_TransitionConfirm({ step, campaign, busy, onCancel, onConfirm }) {
   );
 }
 
+/* --- Célközönség-választó ------------------------------------------------
+   Egy típus (kurzus / csoport / személy) kiválasztott tételei + kereső. Az
+   ajánlatokat a szerver adja (echo_audience_options), mert a kurzuslista és a
+   hallgatói névsor is túl nagy ahhoz, hogy a kliensbe töltsük. */
+function ECHO_AudiencePicker({ campaignId, kind, cimke, ikon, sug, valasztott, onValt, ro }) {
+  const [q, setQ]         = useState('');
+  const [opts, setOpts]   = useState(null);
+  const [nyit, setNyit]   = useState(false);
+  const [err, setErr]     = useState('');
+
+  useEffect(() => {
+    if (!nyit || ro) return;
+    let el = true;
+    const t = setTimeout(() => {
+      ECHO_api.audienceOptions(campaignId, kind, q)
+        .then(d => { if (el) { setOpts(Array.isArray(d) ? d : []); setErr(''); } })
+        .catch(e => { if (el) { setOpts([]); setErr(ECHO_msg(e)); } });
+    }, 250);           // gepeles kozben ne inditsunk minden leutesre lekerest
+    return () => { el = false; clearTimeout(t); };
+  }, [nyit, q, kind, campaignId, ro]);
+
+  const benne = (id) => valasztott.some(v => v.ref === id);
+
+  return (
+    <div className="border border-slate-100 rounded-2xl p-4">
+      <div className="flex items-center justify-between gap-3 mb-2">
+        <div className="flex items-center gap-2">
+          {ikon}
+          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{cimke}</span>
+          {valasztott.length > 0 && (
+            <span className="text-[10px] font-black text-primary">{valasztott.length}</span>
+          )}
+        </div>
+        {!ro && (
+          <button type="button" onClick={() => setNyit(v => !v)}
+            className="text-[11px] font-black text-primary hover:underline">
+            {nyit ? 'Kész' : '+ Hozzáadás'}
+          </button>
+        )}
+      </div>
+      <p className="text-[11px] text-slate-400 leading-relaxed mb-3">{sug}</p>
+
+      {valasztott.length === 0 ? (
+        <p className="text-[11px] text-slate-300 font-bold italic">nincs kijelölve</p>
+      ) : (
+        <div className="flex flex-wrap gap-1.5">
+          {valasztott.map(v => (
+            <span key={v.ref}
+              className="inline-flex items-center gap-1.5 bg-slate-50 border border-slate-100
+                         rounded-xl pl-2.5 pr-1.5 py-1 text-[11px] font-bold text-slate-600 max-w-full">
+              <span className="truncate" title={v.cimke}>{v.cimke}</span>
+              {!ro && (
+                <button type="button" onClick={() => onValt(valasztott.filter(x => x.ref !== v.ref))}
+                  className="text-slate-300 hover:text-red-500 flex-none">
+                  <Lucide.X size={12} />
+                </button>
+              )}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {nyit && !ro && (
+        <div className="mt-3 border-t border-slate-100 pt-3">
+          <input className={U_input + ' text-sm'} value={q} autoFocus
+            onChange={e => setQ(e.target.value)} placeholder="Keresés…" />
+          {err && <p className="text-[11px] text-red-500 font-bold mt-2">{err}</p>}
+          <div className="mt-2 max-h-56 overflow-y-auto space-y-1">
+            {opts === null ? <SkeletonBar h={32} /> : opts.length === 0 ? (
+              <p className="text-[11px] text-slate-300 font-bold italic py-2">nincs találat</p>
+            ) : opts.map(o => (
+              <button key={o.id} type="button" disabled={benne(o.id)}
+                onClick={() => onValt(valasztott.concat([{ ref: o.id, cimke: o.cimke, kind }]))}
+                className={'w-full text-left px-3 py-2 rounded-xl border transition ' +
+                  (benne(o.id) ? 'border-slate-100 bg-slate-50 opacity-50 cursor-default'
+                               : 'border-slate-100 hover:border-primary hover:bg-orange-50/40')}>
+                <span className="block text-xs font-bold text-slate-700 truncate">{o.cimke}</span>
+                <span className="block text-[10px] text-slate-400 font-bold truncate">{o.reszlet}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+/* --- Kampányszerkesztő ---------------------------------------------------
+   Egy helyen a metaadatok ÉS az, hogy ki kapja meg a kérdőívet. A szerver
+   szabálya: 'draft' állapotban minden szerkeszthető, futó kampányon CSAK a
+   név. A felület ezt nem duplikálja, hanem tükrözi — a mezők letiltása csak
+   udvariasság, az érvényesítés a szerveren van (ECHO_CAMPAIGN_RUNNING). */
+function ECHO_CampaignEditor({ open, campaign, campaigns, onClose, onDone }) {
+  const [tpls, setTpls]   = useState(null);
+  const [aud, setAud]     = useState(null);
+  const [nev, setNev]     = useState('');
+  const [nevEn, setNevEn] = useState('');
+  const [term, setTerm]   = useState('');
+  const [ver, setVer]     = useState('');
+  const [op, setOp]       = useState('');
+  const [cl, setCl]       = useState('');
+  const [gop, setGop]     = useState('');
+  const [gcl, setGcl]     = useState('');
+  const [tetel, setTetel] = useState([]);
+  const [busy, setBusy]   = useState(false);
+  const [err, setErr]     = useState('');
+
+  const draft = !!campaign && campaign.state === 'draft';
+  const ro    = !draft;
+  const termOpts = React.useMemo(() => ECHO_termOptions(campaigns), [campaigns]);
+
+  useEffect(() => {
+    if (!open || !campaign) return;
+    setErr(''); setBusy(false);
+    setAud(null); setTetel([]);
+    // A mezoket NEM a listasorbol toltjuk: az echo_campaigns() nem ad
+    // name_en-t, a celmeghatarozasi ablakot pedig egyik lista sem. Egyetlen
+    // forras van, az echo_campaign_audience().kampany — igy nem tud ketto
+    // elcsuszni egymastol.
+    setNev(campaign.name || ''); setNevEn(''); setTerm(campaign.term || '');
+    setVer(''); setOp(''); setCl(''); setGop(''); setGcl('');
+
+    ECHO_api.templates()
+      .then(d => {
+        const arr = [];
+        (Array.isArray(d) ? d : []).forEach(t => {
+          (Array.isArray(t.verziok) ? t.verziok : []).forEach(v => {
+            if (v.state === 'live' || v.state === 'approved') {
+              arr.push({ id: v.id, label: `${t.name_hu} · v${v.version}`,
+                         state: v.state, kerdesek: v.kerdesek });
+            }
+          });
+        });
+        setTpls(arr);
+      })
+      .catch(e => { setTpls([]); setErr(ECHO_msg(e)); });
+
+    ECHO_api.audience(campaign.id)
+      .then(d => {
+        setAud(d);
+        const k = (d && d.kampany) || {};
+        setNev(k.name || '');
+        setNevEn(k.name_en || '');
+        setTerm(k.term || '');
+        setVer(k.template_version_id || '');
+        setOp(ECHO_toLocalInput(k.opens_at));
+        setCl(ECHO_toLocalInput(k.closes_at));
+        setGop(ECHO_toLocalInput(k.goals_open_at));
+        setGcl(ECHO_toLocalInput(k.goals_close_at));
+        setTetel((d && Array.isArray(d.sorok) ? d.sorok : [])
+          .map(x => ({ ref: x.ref, cimke: x.cimke, kind: x.kind })));
+      })
+      .catch(e => { setAud(null); setErr(ECHO_msg(e)); });
+  }, [open, campaign && campaign.id]);
+
+  const azok = (k) => tetel.filter(t => t.kind === k);
+  const setAzok = (k) => (uj) => setTetel(tetel.filter(t => t.kind !== k).concat(uj));
+
+  const felAblak   = (!!op) !== (!!cl);
+  const felCel     = (!!gop) !== (!!gcl);
+  const rosszAblak = op && cl && ECHO_fromLocalInput(cl) <= ECHO_fromLocalInput(op);
+  const ok = nev.trim() && term.trim() && !felAblak && !felCel && !rosszAblak && !busy;
+
+  const ment = async () => {
+    setBusy(true); setErr('');
+    try {
+      // A NULL a szerveren azt jelenti: "hagyd bekén". Amit URITENI akarunk,
+      // azt a clear tombbel mondjuk meg — enelkul nem lehetne megkulonboztetni
+      // a "nem kuldtem el" es a "torold" esetet.
+      const clear = [];
+      if (draft) {
+        if (!ver) clear.push('template');
+        if (!op)  clear.push('window');
+        if (!gop) clear.push('goals');
+        if (!nevEn.trim() && aud && aud.kampany && aud.kampany.name_en) clear.push('name_en');
+      }
+      await ECHO_api.campaignUpdate(campaign.id, {
+        nev: nev.trim(),
+        nameEn: nevEn.trim() || null,
+        term: draft ? term.trim() : null,
+        ver:  draft && ver ? ver : null,
+        opensAt:      draft && op  ? ECHO_fromLocalInput(op)  : null,
+        closesAt:     draft && cl  ? ECHO_fromLocalInput(cl)  : null,
+        goalsOpenAt:  draft && gop ? ECHO_fromLocalInput(gop) : null,
+        goalsCloseAt: draft && gcl ? ECHO_fromLocalInput(gcl) : null,
+        clear,
+      });
+      if (draft) {
+        await ECHO_api.audienceSet(campaign.id,
+          tetel.map(t => ({ kind: t.kind, id: t.ref })));
+      }
+      onDone();
+    } catch (e) { setErr(ECHO_msg(e)); }
+    finally { setBusy(false); }
+  };
+
+  if (!campaign) return null;
+
+  return (
+    <UModal open={open} onClose={busy ? () => {} : onClose} max="max-w-4xl"
+      icon={<Lucide.SlidersHorizontal size={20} />} title="Kampány szerkesztése"
+      subtitle={campaign.code + ' · ' + ((ECHO_CAMPAIGN_STATE[campaign.state] || {}).label || campaign.state)}>
+
+      {err && (
+        <div className="mb-5 bg-red-50 border border-red-100 rounded-2xl px-4 py-3 text-sm font-bold text-red-600 flex gap-2">
+          <Lucide.AlertCircle size={16} className="flex-none mt-0.5" /> {err}
+        </div>
+      )}
+
+      {ro && (
+        <div className="mb-5 bg-amber-50 border border-amber-100 rounded-2xl px-4 py-3 flex gap-2.5">
+          <Lucide.Lock size={15} className="text-amber-500 flex-none mt-0.5" />
+          <p className="text-[11px] text-amber-700 font-medium leading-relaxed">
+            A kampány már <b>elindult</b>, ezért csak a <b>neve</b> módosítható. A kérdőív,
+            a félév, az időablak és a célközönség menet közbeni átírása a már beérkezett
+            válaszokat tenné értelmezhetetlenné, a már kiadott jegyeket pedig érvénytelenné.
+          </p>
+        </div>
+      )}
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        {/* --- bal: metaadatok --- */}
+        <div className="space-y-4">
+          <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Metaadatok</h4>
+
+          <UField label="A kampány neve" hint="Ez látszik a hallgatói és az oktatói felületen is.">
+            <input className={U_input} value={nev} onChange={e => setNev(e.target.value)} maxLength={160} />
+          </UField>
+
+          <UField label="Angol név" hint="Nem kötelező. Ha üres, az angol felületen a magyar név látszik.">
+            <input className={U_input} value={nevEn} onChange={e => setNevEn(e.target.value)}
+              maxLength={160} placeholder="—" />
+          </UField>
+
+          <UField label="Félév" hint="Metaadat és alapértelmezett hatókör: célközönség-kurzus nélkül a félév minden kurzusa bekerül.">
+            <select className={U_input} value={term} disabled={ro}
+              onChange={e => setTerm(e.target.value)}>
+              <option value="">Válassz félévet…</option>
+              {termOpts.map(t => (
+                <option key={t.term} value={t.term}>{ECHO_termLabel(t.term)}</option>
+              ))}
+            </select>
+          </UField>
+
+          <UField label="Kérdőív (sablonverzió)"
+            hint="Üresen hagyható — de kérdőív nélkül a kampány nem indítható el (ECHO_NO_TEMPLATE).">
+            {tpls === null ? <SkeletonBar h={44} /> : (
+              <select className={U_input} value={ver} disabled={ro}
+                onChange={e => setVer(e.target.value)}>
+                <option value="">Nincs kérdőív — a kampány nem indítható</option>
+                {tpls.map(t => (
+                  <option key={t.id} value={t.id}>
+                    {t.label} · {t.state === 'live' ? 'élesített' : 'jóváhagyott'} · {t.kerdesek} kérdés
+                  </option>
+                ))}
+              </select>
+            )}
+          </UField>
+
+          <UField label="Kitöltési ablak"
+            hint="Üresen hagyható, de akkor a kampány nem indítható el. Két vége csak együtt értelmes.">
+            <div className="grid grid-cols-2 gap-2">
+              <input type="datetime-local" className={U_input} value={op} disabled={ro}
+                onChange={e => setOp(e.target.value)} />
+              <input type="datetime-local" className={U_input} value={cl} disabled={ro}
+                onChange={e => setCl(e.target.value)} />
+            </div>
+          </UField>
+
+          <UField label="Célmeghatározási ablak (Part 1)"
+            hint="A félév ELEJI, NEM névtelen szakasz ablaka. Ha üres, a célmeghatározás nem nyílik meg.">
+            <div className="grid grid-cols-2 gap-2">
+              <input type="datetime-local" className={U_input} value={gop} disabled={ro}
+                onChange={e => setGop(e.target.value)} />
+              <input type="datetime-local" className={U_input} value={gcl} disabled={ro}
+                onChange={e => setGcl(e.target.value)} />
+            </div>
+          </UField>
+
+          {(felAblak || felCel) && (
+            <p className="text-[11px] text-red-500 font-bold">
+              Az időablak két végpontját együtt kell megadni, vagy egyiket sem.
+            </p>
+          )}
+          {rosszAblak && (
+            <p className="text-[11px] text-red-500 font-bold">
+              A zárás nem lehet a nyitás előtt.
+            </p>
+          )}
+        </div>
+
+        {/* --- jobb: célközönség --- */}
+        <div className="space-y-4">
+          <div>
+            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Ki kapja meg</h4>
+            <p className="text-[11px] text-slate-400 leading-relaxed mt-1.5">
+              Két független kérdés. A <b>kurzusok</b> azt mondják meg, MIT értékelnek;
+              a <b>csoportok</b> és a <b>személyek</b> azt, KI értékel. Amit üresen hagysz,
+              az nem szűkít.
+            </p>
+          </div>
+
+          <ECHO_AudiencePicker campaignId={campaign.id} kind="course" ro={ro}
+            cimke="Kurzusok" ikon={<Lucide.BookOpen size={13} className="text-slate-400" />}
+            sug="Üresen: a félév MINDEN kurzusa. Kijelölve: pontosan ezek."
+            valasztott={azok('course')} onValt={setAzok('course')} />
+
+          <ECHO_AudiencePicker campaignId={campaign.id} kind="group" ro={ro}
+            cimke="Csoportok" ikon={<Lucide.Users size={13} className="text-slate-400" />}
+            sug="A Felhasználók → Csoportok alatt létrehozott csoportok. Szabály alapú csoportnál a tagság a mentés pillanatában dől el."
+            valasztott={azok('group')} onValt={setAzok('group')} />
+
+          <ECHO_AudiencePicker campaignId={campaign.id} kind="user" ro={ro}
+            cimke="Egyedi személyek" ikon={<Lucide.User size={13} className="text-slate-400" />}
+            sug="Nevesített hallgatók — csoporton kívül, egyedi esetekre."
+            valasztott={azok('user')} onValt={setAzok('user')} />
+
+          {aud && (
+            <div className="bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
+                A mentett állapot szerint
+              </p>
+              <p className="text-sm font-black text-slate-700">
+                legfeljebb {aud.legfeljebb_kurzus} kurzus · {aud.legfeljebb_hallgato} hallgató
+              </p>
+              <p className="text-[11px] text-slate-400 leading-relaxed mt-1.5">
+                Felső korlát: a kizárási szabályok (létszám, órarendi info, vizsgakurzus,
+                oktatói óraarány) csak az <b>alkalmasság újraépítésekor</b> futnak le. A pontos
+                számot az újraépítés adja meg.
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="flex items-center justify-end gap-2 mt-6 pt-5 border-t border-slate-100">
+        <button onClick={onClose} disabled={busy} className={U_btnGhost + ' py-2.5 px-5'}>Mégse</button>
+        <button onClick={ment} disabled={!ok}
+          className={U_btnPrimary + ' py-2.5 px-5 disabled:opacity-40 disabled:cursor-not-allowed'}>
+          {busy ? 'Mentés…' : 'Mentés'}
+        </button>
+      </div>
+    </UModal>
+  );
+}
+
+
 function ECHO_CampaignsPanel({ user }) {
   const [rows, setRows] = useState(null);
   const [err, setErr] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [sel, setSel] = useState(null);        // kiválasztott kampány
+  const [editOpen, setEditOpen] = useState(false);  // kampányszerkesztő
   const [rate, setRate] = useState(null);      // echo_rate eredménye
   const [rateBusy, setRateBusy] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
@@ -2691,9 +3061,15 @@ function ECHO_CampaignsPanel({ user }) {
                     {ECHO_dateTime(sel.opens_at)} — {ECHO_dateTime(sel.closes_at)}
                   </p>
                 </div>
-                <button onClick={openForm} className={U_btnGhost + ' py-2.5 px-4 text-sm flex-none'}>
-                  <Lucide.FileText size={15} /> Kérdőív
-                </button>
+                <div className="flex items-center gap-2 flex-none">
+                  <button onClick={() => setEditOpen(true)}
+                    className={U_btnGhost + ' py-2.5 px-4 text-sm'}>
+                    <Lucide.SlidersHorizontal size={15} /> Szerkesztés
+                  </button>
+                  <button onClick={openForm} className={U_btnGhost + ' py-2.5 px-4 text-sm'}>
+                    <Lucide.FileText size={15} /> Kérdőív
+                  </button>
+                </div>
               </div>
 
               {/* --- ÁLLAPOTGÉP (18_echo_campaign.sql) ---
@@ -2934,6 +3310,10 @@ function ECHO_CampaignsPanel({ user }) {
       {/* --- kampány-életciklus: létrehozás és állapotváltás --- */}
       <ECHO_CampaignCreate open={createOpen} onClose={() => setCreateOpen(false)}
                           onDone={onCreated} campaigns={rows} />
+
+      <ECHO_CampaignEditor open={editOpen} campaign={sel} campaigns={rows}
+        onClose={() => setEditOpen(false)}
+        onDone={() => { setEditOpen(false); load(true); loadDetail(sel && sel.id); }} />
       {sel && step && (
         <ECHO_TransitionConfirm
           step={step} campaign={sel} busy={txBusy}
