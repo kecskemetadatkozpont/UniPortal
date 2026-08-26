@@ -302,6 +302,7 @@ const ECHO_api = {
                                     { p_campaign: id, p_items: items }),
   audienceStudents:(id, items, q) => ECHO_rpc('echo_audience_target_students',
                                     { p_campaign: id, p_items: items, p_q: q || null, p_limit: 300 }),
+  campaignForm:   (id)          => ECHO_rpc('echo_campaign_form', { p_campaign: id }),
   campaignStudents:(id, q)      => ECHO_rpc('echo_campaign_students',
                                     { p_campaign: id, p_q: q || null, p_limit: 300 }),
   audiencePreview:(id, items)   => ECHO_rpc('echo_audience_preview',
@@ -3083,22 +3084,17 @@ function ECHO_CampaignsPanel({ user }) {
   };
 
   /* A kérdőív megtekintése.
-     A 15_echo_core.sql NEM tartalmaz admin oldali "add vissza a template
-     compiled JSONB-jét" RPC-t — az echo_get_form() a HÍVÓ saját részvételére
-     szűr (ECHO_NOT_ELIGIBLE). Ezért a megtekintéshez a saját, e kampányban
-     véleményezhető kurzusunkat használjuk; ha ilyen nincs, ezt kimondjuk,
-     nem találunk ki nem létező végpontot. */
+     Az echo_get_form() HALLGATÓI végpont: a hívó saját echo.participation
+     sorára szűr, és egy adminisztrátor nincs beiratkozva a kurzusokra — ezért
+     korábban a saját kampánya kérdőívét sem tudta megnézni. A 48-as migráció
+     külön admin RPC-t ad (echo_campaign_form), ami a kampány sablonverziójának
+     lefordított kérdőívét adja vissza, hallgatói adat nélkül. A hallgatói
+     kaput SZÁNDÉKOSAN nem lazítottuk fel — annak szigorúnak kell maradnia. */
   const openForm = async () => {
     setFormOpen(true); setPreview(null);
     try {
-      const mine = await ECHO_api.myCourses();
-      const hit = (Array.isArray(mine) ? mine : []).find(c => c.campaign_id === sel.id);
-      if (!hit) {
-        setPreview({ error: 'A kérdőív előnézetéhez a 15_echo_core.sql-ben nincs admin RPC: az echo_get_form() a hívó saját részvételére szűr. Ehhez a kampányhoz nincs saját véleményezhető kurzusod, ezért a kérdőív most nem jeleníthető meg.' });
-        return;
-      }
-      const f = await ECHO_api.getForm(hit.campaign_id, hit.course_id);
-      setPreview({ form: (f && f.form) || null });
+      const f = await ECHO_api.campaignForm(sel.id);
+      setPreview({ form: (f && f.form) || null, tpl: (f && f.template) || null });
     } catch (e) { setPreview({ error: ECHO_msg(e) }); }
   };
 
@@ -3328,10 +3324,21 @@ function ECHO_CampaignsPanel({ user }) {
 
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
                 {[
-                  { k: 'Jogosult pár', v: sel.eligible_pairs, i: 'Link2' },
-                  { k: 'Jogosult hallgató', v: sel.eligible_students, i: 'Users' },
-                  { k: 'Elkezdte', v: sel.attempted, i: 'PlayCircle' },
-                  { k: 'Beérkezett', v: sel.responses, i: 'Inbox' },
+                  // "Jogosult par" = egy KURZUS-OKTATO kombinacio. Egy kurzuson
+                  // tobb oktato is velemenyezheto, ezert a parok szama nagyobb
+                  // lehet a kurzusokenal. A szerveroldali uzenetek is
+                  // "jogosultsagi par"-nak hivjak — a cimke ezt mondja ki.
+                  { k: 'Kurzus–oktató pár', v: sel.eligible_pairs, i: 'Link2',
+                    t: 'Hány kurzus–oktató kombinációt lehet véleményezni. Egy kurzuson több '
+                     + 'oktató is véleményezhető, ezért ez a szám nagyobb lehet a kurzusok '
+                     + 'számánál. A naplókban „jogosultsági pár” néven szerepel.' },
+                  { k: 'Jogosult hallgató', v: sel.eligible_students, i: 'Users',
+                    t: 'Hány hallgató kapja meg a kérdőívet. Kattints a névsorért.' },
+                  { k: 'Elkezdte', v: sel.attempted, i: 'PlayCircle',
+                    t: 'Hányan kértek jegyet a kitöltéshez. Azt, hogy KIK, nem mutatjuk: '
+                     + 'a kérdőív névtelen.' },
+                  { k: 'Beérkezett', v: sel.responses, i: 'Inbox',
+                    t: 'Hány kitöltött kérdőív érkezett be.' },
                 ].map(x => {
                   const Ic = Lucide[x.i] || Lucide.Circle;
                   // Csak a "Jogosult hallgato" nyithato meg: a tobbi szam mogott
@@ -3342,7 +3349,7 @@ function ECHO_CampaignsPanel({ user }) {
                     <div key={x.k}
                       onClick={nyit ? () => setJogOpen(true) : undefined}
                       role={nyit ? 'button' : undefined}
-                      title={nyit ? 'Kattints a névsorért' : undefined}
+                      title={x.t || undefined}
                       className={'bg-slate-50 rounded-2xl p-4 ' +
                         (nyit ? 'cursor-pointer hover:bg-orange-50/60 transition' : '')}>
                       <Ic size={16} className={(nyit ? 'text-primary' : 'text-slate-400') + ' mb-2'} />
@@ -3479,7 +3486,7 @@ function ECHO_CampaignsPanel({ user }) {
         ) : !preview.form ? (
           <UEmpty icon={<Lucide.FileQuestion size={28} />} title="A kérdőív üres" />
         ) : (
-          <ECHO_FormPreview form={preview.form} lang={lang} />
+          <ECHO_FormPreview form={preview.form} lang={lang} tpl={preview.tpl} />
         )}
       </UModal>
 
@@ -3507,15 +3514,28 @@ function ECHO_CampaignsPanel({ user }) {
 
 // A compiled JSONB olvasható kirajzolása. Ugyanabból az adatból, mint a
 // kitöltő — így ami itt látszik, azt kapja a hallgató is.
-function ECHO_FormPreview({ form, lang }) {
+function ECHO_FormPreview({ form, lang, tpl }) {
   const meta = form.meta || {};
+  // A 'meta' a compiled JSONB-ből jön, és nem minden sablonverzióban van
+  // kitöltve — ilyenkor a fejléc "· v" alakban, üresen jelent meg. A tpl az
+  // adatbázisbeli sablonverzió (48_campaign_form.sql): ha van, AZ a pontosabb
+  // forrás, mert a tábla írja, nem a fordítás pillanata.
+  const cim = ECHO_txt({ hu: meta.title_hu, en: meta.title_en }, lang)
+              || (tpl && (lang === 'en' ? (tpl.name_en || tpl.name_hu) : tpl.name_hu))
+              || 'A kérdőív';
+  const alsor = [
+    meta.code || null,
+    (meta.version || (tpl && tpl.version)) ? 'v' + (meta.version || tpl.version) : null,
+    meta.legal_hu || null,
+    (tpl && tpl.state) ? (tpl.state === 'live' ? 'élesített' : tpl.state) : null,
+  ].filter(Boolean).join(' · ');
   return (
     <div className="space-y-6">
       <div className="bg-slate-50 rounded-2xl p-4">
-        <h4 className="font-black text-slate-900"><ECHO_Src>{ECHO_txt({ hu: meta.title_hu, en: meta.title_en }, lang)}</ECHO_Src></h4>
-        <p className="text-xs text-slate-400 font-bold mt-1">
-          <ECHO_Src>{meta.code} · v{meta.version}{meta.legal_hu ? ' · ' + meta.legal_hu : ''}</ECHO_Src>
-        </p>
+        <h4 className="font-black text-slate-900"><ECHO_Src>{cim}</ECHO_Src></h4>
+        {alsor && (
+          <p className="text-xs text-slate-400 font-bold mt-1"><ECHO_Src>{alsor}</ECHO_Src></p>
+        )}
         {meta.forras_megjegyzes && (
           <p className="text-[11px] text-amber-700 font-medium mt-2 leading-relaxed">
             <ECHO_Src>{meta.forras_megjegyzes}</ECHO_Src>
