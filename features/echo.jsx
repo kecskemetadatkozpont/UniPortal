@@ -2177,12 +2177,59 @@ function ECHO_fromLocalInput(v) {
   return isNaN(d.getTime()) ? null : d.toISOString();
 }
 
+/* --- Feleveek a legordulohoz ---------------------------------------------
+   A felev formatuma '2025/26/2': a tanev elso eve / a masodik eve ket jegyen /
+   1 = oszi, 2 = tavaszi. A lista a MAI datum kore general harom tanevet, es
+   hozzaveszi azokat a feleveket, amikre mar van kampany — igy egy regebbi vagy
+   kezzel felvitt felev sem tunik el a legordulobol.
+
+   Foglaltnak azt a felevet jeloljuk, amire mar van AKTIV kampany. Ez nem sajat
+   szigor: az echo_campaign_active_term_uidx egyedi index draft/open/closed/
+   processing allapotban tiltja a masodikat — egy sealed/published kampany
+   feleve viszont ujra szabad, ezert azt nem tiltjuk. Ha ezt nem irnank ki, a
+   felhasznalo a Letrehozas gombig eljutna, es ott kapna egy nyers
+   constraint-hibat arrol, amit a lista elore tud. */
+const ECHO_TERM_ACTIVE = ['draft', 'open', 'closed', 'processing'];
+
+function ECHO_termCurrent(now) {
+  const d = now || new Date();
+  // A tanev szeptemberben kezdodik, de a kampanyt mar augusztusban keszitik:
+  // augusztustol a KOVETKEZO tanev szamit mostaninak.
+  const y = d.getFullYear() - (d.getMonth() >= 7 ? 0 : 1);
+  const sem = (d.getMonth() >= 7 || d.getMonth() === 0) ? '1' : '2';
+  return y + '/' + String((y + 1) % 100).padStart(2, '0') + '/' + sem;
+}
+
+function ECHO_termLabel(term) {
+  const m = /^(\d{4})\/(\d{2})\/([12])$/.exec(term || '');
+  if (!m) return term;                     // kezzel felvitt, ismeretlen alaku felev
+  return term + ' \u00b7 ' + (m[3] === '1' ? 'őszi' : 'tavaszi') + ' félév';
+}
+
+function ECHO_termOptions(rows, now) {
+  const d = now || new Date();
+  const base = d.getFullYear() - (d.getMonth() >= 7 ? 0 : 1);
+  const list = [];
+  for (let y = base - 1; y <= base + 1; y++) {
+    const nx = String((y + 1) % 100).padStart(2, '0');
+    list.push(y + '/' + nx + '/1', y + '/' + nx + '/2');
+  }
+  const taken = new Map();
+  (Array.isArray(rows) ? rows : []).forEach(c => {
+    if (!c || !c.term) return;
+    if (list.indexOf(c.term) < 0) list.push(c.term);
+    if (ECHO_TERM_ACTIVE.indexOf(c.state) >= 0) taken.set(c.term, c);
+  });
+  // A negyjegyu evszam miatt a sztringrendezes idorendet ad.
+  return list.sort().map(term => ({ term, taken: taken.get(term) || null }));
+}
+
 /* --- Új kampány űrlapja ---------------------------------------------------
    A sablonverzió-választó KIZÁRÓLAG 'live' és 'approved' verziót kínál, mert
    az echo_campaign_create() is csak ezeket fogadja el. A megnyitáshoz viszont
    már 'live' kell (ECHO_TEMPLATE_NOT_LIVE) — ezt a lista ki is írja, hogy ne
    utólag derüljön ki. */
-function ECHO_CampaignCreate({ open, onClose, onDone }) {
+function ECHO_CampaignCreate({ open, onClose, onDone, campaigns }) {
   const [tpls, setTpls]   = useState(null);
   const [nev, setNev]     = useState('');
   const [term, setTerm]   = useState('');
@@ -2192,9 +2239,21 @@ function ECHO_CampaignCreate({ open, onClose, onDone }) {
   const [busy, setBusy]   = useState(false);
   const [err, setErr]     = useState('');
 
+  // A legordulo a mar letezo kampanyokbol tudja meg, melyik felev foglalt —
+  // kulon lekeres nelkul, mert a lista ugyis be van toltve a panelen.
+  const termNow  = React.useMemo(() => ECHO_termCurrent(), []);
+  const termOpts = React.useMemo(() => ECHO_termOptions(campaigns), [campaigns]);
+
   useEffect(() => {
     if (!open) return;
     setErr(''); setBusy(false);
+    // A mostani felevet felajanljuk, de csak ha szabad: egy foglalt felev
+    // elovalasztasa csak a Letrehozas gombnal derulne ki.
+    setTerm(prev => {
+      if (prev) return prev;
+      const hit = termOpts.find(t => t.term === termNow);
+      return hit && !hit.taken ? hit.term : '';
+    });
     ECHO_api.templates()
       .then(d => {
         const arr = [];
@@ -2246,7 +2305,22 @@ function ECHO_CampaignCreate({ open, onClose, onDone }) {
 
         <UField label="Félév"
           hint="Az alkalmassági lista EBBŐL dolgozik: az echo.eligibility_rebuild() a félév minden kurzusát összegyűjti. Egy félévre egyszerre egy aktív kampány lehet.">
-          <input className={U_input} value={term} onChange={e => setTerm(e.target.value)} placeholder="2025/26/2" />
+          <select className={U_input} value={term} onChange={e => setTerm(e.target.value)}>
+            <option value="">Válassz félévet…</option>
+            {termOpts.map(t => (
+              <option key={t.term} value={t.term} disabled={!!t.taken}>
+                {ECHO_termLabel(t.term)}
+                {t.term === termNow ? ' \u00b7 mostani' : ''}
+                {t.taken ? ' — foglalt: ' + (t.taken.name || t.taken.code || 'aktív kampány') : ''}
+              </option>
+            ))}
+          </select>
+          {termOpts.some(t => t.taken) && (
+            <p className="text-[11px] text-slate-400 mt-1.5 leading-relaxed">
+              A foglalt félévek nem választhatók: egy félévre egyszerre egy aktív
+              kampány lehet. Lezárt (sealed) kampány féléve újra szabaddá válik.
+            </p>
+          )}
         </UField>
 
         <UField label="Kérdőív (sablonverzió)"
@@ -2870,7 +2944,8 @@ function ECHO_CampaignsPanel({ user }) {
       </UModal>
 
       {/* --- kampány-életciklus: létrehozás és állapotváltás --- */}
-      <ECHO_CampaignCreate open={createOpen} onClose={() => setCreateOpen(false)} onDone={onCreated} />
+      <ECHO_CampaignCreate open={createOpen} onClose={() => setCreateOpen(false)}
+                          onDone={onCreated} campaigns={rows} />
       {sel && step && (
         <ECHO_TransitionConfirm
           step={step} campaign={sel} busy={txBusy}
