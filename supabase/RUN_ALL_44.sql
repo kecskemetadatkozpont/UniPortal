@@ -107,6 +107,18 @@ declare
   v_nev   text := (select t.name from echo.teacher t
                     where t.id = coalesce(new.teacher_id, old.teacher_id));
 begin
+  -- MAGA A KURZUS tunik el? Akkor NE naplozzunk. A kurzus torlese kaszkadol az
+  -- echo.course_teacher-re, ez a trigger pedig AFTER DELETE fut — a beszurt
+  -- naplosor egy mar nem letezo kurzusra hivatkozna, es a course_history
+  -- idegen kulcsa elhasalna. Az pedig nem csak a naplozast bukna el, hanem AZ
+  -- EGESZ TORLEST. Merve: az echo_course_delete() minden oktatoval rendelkezo
+  -- kurzuson elhasalt, amig ez a feltetel nem volt itt.
+  -- A naplosor amugy is kaszkadolna a kurzussal egyutt, tehat nem veszik el
+  -- semmi, ami megmaradt volna.
+  if tg_op = 'DELETE' and not exists (select 1 from echo.course where id = v_c) then
+    return old;
+  end if;
+
   if tg_op = 'INSERT' then
     insert into echo.course_history (course_id, mezo, regi, uj, actor_key, actor_email)
     values (v_c, 'oktato', null, v_nev || ' · ' || new.share_pct::text || '%', auth.uid(), v_email);
@@ -402,6 +414,14 @@ select 'RPC: '||p.proname,
             then 'OK' else 'HIBA' end
   from pg_proc p join pg_namespace n on n.oid=p.pronamespace
  where n.nspname='public' and p.proname in ('echo_course_students','echo_course_history')
+union all
+select 'a naplozas nem akadalyozza a kurzustorlest',
+       case when prosrc like '%not exists (select 1 from echo.course where id = v_c)%'
+            then 'megvan' else '(nincs)' end,
+       case when prosrc like '%not exists (select 1 from echo.course where id = v_c)%'
+            then 'OK' else 'HIBA — a torles elhasalna' end
+  from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+ where n.nspname='echo' and p.proname='course_teacher_audit'
 union all
 select 'ugyanaz a kod tobb felevben (elo adat)',
        (select count(*)::text from (select code from echo.course
