@@ -49,6 +49,7 @@ const FEATURE_FILES = [
   'features/agency.jsx',
   'features/multiprogram.jsx',
   'features/groups.jsx',
+  'features/roles.jsx',
 ];
 
 // `motion` is only referenced by the shim at the top of app.jsx, which renders

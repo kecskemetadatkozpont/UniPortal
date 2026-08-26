@@ -10805,6 +10805,19 @@ const App: React.FC = () => {
       }
     } catch (e) { /* a 19-es migráció még nem futott le — a menü marad a régi */ }
 
+    // --- SZEREPKÖR-JOGOSULTSÁGOK (39_role_admin.sql) ---
+    // A szerepkör -> menüpont leképezés eddig ITT volt beégetve. Most a
+    // táblából jön, hogy szuperadmin oldalról szerkeszthető legyen.
+    // SUPERADMIN-nál null jön vissza, és a szűrő meg sem nézi: az ő
+    // hozzáférését nem szabad tudni elvenni, különben nem maradna út vissza.
+    // Ha a 39-es még nem futott le, szintén null — a szűrő a régi, kódba
+    // égetett listákra esik vissza, tehát senki nem veszít hozzáférést.
+    let rolePerms = null;
+    try {
+      const { data: rp, error: rpErr } = await sb.rpc('my_role_permissions');
+      if (!rpErr && Array.isArray(rp)) rolePerms = rp;
+    } catch (e) { /* a 39-es migráció még nem futott le */ }
+
     // --- CSOPORT-JOGOSULTSÁGOK (38_student_groups.sql) ---
     // A csoport csak ADHAT menüpontot, elvenni nem tud semmit: a szűrő alább
     // előbb a szerepkört nézi, és a csoportos ág csak akkor jut szóhoz, ha a
@@ -10855,6 +10868,9 @@ const App: React.FC = () => {
       dormRoles,
       // Csoportból örökölt menüpont-jogosultságok (38_student_groups.sql).
       groupPerms,
+      // A szerepkörhöz rendelt menüpontok (39_role_admin.sql). null = nincs
+      // adat, ilyenkor a kódba égetett lista dönt.
+      rolePerms,
       dormResident,
       avatar: (profile && profile.avatar_url) || ov.avatar || 'https://i.pravatar.cc/150?u=' + encodeURIComponent(authUser.email),
     });
@@ -11053,7 +11069,25 @@ const App: React.FC = () => {
     // ügynökség nem lakhat kollégiumban. Aki nem lakó, annak a nézet maga
     // mondja meg, hogy nincs elhelyezése — nem a menüből tűnik el.
     if (item.id === AppView.DORM_STUDENT) return currentUser.role !== 'AGENT';
-    if (currentUser.role === 'SUPERADMIN' || currentUser.role === 'ADMIN') return true;
+    // A SZUPERADMIN mindent lát, és ezt SEMMILYEN tábla nem írhatja felül.
+    // Ha elvehető lenne, ki lehetne zárni magát abból a képernyőből is,
+    // amivel visszaállítaná — és nem maradna út vissza.
+    if (currentUser.role === 'SUPERADMIN') return true;
+
+    // A szerepkörhöz rendelt lista FELVÁLTJA a lentebbi, kódba égetett
+    // ágakat, ha van adat. Így a szuperadmin tényleg át tudja szabni, mit
+    // lát egy szerepkör — nem csak bővíteni. Ha a 39-es migráció nem futott
+    // le, a rolePerms null, és minden marad a régiben.
+    //
+    // Amit a FÖLÖTTE lévő ágak már eldöntöttek (Regisztrációk, ECHO- és
+    // kollégiumi grantok), azt ez nem írja felül: azok saját biztonsági
+    // szabályok, nem szerepkör-beállítás kérdése.
+    if (Array.isArray(currentUser.rolePerms)) {
+      return currentUser.rolePerms.includes(item.id)
+          || (currentUser.groupPerms || []).includes(item.id);
+    }
+
+    if (currentUser.role === 'ADMIN') return true;
     if (currentUser.role === 'AGENT') return [AppView.FEED, AppView.PROGRAMS, AppView.ASSISTANT, AppView.AGENT_PORTAL, AppView.INTERVIEWS].includes(item.id);
     if (currentUser.role === 'FINANCE') return [AppView.FEED, AppView.ASSISTANT, AppView.FINANCE, AppView.AGENT_PORTAL, AppView.INTERVIEWS, AppView.REPORTS].includes(item.id);
     if (currentUser.role === 'ADMISSIONS') return [AppView.FEED, AppView.ASSISTANT, AppView.ADMISSIONS_CORE, AppView.EVALUATION, AppView.ENGAGEMENT_CRM, AppView.IMMIGRATION, AppView.INTERVIEWS, AppView.MARKETING_LEADS, AppView.REPORTS, AppView.INTELLIGENCE].includes(item.id);

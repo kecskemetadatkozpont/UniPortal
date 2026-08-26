@@ -214,21 +214,21 @@ function RegistrationsView({ user, onCountChange }) {
       )}
 
       <div className="flex items-center gap-2 mt-7 flex-wrap">
-        {[['pending', 'Jóváhagyásra vár', pending.length], ['users', 'Felhasználók', active.length], ['rejected', 'Elutasítva', rejected.length], ['groups', 'Csoportok', null]].map(([k, label, n]) => (
+        {[['pending', 'Jóváhagyásra vár', pending.length], ['users', 'Felhasználók', active.length], ['rejected', 'Elutasítva', rejected.length], ['groups', 'Csoportok', null], ['roles', 'Szerepkörök', null]].map(([k, label, n]) => (
           <button key={k} onClick={() => setTab(k)}
             className={'px-4 py-2 rounded-xl text-sm font-bold transition-colors ' +
               (tab === k ? 'bg-slate-900 text-white' : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-50')}>
             {label}{n !== null && <span className={'ml-1 ' + (tab === k ? 'text-white/60' : 'text-slate-400')}>{n}</span>}
           </button>
         ))}
-        {tab !== 'groups' && <select value={groupBy} onChange={e => setGroupBy(e.target.value)}
+        {!['groups','roles'].includes(tab) && <select value={groupBy} onChange={e => setGroupBy(e.target.value)}
                 title="Csoportosítás"
                 className="ml-auto bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-semibold text-slate-600 focus:outline-none focus:ring-2 focus:ring-primary/20">
           {REG_GROUP_BY.map(([k, label]) => (
             <option key={k || 'none'} value={k}>{k ? 'Csoportosítás: ' + label : label}</option>
           ))}
         </select>}
-        {tab !== 'groups' && <div className="relative">
+        {!['groups','roles'].includes(tab) && <div className="relative">
           <Lucide.Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" />
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="Keresés név, e-mail vagy szak szerint…"
             className="w-64 bg-white border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
@@ -237,6 +237,8 @@ function RegistrationsView({ user, onCountChange }) {
 
       {tab === 'groups' ? (
         <GRP_Tab rows={rows || []} user={user} />
+      ) : tab === 'roles' ? (
+        <ROLE_Tab rows={rows || []} user={user} />
       ) : list.length === 0 ? (
         <div className="mt-6 bg-white rounded-3xl border border-slate-100 p-14 text-center">
           <div className="w-14 h-14 rounded-2xl bg-slate-50 text-slate-300 flex items-center justify-center mx-auto mb-4">
