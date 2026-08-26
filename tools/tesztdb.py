@@ -201,12 +201,19 @@ def sql_fiokok(hallgato, oktato):
             s.append(f"""  insert into auth.users (
     id, instance_id, aud, role, email, encrypted_password,
     email_confirmed_at, created_at, updated_at,
-    raw_app_meta_data, raw_user_meta_data)
+    raw_app_meta_data, raw_user_meta_data,
+    confirmation_token, recovery_token, email_change,
+    email_change_token_new, email_change_token_current)
   values ({q(x['uid'])}::uuid, '00000000-0000-0000-0000-000000000000'::uuid,
     'authenticated', 'authenticated', {q(x['email'])}, v_hash,
     now(), now(), now(),
     '{{"provider":"email","providers":["email"]}}'::jsonb,
-    {q(meta)}::jsonb)
+    {q(meta)}::jsonb,
+    -- ÜRES SZÖVEG, NEM NULL. A GoTrue ezeket a mezőket Go string-be olvassa,
+    -- és NULL-ra elhasal: a belépés ilyenkor "Database error querying schema"
+    -- hibát ad, még HELYES jelszóval is. Az első futásnál mind a 461 fiók
+    -- használhatatlan lett emiatt.
+    '', '', '', '', '')
   on conflict (id) do nothing;""")
     return '\n'.join(s)
 

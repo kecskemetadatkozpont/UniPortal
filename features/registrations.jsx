@@ -172,8 +172,13 @@ function RegistrationsView({ user, onCountChange }) {
   const list = tab === 'pending' ? pending : tab === 'users' ? active : rejected;
 
   /* Csoportosítás. A csoport nélküli sorok a végére kerülnek, saját
-     "Nincs megadva" szakaszba — így látszik, kinél hiányzik a besorolás. */
-  const csoportok = React.useMemo(() => {
+     "Nincs megadva" szakaszba — így látszik, kinél hiányzik a besorolás.
+
+     SZÁNDÉKOSAN NEM useMemo: ez a függvény a `rows === null` korai
+     visszatérés MÖGÖTT áll, tehát hookként töltés közben nem futna le, utána
+     viszont igen — a hook-sorrend megváltozna, és React eldobná a fát.
+     Fehér képernyőt okozott. Néhány száz soron a memoizálás úgysem számít. */
+  const csoportok = (() => {
     if (!groupBy) return null;
     const m = new Map();
     for (const r of list) {
@@ -186,7 +191,7 @@ function RegistrationsView({ user, onCountChange }) {
       if (b[0] === '__nincs__') return -1;
       return b[1].length - a[1].length;      // a legnépesebb elöl
     });
-  }, [list, groupBy]);
+  })();
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-6xl 2xl:max-w-[1500px]">
