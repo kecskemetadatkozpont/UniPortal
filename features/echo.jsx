@@ -4731,9 +4731,9 @@ function ECHO_Editor({ user }) {
                         {(s.questions || []).length} kérdés
                       </span>
                       {(s.part || 'part2') === 'part1' && (
-                        <span title="A félév elején kitöltött célmeghatározó kérdések. Ezek nem kerülnek be az oktatói eredménybe."
+                        <span title="A válasz a hallgató nevéhez kötve tárolódik, és kimarad a névtelen halmazból — ezért nincs benne az oktatói eredményben."
                           className="text-[10px] font-black uppercase tracking-wider rounded-lg px-2 py-0.5 bg-indigo-50 text-indigo-700 mt-0.5">
-                          félév eleji · nincs a riportban
+                          célmeghatározás · nem névtelen
                         </span>
                       )}
                       {!ro && (
@@ -4781,27 +4781,41 @@ function ECHO_Editor({ user }) {
                           </div>
                         </div>
 
-                        {/* MIT JELENT A part VALÓJÁBAN
-                            Nem csak azt, mikor töltik ki. A part1 szakaszok
-                            kérdései KIMARADNAK az oktatói eredményből — lásd
-                            24_echo_form_v3.sql: a results_build szűrése
-                            `coalesce(s.value->>'part','part2') <> 'part1'`.
-                            Enélkül n=0-val jelennének meg, mert a félév végi
-                            válaszhalmazban nincs rájuk adat. A felület eddig
-                            csak a nyers 'part1' / 'part2' kódot mutatta. */}
+                        {/* MIT JELENT A part VALÓJÁBAN — ÉS MIT NEM
+                            NEM időzítés. Azt, hogy mikor tölthető ki, a KAMPÁNY
+                            mondja meg: goals_open_at/goals_close_at a célokra,
+                            opens_at/closes_at az értékelésre.
+
+                            A part azt dönti el, HOVA kerül a válasz:
+                              part1 → echo_save_goals() a student_goal.intro-ba
+                                      írja, ami AZONOSÍTOTT sor, ÉS az
+                                      echo_submit() kivágja a névtelen halmazból
+                                      (23_echo_form_rules.sql: v_course_a - v_key).
+                                      Enélkül ugyanaz a válasz ott állna az
+                                      azonosított és a névtelen oldalon is, és a
+                                      kettő összevethető lenne — ez deanonimizál.
+                              part2 → a névtelen válaszhalmazba megy, és ez adja
+                                      az oktatói eredményt.
+
+                            A korábbi címke ("félév eleji / félév végi") az
+                            időzítést sugallta, ami a kampány dolga. */}
                         <div>
                           <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                            Mikor töltik ki
+                            Hova kerül a válasz
                           </label>
                           <select className={U_input + ' py-2 text-sm mt-1'} value={s.part || 'part2'} disabled={ro}
                             onChange={e => patchSection(i, { part: e.target.value })}>
-                            <option value="part2">A félév végén — bekerül az oktatói eredménybe</option>
-                            <option value="part1">A félév elején — célmeghatározás, nem kerül a riportba</option>
+                            <option value="part2">Névtelen értékelés — bekerül az oktatói eredménybe</option>
+                            <option value="part1">Célmeghatározás — a hallgató nevéhez kötve, a névtelen halmazon kívül</option>
                           </select>
                           <p className="text-[11px] text-slate-400 mt-1.5 leading-relaxed">
                             {(s.part || 'part2') === 'part1'
-                              ? 'A hallgató a félév ELEJÉN válaszol rá, a saját céljairól. Ezek a válaszok szándékosan nem jelennek meg az oktatói eredménynézetben — a félév végi halmazban nincs rájuk adat, ott n=0-ként látszanának.'
-                              : 'A hallgató a félév VÉGÉN válaszol rá. Ez a rész adja az oktatói eredményt és a jegyzőkönyvet.'}
+                              ? 'A válasz a hallgató saját céljai mellé kerül, névvel. A névtelen halmazból a rendszer kiveszi — ha mindkét helyen ott lenne, a kettő összevethető volna, és az visszafejthetővé tenné a kitöltőt. Ezért nem is jelenik meg az oktatói eredményben.'
+                              : 'A válasz a névtelen halmazba megy. Ez adja az oktatói eredményt és a jegyzőkönyvet.'}
+                          </p>
+                          <p className="text-[11px] text-slate-400 mt-1.5 leading-relaxed">
+                            Azt, hogy <strong>mikor</strong> tölthető ki, nem itt kell megadni:
+                            a kampánynak külön célmeghatározási és értékelési ablaka van.
                           </p>
                         </div>
                       </div>
