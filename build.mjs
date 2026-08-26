@@ -22,6 +22,7 @@
 // Usage:  npm run build     (the Pages workflow runs this before deploying)
 // ============================================================
 import { readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import * as esbuild from 'esbuild';
@@ -86,7 +87,29 @@ try {
     metafile: true,
   });
   const bytes = Object.values(result.metafile.outputs)[0].bytes;
-  console.log(`app.bundle.js  ${(bytes / 1024).toFixed(1)} kB`);
+
+  // A csomag TARTALMI ujjlenyomata bekerul az app.html-be, es a betoltes ezzel
+  // hivja: ./app.bundle.js?v=<hash>
+  // MIERT KELL: a GitHub Pages 'cache-control: max-age=600' fejlecet ad a
+  // csomagra, a betoltes pedig verziojel nelkul ugyanarra az URL-re mutatott.
+  // Egy kiadas utan a bongeszo tehat akar tiz percig — sajat modul-
+  // gyorsitotarabol pedig tovabb — a REGI kodot futtatta. Ez nem elmeleti:
+  // egy valos bejelentesnel az elo csomagban MAR benne volt a javitas, a
+  // felhasznalo bongeszoje megis a regi hibauzenetet mutatta.
+  // Tartalmi hash es nem idobelyeg: valtozatlan csomagnal az app.html sem
+  // valtozik, tehat nem termel zajt a git-tortenetben.
+  const bundlePath = join(root, 'app.bundle.js');
+  const hash = createHash('sha256').update(readFileSync(bundlePath)).digest('hex').slice(0, 12);
+  const htmlPath = join(root, 'app.html');
+  const html = readFileSync(htmlPath, 'utf8');
+  if (!/const BUNDLE_V = '[^']*';/.test(html)) {
+    console.error('FIGYELEM: az app.html-ben nincs BUNDLE_V sor — a gyorsitotar-tores NEM aktiv.');
+  } else {
+    const ujHtml = html.replace(/const BUNDLE_V = '[^']*';/, `const BUNDLE_V = '${hash}';`);
+    if (ujHtml !== html) writeFileSync(htmlPath, ujHtml);
+  }
+
+  console.log(`app.bundle.js  ${(bytes / 1024).toFixed(1)} kB   v=${hash}`);
 } finally {
   rmSync(entry, { force: true });
 }

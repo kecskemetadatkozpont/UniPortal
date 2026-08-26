@@ -176,8 +176,19 @@
     // features/*.jsx into app.bundle.js with esbuild, so the browser skips the
     // slow in-page Babel pass entirely. Without a build (plain `python3 -m
     // http.server`) the file is absent and we fall back to compiling in-page.
+    // A csomag tartalmi ujjlenyomata. A build.mjs irja ide minden forditasnal,
+    // ES CSAK AKKOR VALTOZIK, ha a csomag tartalma valtozott.
+    // MIERT KELL: a GitHub Pages 'cache-control: max-age=600' fejlecet ad az
+    // app.bundle.js-re, a dinamikus import pedig verziojel nelkul ugyanarra az
+    // URL-re mutatott. Egy kiadas utan a bongeszo tehat akar tiz percig — sajat
+    // modul-gyorsitotarabol pedig tovabb — a REGI kodot futtatta, es a
+    // felhasznalo joggal hitte, hogy a javitas nem keszult el. Mert(ve): az elo
+    // csomagban mar benne volt a javitas, a bongeszo megis a regit mutatta.
+    const BUNDLE_V = '91abcbcee455';
+    const BUNDLE_URL = './app.bundle.js?v=' + BUNDLE_V;
+
     async function hasPrebuilt() {
-      try { return (await fetch('app.bundle.js', { method: 'HEAD' })).ok; }
+      try { return (await fetch(BUNDLE_URL, { method: 'HEAD' })).ok; }
       catch (e) { return false; }
     }
 
@@ -197,7 +208,7 @@
       try {
         // Deliberately outside the fallback: a runtime error inside the bundle
         // must surface as an error, not silently re-mount the app via Babel.
-        if (await hasPrebuilt()) { await import('./app.bundle.js'); return; }
+        if (await hasPrebuilt()) { await import(BUNDLE_URL); return; }
         let src = await (await fetch('app.jsx')).text();
         // New feature modules are concatenated into app.jsx's module (shared
         // scope) at the /*__FEATURES__*/ marker, just before the App component.
