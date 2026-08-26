@@ -300,6 +300,8 @@ const ECHO_api = {
   audience:       (id)          => ECHO_rpc('echo_campaign_audience', { p_campaign: id }),
   audienceSet:    (id, items)   => ECHO_rpc('echo_campaign_audience_set',
                                     { p_campaign: id, p_items: items }),
+  audiencePreview:(id, items)   => ECHO_rpc('echo_audience_preview',
+                                    { p_campaign: id, p_items: items }),
   audienceOptions:(id, kind, q) => ECHO_rpc('echo_audience_options',
                                     { p_campaign: id, p_kind: kind, p_q: q || null, p_limit: 60 }),
   rate:       (campaign)  => ECHO_rpc('echo_rate', { p_campaign: campaign }),
@@ -2592,6 +2594,8 @@ function ECHO_CampaignEditor({ open, campaign, campaigns, onClose, onDone }) {
   const [gop, setGop]     = useState('');
   const [gcl, setGcl]     = useState('');
   const [tetel, setTetel] = useState([]);
+  const [elo, setElo]     = useState(null);     // elonezet a MEG NEM MENTETT listara
+  const [eloBusy, setEloBusy] = useState(false);
   const [busy, setBusy]   = useState(false);
   const [err, setErr]     = useState('');
 
@@ -2642,6 +2646,22 @@ function ECHO_CampaignEditor({ open, campaign, campaigns, onClose, onDone }) {
       })
       .catch(e => { setAud(null); setErr(ECHO_msg(e)); });
   }, [open, campaign && campaign.id]);
+
+  // A becslest a SZERVER adja, mert a beiratkozasi adat nincs a kliensben.
+  // Kesleltetve: gyors egymas utani kijelolesnel ne inditsunk minden
+  // kattintasra lekerest. A mentett allapot igy is latszik alatta, hogy
+  // legyen mihez merni a valtozast.
+  useEffect(() => {
+    if (!open || !campaign || !draft) { setElo(null); return; }
+    let el = true;
+    setEloBusy(true);
+    const t = setTimeout(() => {
+      ECHO_api.audiencePreview(campaign.id, tetel.map(x => ({ kind: x.kind, id: x.ref })))
+        .then(d => { if (el) { setElo(d); setEloBusy(false); } })
+        .catch(() => { if (el) { setElo(null); setEloBusy(false); } });
+    }, 350);
+    return () => { el = false; clearTimeout(t); setEloBusy(false); };
+  }, [open, campaign && campaign.id, draft, JSON.stringify(tetel.map(x => x.kind + ':' + x.ref).sort())]);
 
   const azok = (k) => tetel.filter(t => t.kind === k);
   const setAzok = (k) => (uj) => setTetel(tetel.filter(t => t.kind !== k).concat(uj));
@@ -2805,18 +2825,44 @@ function ECHO_CampaignEditor({ open, campaign, campaigns, onClose, onDone }) {
             sug="Nevesített hallgatók — csoporton kívül, egyedi esetekre."
             valasztott={azok('user')} onValt={setAzok('user')} />
 
-          {aud && (
+          {(elo || aud) && (
             <div className="bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3">
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
-                A mentett állapot szerint
-              </p>
+              <div className="flex items-center gap-2 mb-1.5">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                  {elo ? 'A mostani beállítás szerint' : 'A mentett állapot szerint'}
+                </p>
+                <RefreshingBadge on={eloBusy} />
+              </div>
               <p className="text-sm font-black text-slate-700">
-                legfeljebb {aud.legfeljebb_kurzus} kurzus · {aud.legfeljebb_hallgato} hallgató
+                legfeljebb {(elo || aud).legfeljebb_kurzus} kurzus
+                {' · '}{(elo || aud).legfeljebb_hallgato} hallgató
               </p>
+
+              {/* Ha a szabaly alapu csoport sok emberre illeszkedik, de kozuluk
+                  keves van beiratkozva a celzott kurzusokra, a ket szam elter —
+                  es ez pont az, amit erteni kell a mentes ELOTT. */}
+              {elo && elo.hallgato_szukitve
+                && elo.celzott_szemely > elo.legfeljebb_hallgato && (
+                <p className="text-[11px] text-amber-700 leading-relaxed mt-1.5">
+                  A kijelölt csoportok és személyek <b>{elo.celzott_szemely}</b> főt fednek le,
+                  de közülük csak <b>{elo.legfeljebb_hallgato}</b> van beiratkozva a célzott
+                  kurzusokra. A többi nem kap kérdőívet.
+                </p>
+              )}
+
+              {elo && aud
+                && (elo.legfeljebb_kurzus !== aud.legfeljebb_kurzus
+                    || elo.legfeljebb_hallgato !== aud.legfeljebb_hallgato) && (
+                <p className="text-[11px] text-slate-400 font-bold mt-1.5">
+                  Mentve: {aud.legfeljebb_kurzus} kurzus · {aud.legfeljebb_hallgato} hallgató —
+                  a fenti szám mentés után lép életbe.
+                </p>
+              )}
+
               <p className="text-[11px] text-slate-400 leading-relaxed mt-1.5">
                 Felső korlát: a kizárási szabályok (létszám, órarendi info, vizsgakurzus,
-                oktatói óraarány) csak az <b>alkalmasság újraépítésekor</b> futnak le. A pontos
-                számot az újraépítés adja meg.
+                oktatói óraarány) csak az <b>alkalmasság újraépítésekor</b> futnak le — azt a
+                mentés most már magától elvégzi.
               </p>
             </div>
           )}
