@@ -336,6 +336,34 @@ const ECHO_api = {
   courseResults:  (campaign, course) =>
     ECHO_rpc('echo_course_results', { p_campaign: campaign, p_course: course }),
 
+  /* EXPORT — 34_echo_export.sql
+     Ugyanaz az adatút, mint a képernyőé: a szerver a results_build()
+     kimenetét lapítja sorokká, és minden rejtés-jelzőt tiszteletben tart.
+     Amit a riport elrejt, azt az export nem tudja megmutatni — nem
+     ellenőrzésből, hanem mert hozzá sem fér a nyers válaszokhoz. */
+  exportResults: (campaign, course, teacher, scope, format) =>
+    ECHO_rpc('echo_export_results', {
+      p_campaign: campaign, p_course: course, p_teacher: teacher || null,
+      p_scope: scope || 'course', p_format: format || 'csv' }),
+  exportLog: (campaign) =>
+    ECHO_rpc('echo_export_log', { p_campaign: campaign || null }),
+
+  /* 7 NAPOS OKTATÓI ÉSZREVÉTEL — 35_echo_comment.sql, 6. § (7)
+     A határidő NEM a kampány zárásától indul, hanem az ÁTVÉTELTŐL. Amíg
+     nincs átvétel, a szerver 'atvette: null'-t ad, és az óra el sem indul. */
+  commentWindow: (campaign) =>
+    ECHO_rpc('echo_my_comment_window', { p_campaign: campaign }),
+  commentSubmit: (campaign, body) =>
+    ECHO_rpc('echo_teacher_comment_submit', { p_campaign: campaign, p_body: body }),
+  comments: (campaign) =>
+    ECHO_rpc('echo_teacher_comments', { p_campaign: campaign || null }),
+  commentAck: (id, note) =>
+    ECHO_rpc('echo_comment_acknowledge', { p_comment: id, p_note: note || null }),
+  protocolHandover: (campaign, teacher, method, note) =>
+    ECHO_rpc('echo_protocol_handover', {
+      p_campaign: campaign, p_teacher: teacher,
+      p_method: method || 'rendszer', p_note: note || null }),
+
   moderationQueue: (campaign) => ECHO_rpc('echo_moderation_queue', { p_campaign: campaign }),
   moderate: (response, question, allapot, indok, megjegyzes) =>
     ECHO_rpc('echo_moderate', {
@@ -3168,6 +3196,214 @@ function ECHO_ResultBlock({ r, lang, cim, ikon, tajekoztato }) {
    ilyenkor CSAK az arányt mutatjuk, és kimondjuk, miért.
    ------------------------------------------------------------ */
 
+/* ---------------------------------------------------------------------------
+   ECHO_ExportButton — a riport kivitele CSV-be vagy JSON-ba
+
+   A CSV-t itt állítjuk elő, DE az adatot nem itt szűrjük: a szerver
+   echo_export_results() már elnyomott sorokat ad vissza. Ha egy cella rejtve
+   volt a képernyőn, ide üresen érkezik — nincs mit "véletlenül" kiírni.
+
+   A rejtett cellák SZÁMÁT viszont megmutatjuk. Enélkül egy hiányos állomány
+   teljesnek látszana, és a fogadó fél nem tudná, hogy szűrt adatot kapott.
+   --------------------------------------------------------------------------- */
+/* ---------------------------------------------------------------------------
+   ECHO_CommentPanel — a 6. § (7) szerinti 7 napos oktatói észrevétel
+
+   A határidő NEM a kampány zárásától indul, hanem az ÁTVÉTELTŐL: attól, hogy
+   az oktató ténylegesen megkapta a jegyzőkönyvet. Amíg ez nem történt meg, a
+   szerver 'atvette: null'-t ad — ilyenkor NEM hazudunk határidőt, hanem
+   megmondjuk, hogy az óra még el sem indult.
+
+   A határidőn túli beadást a szerver ELFOGADJA, csak megjelöli. Ezt itt is
+   őszintén kiírjuk: egy elutasított észrevétel nyomtalanul eltűnne, egy
+   megjelölt viszont ott marad, és a címzett dönt róla.
+   --------------------------------------------------------------------------- */
+function ECHO_CommentPanel({ campaign }) {
+  const [w, setW] = useState(null);
+  const [body, setBody] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [ok, setOk] = useState('');
+
+  const reload = React.useCallback(async () => {
+    if (!campaign) return;
+    try { setErr(''); setW(await ECHO_api.commentWindow(campaign)); }
+    catch (e) { setErr(ECHO_msg(e)); setW(null); }
+  }, [campaign]);
+
+  useEffect(() => { reload(); }, [reload]);
+
+  if (!campaign) return null;
+  if (err && !w) return null;   /* nem oktató: a panel egyszerűen nincs ott */
+  if (!w) return null;
+
+  const kuld = async () => {
+    setBusy(true); setErr(''); setOk('');
+    try {
+      const d = await ECHO_api.commentSubmit(campaign, body);
+      setBody('');
+      setOk(d.kesett
+        ? 'Az észrevétel rögzítve, de a határidőn TÚL érkezett — ezt a rendszer megjelölte. '
+          + 'A címzett (' + (d.cimzett_szerep || 'nincs kijelölve') + ') dönt róla.'
+        : 'Az észrevétel rögzítve, és továbbítva a címzettnek ('
+          + (d.cimzett_szerep || 'nincs kijelölve') + ').');
+      if (!d.cimzett_van) {
+        setOk(o => o + ' FIGYELEM: nincs kijelölt címzett — szóljon a Minőségügynek.');
+      }
+      reload();
+    } catch (e) { setErr(ECHO_msg(e)); }
+    finally { setBusy(false); }
+  };
+
+  const fmt = (t) => t ? new Date(t).toLocaleString('hu-HU',
+    { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
+
+  return (
+    <div className="bg-white border border-slate-100 rounded-3xl p-5 space-y-4">
+      <div className="flex items-start gap-3">
+        <Lucide.MessageSquare size={18} className="flex-none mt-0.5 text-slate-400" />
+        <div className="min-w-0">
+          <h3 className="font-black text-slate-800">Észrevétel a jegyzőkönyvre</h3>
+          <p className="text-[11px] text-slate-400 font-medium mt-1 leading-relaxed">
+            A szabályzat 6. § (7) szerint {w.nap} napod van észrevételt tenni. A határidő a
+            jegyzőkönyv <strong>átvételétől</strong> indul, nem a kampány zárásától.
+          </p>
+        </div>
+      </div>
+
+      {!w.atvette && (
+        <div className="bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 text-sm text-slate-600 font-medium">
+          A jegyzőkönyv átvétele még nincs rögzítve, ezért a {w.nap} napos határidő
+          <strong> még el sem indult</strong>. Észrevételt az átvétel után lehet tenni.
+        </div>
+      )}
+
+      {w.atvette && (
+        <div className="grid sm:grid-cols-3 gap-3 text-sm">
+          <div>
+            <div className="text-[10px] uppercase font-bold text-slate-400">Átvéve</div>
+            <div className="font-bold text-slate-700">{fmt(w.atvette)}</div>
+          </div>
+          <div>
+            <div className="text-[10px] uppercase font-bold text-slate-400">Határidő</div>
+            <div className="font-bold text-slate-700">{fmt(w.hatarido)}</div>
+          </div>
+          <div>
+            <div className="text-[10px] uppercase font-bold text-slate-400">Hátralévő</div>
+            <div className={'font-bold ' + (w.lejart ? 'text-red-600' : 'text-emerald-700')}>
+              {w.lejart ? 'Lejárt' : Math.floor((w.hatralevo_orak || 0) / 24) + ' nap '
+                          + ((w.hatralevo_orak || 0) % 24) + ' óra'}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {w.atvette && (
+        <>
+          <textarea
+            value={body} onChange={e => setBody(e.target.value)} rows={4}
+            placeholder="Mit szeretnél megjegyezni a jegyzőkönyvhöz?"
+            className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary" />
+          {w.lejart && (
+            <div className="text-[11px] font-medium text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+              A határidő lejárt. Az észrevételt a rendszer ettől még <strong>befogadja</strong>,
+              de megjelöli késettként — a címzett dönt róla.
+            </div>
+          )}
+          <div className="flex items-center gap-3 flex-wrap">
+            <button disabled={busy || !body.trim()} onClick={kuld}
+                    className="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50">
+              <Lucide.Send size={14} /> Észrevétel beküldése
+            </button>
+            {w.eddigi_eszrevetel > 0 && (
+              <span className="text-[11px] font-medium text-slate-400">
+                Eddig {w.eddigi_eszrevetel} észrevételt küldtél ehhez a kampányhoz.
+              </span>
+            )}
+          </div>
+        </>
+      )}
+
+      {ok  && <div className="text-[11px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2">{ok}</div>}
+      {err && <div className="text-[11px] font-medium text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{err}</div>}
+    </div>
+  );
+}
+
+function ECHO_ExportCsv(adat) {
+  const fej = ['blokk', 'kerdes_id', 'kerdes', 'tipus', 'n', 'atlag', 'eloszlas', 'szoveg_db', 'szovegek'];
+  const esc = (v) => {
+    if (v === null || v === undefined) return '';
+    const t = (typeof v === 'object') ? JSON.stringify(v) : String(v);
+    return /[";\n\r]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+  };
+  const sorok = (adat.sorok || []).map(r => fej.map(k => esc(r[k])).join(';'));
+  /* BOM: enélkül az Excel a magyar ékezeteket elrontja. */
+  return '\ufeff' + [fej.join(';')].concat(sorok).join('\r\n');
+}
+
+function ECHO_ExportButton({ campaign, course, teacher, scope, cimke }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [info, setInfo] = useState('');
+
+  const fut = async (format) => {
+    setBusy(true); setErr(''); setInfo('');
+    try {
+      const d = await ECHO_api.exportResults(campaign, course, teacher, scope, format);
+      if (d.teljesen_rejtve) {
+        setErr('Ez a bontás egészében rejtve van (' + (d.ok || 'k-küszöb') +
+               '), ezért nem exportálható. Ez nem hiba: a küszöb alatti '
+               + 'halmazból egyetlen sor sem vihető ki.');
+        return;
+      }
+      const tartalom = (format === 'csv') ? ECHO_ExportCsv(d) : JSON.stringify(d, null, 2);
+      const blob = new Blob([tartalom],
+        { type: format === 'csv' ? 'text/csv;charset=utf-8' : 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'echo-' + (scope || 'course') + '-' +
+                   new Date().toISOString().slice(0, 10) + '.' + format;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+
+      const n = (d.sorok || []).length, rejtett = d.rejtett_cellak || 0;
+      setInfo(n + ' sor kiírva' +
+        (rejtett > 0 ? ' — ' + rejtett + ' cellát a k-küszöb elrejtett, ezek nincsenek benne.' : '.'));
+    } catch (e) { setErr(ECHO_msg(e)); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">
+          {cimke || 'Kivitel'}
+        </span>
+        <button disabled={busy} onClick={() => fut('csv')}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-50">
+          <Lucide.Download size={13} /> CSV
+        </button>
+        <button disabled={busy} onClick={() => fut('json')}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-50">
+          <Lucide.Download size={13} /> JSON
+        </button>
+      </div>
+      {info && (
+        <div className="text-[11px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2">
+          {info}
+        </div>
+      )}
+      {err && (
+        <div className="text-[11px] font-medium text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+          {err}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ECHO_TeacherView({ user }) {
   const [mode, setMode] = useState(null);   // null = még próbálkozunk | 'oktato' | 'admin'
   const [mine, setMine] = useState(null);   // echo_my_teacher_courses() nyers válasza
@@ -3426,6 +3662,19 @@ function ECHO_TeacherView({ user }) {
           <ECHO_ResultBlock
             r={cres} lang={lang} ikon="BookOpen"
             cim={'Kurzusszintű eredmény — ' + (cres.course_name || '')} />
+
+          {/* Kivitel — 34_echo_export.sql. A szerver ugyanazt a
+              results_build() utat járja, mint a fenti blokk, tehát amit
+              itt nem látsz, azt az állomány sem tartalmazza. */}
+          <div className="bg-white border border-slate-100 rounded-2xl px-4 py-3">
+            <ECHO_ExportButton
+              campaign={cid} course={courseId} teacher={null} scope="course"
+              cimke="Kurzusszintű eredmény kivitele" />
+          </div>
+
+          {/* 7 napos oktatói észrevétel — 35_echo_comment.sql, 6. § (7).
+              A panel magát rejti el, ha a fiók nem oktatói sorhoz kötött. */}
+          <ECHO_CommentPanel campaign={cid} />
 
           {/* A 33% ALATTI ÓRALÁTOGATÁSÚ VÁLASZOK — KÜLÖN BLOKK, jelöléssel.
               3. § (9): ezek nem számítanak a jegyzőkönyvi statisztikába. Saját
