@@ -4712,17 +4712,28 @@ function ECHO_Editor({ user }) {
                   <div key={s.id || i} className="space-y-2">
 
                     {/* szakaszfejléc */}
-                    <div className="flex items-center gap-2 flex-wrap">
+                    <div className="flex items-start gap-2 flex-wrap">
+                      {/* Ugyanaz a kétnyelvű megjelenés, mint a kérdéskártyákon:
+                          nagyban a magyar, alatta kicsiben az angol. Az angol
+                          cím kötelező az élesítéshez, tehát a hiánya nem egy
+                          külön címkében bújik meg, hanem ott áll a helyén. */}
                       <button onClick={() => setSi(si === i ? si : i)}
-                        className="text-[13px] font-black text-slate-900 text-left">
-                        <ECHO_Src>{s.hu || '(névtelen szakasz)'}</ECHO_Src>
+                        className="text-left min-w-0">
+                        <span className="block text-[14px] font-black text-slate-900">
+                          <ECHO_Src>{s.hu || '(névtelen szakasz)'}</ECHO_Src>
+                        </span>
+                        <span className={'block text-[11px] ' +
+                          (s.en ? 'text-slate-400' : 'font-bold text-amber-600')}>
+                          <ECHO_Src>{s.en || '— nincs angol cím, az élesítéshez kötelező —'}</ECHO_Src>
+                        </span>
                       </button>
-                      <span className="text-[10px] font-black uppercase tracking-wider rounded-lg px-2 py-0.5 bg-slate-100 text-slate-500">
+                      <span className="text-[10px] font-black uppercase tracking-wider rounded-lg px-2 py-0.5 bg-slate-100 text-slate-500 mt-0.5">
                         {(s.questions || []).length} kérdés
                       </span>
-                      {!s.en && (
-                        <span className="text-[10px] font-black uppercase tracking-wider rounded-lg px-2 py-0.5 bg-amber-50 text-amber-700">
-                          hiányzó angol cím
+                      {(s.part || 'part2') === 'part1' && (
+                        <span title="A félév elején kitöltött célmeghatározó kérdések. Ezek nem kerülnek be az oktatói eredménybe."
+                          className="text-[10px] font-black uppercase tracking-wider rounded-lg px-2 py-0.5 bg-indigo-50 text-indigo-700 mt-0.5">
+                          félév eleji · nincs a riportban
                         </span>
                       )}
                       {!ro && (
@@ -4749,18 +4760,50 @@ function ECHO_Editor({ user }) {
 
                     {/* a szakasz saját beállításai — csak ha kinyitottad */}
                     {si === i && !ro && (
-                      <div className="bg-white rounded-2xl border border-slate-100 p-3 space-y-2">
-                        <input className={U_input + ' py-1.5 text-xs'} value={s.hu || ''} disabled={ro}
-                          onChange={e => patchSection(i, { hu: e.target.value })} placeholder="szakaszcím (magyar)" />
-                        <input className={U_input + ' py-1.5 text-xs ' + (s.en ? '' : 'border-amber-200 bg-amber-50/50')}
-                          value={s.en || ''} disabled={ro}
-                          onChange={e => patchSection(i, { en: e.target.value })}
-                          placeholder="szakaszcím (angol) — kötelező" />
-                        <select className={U_input + ' py-1.5 text-xs'} value={s.part || 'part2'} disabled={ro}
-                          onChange={e => patchSection(i, { part: e.target.value })}>
-                          <option value="part1">part1 — félév eleji célmeghatározó</option>
-                          <option value="part2">part2 — félév végi értékelés</option>
-                        </select>
+                      <div className="bg-white rounded-2xl border border-slate-100 p-4 space-y-3">
+                        <div className="grid sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                              Szakaszcím · magyar
+                            </label>
+                            <input className={U_input + ' py-2 text-sm mt-1'} value={s.hu || ''} disabled={ro}
+                              onChange={e => patchSection(i, { hu: e.target.value })}
+                              placeholder="pl. Az oktatóról" />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                              Szakaszcím · angol <span className="text-primary">· kötelező</span>
+                            </label>
+                            <input className={U_input + ' py-2 text-sm mt-1 ' + (s.en ? '' : 'border-amber-200 bg-amber-50/50')}
+                              value={s.en || ''} disabled={ro}
+                              onChange={e => patchSection(i, { en: e.target.value })}
+                              placeholder="pl. About the lecturer" />
+                          </div>
+                        </div>
+
+                        {/* MIT JELENT A part VALÓJÁBAN
+                            Nem csak azt, mikor töltik ki. A part1 szakaszok
+                            kérdései KIMARADNAK az oktatói eredményből — lásd
+                            24_echo_form_v3.sql: a results_build szűrése
+                            `coalesce(s.value->>'part','part2') <> 'part1'`.
+                            Enélkül n=0-val jelennének meg, mert a félév végi
+                            válaszhalmazban nincs rájuk adat. A felület eddig
+                            csak a nyers 'part1' / 'part2' kódot mutatta. */}
+                        <div>
+                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                            Mikor töltik ki
+                          </label>
+                          <select className={U_input + ' py-2 text-sm mt-1'} value={s.part || 'part2'} disabled={ro}
+                            onChange={e => patchSection(i, { part: e.target.value })}>
+                            <option value="part2">A félév végén — bekerül az oktatói eredménybe</option>
+                            <option value="part1">A félév elején — célmeghatározás, nem kerül a riportba</option>
+                          </select>
+                          <p className="text-[11px] text-slate-400 mt-1.5 leading-relaxed">
+                            {(s.part || 'part2') === 'part1'
+                              ? 'A hallgató a félév ELEJÉN válaszol rá, a saját céljairól. Ezek a válaszok szándékosan nem jelennek meg az oktatói eredménynézetben — a félév végi halmazban nincs rájuk adat, ott n=0-ként látszanának.'
+                              : 'A hallgató a félév VÉGÉN válaszol rá. Ez a rész adja az oktatói eredményt és a jegyzőkönyvet.'}
+                          </p>
+                        </div>
                       </div>
                     )}
 
