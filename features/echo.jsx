@@ -4776,24 +4776,33 @@ function ECHO_Editor({ user }) {
                                     : sulyos ? 'border-red-100' : 'border-slate-100')}>
 
                           {/* fejsor — összecsukva és kinyitva is ez látszik */}
-                          <div className="flex items-center gap-2.5 p-3">
+                          <div className="flex items-start gap-2.5 p-3">
                             <button onClick={() => { setSi(i); setQi(nyitva ? null : k); setPv(null); }}
-                              className="flex items-center gap-2.5 min-w-0 flex-1 text-left">
+                              className="flex items-start gap-2.5 min-w-0 flex-1 text-left">
                               <span className={'w-7 h-7 rounded-lg flex-none flex items-center justify-center ' +
                                 (nyitva ? 'bg-primary/10 text-primary'
                                         : sulyos ? 'bg-red-50 text-red-500' : 'bg-slate-50 text-slate-400')}>
                                 <Lucide.HelpCircle size={15} />
                               </span>
+                              {/* A kérdés szövege TÖRDELŐDIK, nem vágódik le.
+                                  A hárommezős elrendezésben ez egy keskeny fában
+                                  élt, ahol a truncate indokolt volt — a széles
+                                  kártyán viszont mérve 205 pixel is eltűnt egy
+                                  hosszabb kérdésből. Két sor után jelezzük, hogy
+                                  van még, és a title megmutatja a teljeset. */}
                               <span className="min-w-0 flex-1">
-                                <span className="block text-[13px] font-bold text-slate-800 truncate">
+                                <span className="block text-[13px] font-bold text-slate-800 line-clamp-2"
+                                  title={x.hu || x.id}>
                                   <ECHO_Src>{x.hu || x.id}</ECHO_Src>
                                 </span>
                                 {sulyos ? (
-                                  <span className="block text-[11px] font-bold text-red-600 truncate">
+                                  <span className="block text-[11px] font-bold text-red-600 line-clamp-2"
+                                    title={hibak[0].uzenet}>
                                     <ECHO_Src>{hibak[0].uzenet}</ECHO_Src>
                                   </span>
                                 ) : (
-                                  <span className="block text-[11px] text-slate-400 truncate">
+                                  <span className="block text-[11px] text-slate-400 line-clamp-2"
+                                    title={x.en || 'Nincs megadva angol szöveg.'}>
                                     <ECHO_Src>{x.en || '— nincs angol szöveg —'}</ECHO_Src>
                                   </span>
                                 )}
