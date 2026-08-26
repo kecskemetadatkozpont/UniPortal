@@ -10744,6 +10744,10 @@ const App = (() => {
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [activeView, setActiveView] = useState<AppView>(AppView.AGENT_PORTAL);
+  // Melyik auth-fiókra állítottuk már be a kezdőnézetet. A profil betöltése
+  // minden token-frissítéskor lefut; ez a ref választja el a "más lépett be"
+  // esetet a "ugyanaz a fiók frissült" esettől, hogy a nézet ne ugorjon vissza.
+  const landedForRef = useRef(null);
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [loginError, setLoginError] = useState('');
@@ -10841,13 +10845,28 @@ const App: React.FC = () => {
       dormResident,
       avatar: (profile && profile.avatar_url) || ov.avatar || 'https://i.pravatar.cc/150?u=' + encodeURIComponent(authUser.email),
     });
-    // Land the superadmin on the approvals queue when something is waiting;
-    // everyone else (and an empty queue) gets the Campus Feed.
-    let view = viewForRole(role);
-    if (status === 'approved' && role === 'SUPERADMIN' && (await REG_pendingCount()) > 0) {
-      view = AppView.REGISTRATIONS;
+    // HOVA LANDOLJON — és mikor NE mozduljon el.
+    //
+    // Ez a függvény MINDEN auth-eseményre lefut, a token frissítésére is.
+    // A Supabase pedig fülváltáskor frissít: a felhasználó visszakattint egy
+    // másik lapról, jön egy TOKEN_REFRESHED, és a nézet visszaugrott a
+    // Hírfolyamra. A bejelentés szerint a Profil volt az egyetlen kivétel —
+    // az ugyanis külön (showAccount) állapotban él, nem az activeView-ban.
+    //
+    // NEM az esemény nevére szűrünk: a Supabase verziónként mást küld
+    // (SIGNED_IN / INITIAL_SESSION / TOKEN_REFRESHED). Ehelyett arra, ami
+    // valóban számít: MÁS FELHASZNÁLÓ-e, mint akire már landoltunk. Ugyanaz
+    // a fiók = a profil adatai frissülnek, de a nézet a helyén marad.
+    if (landedForRef.current !== authUser.id) {
+      // Land the superadmin on the approvals queue when something is waiting;
+      // everyone else (and an empty queue) gets the Campus Feed.
+      let view = viewForRole(role);
+      if (status === 'approved' && role === 'SUPERADMIN' && (await REG_pendingCount()) > 0) {
+        view = AppView.REGISTRATIONS;
+      }
+      setActiveView(view);
+      landedForRef.current = authUser.id;
     }
-    setActiveView(view);
   };
 
   // Check the existing session on load, and react to sign-in / sign-out.
@@ -10864,7 +10883,7 @@ const App: React.FC = () => {
       }
       const { data } = sb.auth.onAuthStateChange((_event, session) => {
         if (session && session.user) loadProfile(session.user);
-        else setCurrentUser(null);
+        else { landedForRef.current = null; setCurrentUser(null); }
       });
       sub = data && data.subscription;
     })();

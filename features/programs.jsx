@@ -8,7 +8,34 @@
    ============================================================ */
 
 const PROG_TABLE = 'programs', PROG_LS = 'uni_programs';
-const APP_TABLE = 'program_applications', APP_LS = 'uni_applications';
+/* ÖSSZEVONT JELENTKEZÉSI FOLYAMAT — 37_merge_application_flows.sql
+   ------------------------------------------------------------------
+   Korábban a hallgatói jelentkezés a program_applications táblába ment, az
+   ügyintéző viszont az admission_processes-t nézte. A kettő nem tudott
+   egymásról, ezért a feltöltött dokumentumok nem jelentek meg az admin
+   oldalon, és a felvételi folyamat megállt. (Ugyanez okozta a "dupla listát".)
+
+   Mostantól EGY tábla van, két szakasszal:
+     stage = 'student'  a jelentkező tölti   (student_step a számláló)
+     stage = 'office'   az iroda dolgozik    (step a számláló)
+
+   Az oszlopnevek eltérnek attól, amit ez a felület eddig használt. Hogy a
+   húsz olvasási helyet ne kelljen átírni (és elrontani), a HATÁRON fordítunk:
+   PROG_fromRow / PROG_toRow. A komponensek változatlan alakot látnak. */
+const APP_TABLE = 'admission_processes', APP_LS = 'uni_applications';
+
+const PROG_fromRow = (r) => !r ? r : ({
+  id:              r.id,
+  program_id:      r.program_id || (r.data && r.data.program_id) || '',
+  applicant_email: r.owner_email || r.applicant_email || '',
+  applicant_name:  r.applicant_name || '',
+  // A felület 'draft' / 'submitted' párost vár; a tábla szakaszt tárol.
+  status:          r.stage === 'office' ? 'submitted' : 'draft',
+  step_index:      r.student_step || 0,
+  data:            r.data || {},
+  created_at:      r.created_at,
+  updated_at:      r.updated_at,
+});
 
 const PROG_STEP_DEFS = {
   personal:   { label: 'Személyes adatok',    icon: Lucide.User },
@@ -154,7 +181,8 @@ async function PROG_loadPrograms() {
   }
   return merged;
 }
-const PROG_loadApps = () => dlSelect(APP_TABLE, APP_LS, () => [], 'created_at', false);
+const PROG_loadApps = async () =>
+  ((await dlSelect(APP_TABLE, APP_LS, () => [], 'created_at', false)) || []).map(PROG_fromRow);
 
 const PROG_STATUS = {
   draft:     { label: 'Piszkozat',      tone: 'slate' },
@@ -249,12 +277,13 @@ function ProgramApply({ program, app, user, onExit, onSaved }) {
 
   const persist = async (extra = {}) => {
     setSaving(true);
-    const patch = { step_index: idx, data: cur.data || {}, updated_at: new Date().toISOString(), ...extra };
+    const patch = { student_step: idx, data: cur.data || {}, updated_at: new Date().toISOString(), ...extra };
     const saved = await dlUpdate(APP_TABLE, cur.id, patch, APP_LS);
-    setSaving(false); if (saved) { setCur(saved); onSaved && onSaved(saved); }
+    setSaving(false);
+    if (saved) { const m = PROG_fromRow(saved); setCur(m); onSaved && onSaved(m); }
     return saved;
   };
-  const goNext = async () => { const n = Math.min(idx + 1, steps.length - 1); setIdx(n); await persist({ step_index: n }); };
+  const goNext = async () => { const n = Math.min(idx + 1, steps.length - 1); setIdx(n); await persist({ student_step: n }); };
   const goPrev = () => setIdx(i => Math.max(0, i - 1));
   const stepKey = steps[idx];
 
@@ -283,11 +312,20 @@ function ProgramApply({ program, app, user, onExit, onSaved }) {
         {/* step body */}
         <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6 sm:p-8 min-h-[360px]">
           <PROG_StepBody stepKey={stepKey} program={program} data={data} setData={setData} user={user} cur={cur} setCur={setCur}
-            onSubmit={async () => { await persist({ status: 'submitted', step_index: idx }); }} />
+            onSubmit={async () => {
+              /* Előbb mentünk (hogy az utolsó lépés adatai is bent legyenek),
+                 utána a szerver fordítja át a sort az irodai szakaszba. */
+              await persist({ student_step: idx });
+              if (!window.sb) return;
+              const { error } = await window.sb.rpc('application_submit', { p_id: cur.id });
+              if (error) { alert(error.message || 'A beadás nem sikerült. Próbáld újra.'); return; }
+              setCur(c => ({ ...c, status: 'submitted' }));
+              onSaved && onSaved({ ...cur, status: 'submitted' });
+            }} />
           <div className="flex items-center justify-between gap-3 mt-8 pt-5 border-t border-slate-100">
             <button onClick={goPrev} disabled={idx === 0} className={U_btnGhost + (idx === 0 ? ' opacity-0 pointer-events-none' : '')}><Lucide.ArrowLeft size={15} /> Vissza</button>
             <div className="flex items-center gap-3">
-              <button onClick={() => persist()} className="text-sm font-bold text-slate-400 hover:text-slate-700 transition-colors">{saving ? 'Mentés…' : 'Mentés és kilépés'}</button>
+              <button onClick={async () => { await persist(); onExit && onExit(); }} disabled={saving} className="text-sm font-bold text-slate-400 hover:text-slate-700 transition-colors disabled:opacity-50">{saving ? 'Mentés…' : 'Mentés és kilépés'}</button>
               {idx < steps.length - 1 && <button onClick={goNext} className={U_btnPrimary} disabled={!PROG_canAdvance(stepKey, program, data)}>Folytatás <Lucide.ArrowRight size={15} /></button>}
             </div>
           </div>
@@ -309,6 +347,12 @@ function PROG_canAdvance(stepKey, program, data) {
 
 /* ---------- per-step bodies ---------- */
 function PROG_StepBody({ stepKey, program, data, setData, user, cur, onSubmit }) {
+  /* A feltöltés állapota. A hookok a függvény TETEJÉN állnak, mert a törzs
+     lépésenként korán visszatér — feltételes ágban deklarálva megsértenék a
+     hook-sorrendet. */
+  const [docBusy, setDocBusy] = useState('');
+  const [docErr, setDocErr] = useState('');
+
   if (stepKey === 'personal') {
     const p = data.personal || { name: (user && user.name) || '', email: (user && user.email) || '', phone: '', country: '', dob: '' };
     const set = (k, v) => setData({ personal: { ...p, [k]: v } });
@@ -327,7 +371,33 @@ function PROG_StepBody({ stepKey, program, data, setData, user, cur, onSubmit })
   }
   if (stepKey === 'documents') {
     const docs = data.docs || {};
-    const upload = async (id, e) => { const file = e.target.files && e.target.files[0]; if (!file) return; setData({ docs: { ...docs, [id]: { fileName: file.name, at: todayStr() } } }); };
+    /* VALÓDI FELTÖLTÉS — korábban csak a fájl NEVÉT jegyeztük fel, maga a
+       fájl eldobódott. Ezért nem látott semmit az ügyintéző a dokumentum-
+       ellenőrzésnél, és állt meg a folyamat.
+
+       A DOC_upload az app.jsx-ben él, a feature-fájlok annak a modul-
+       hatókörébe fűződnek, tehát elérhető. Ugyanaz a tároló és ugyanaz az
+       útvonalséma, mint az irodai úton — így az admin oldal aláírt
+       hivatkozással meg tudja nyitni. */
+    const upload = async (id, e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      setDocBusy(id);
+      try {
+        const path = await DOC_upload(file, (user && user.email) || 'guest', cur.id, id);
+        setData({ docs: { ...docs, [id]: {
+          fileName: file.name, path, size: file.size,
+          type: file.type || '', at: todayStr(),
+        } } });
+      } catch (err) {
+        setDocErr(id + ': ' + (err && err.message === 'storage-unavailable'
+          ? 'Nincs kapcsolat a tárolóval — jelentkezz be újra.'
+          : 'A feltöltés nem sikerült. Próbáld újra.'));
+      } finally {
+        setDocBusy('');
+        e.target.value = '';
+      }
+    };
     return (
       <div className="space-y-5">
         <PROG_Head icon={Lucide.Upload} title="Dokumentumok feltöltése" sub="Ezek a fájlok kötelezőek ehhez a képzéshez." />
@@ -338,10 +408,20 @@ function PROG_StepBody({ stepKey, program, data, setData, user, cur, onSubmit })
                 <div className={'w-9 h-9 rounded-xl flex items-center justify-center flex-none ' + (got ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-400')}>{got ? <Lucide.Check size={17} /> : <Lucide.FileText size={17} />}</div>
                 <div className="min-w-0"><div className="text-sm font-bold text-slate-700 truncate">{PROG_DOC_DEFS[id] || id}</div>{got && <div className="text-[11px] text-emerald-600 font-semibold truncate">{got.fileName}</div>}</div>
               </div>
-              <label className={U_btnGhost + ' flex-none cursor-pointer text-[13px] py-2 px-4'}>{got ? 'Csere' : 'Feltöltés'}<input type="file" className="hidden" onChange={e => upload(id, e)} /></label>
+              <label className={U_btnGhost + ' flex-none cursor-pointer text-[13px] py-2 px-4 ' + (docBusy === id ? 'opacity-50 pointer-events-none' : '')}>
+                {docBusy === id ? 'Feltöltés…' : got ? 'Csere' : 'Feltöltés'}
+                <input type="file" className="hidden" disabled={!!docBusy} onChange={e => upload(id, e)} />
+              </label>
             </div>
           ); })}
         </div>
+          {docErr && (
+          <div className="flex items-start gap-2 bg-red-50 border border-red-100 rounded-2xl px-4 py-3 text-sm font-bold text-red-600">
+            <Lucide.AlertCircle size={16} className="flex-none mt-0.5" />
+            <span className="flex-1">{docErr}</span>
+            <button onClick={() => setDocErr('')} className="text-red-400 hover:text-red-600"><Lucide.X size={14} /></button>
+          </div>
+          )}
       </div>
     );
   }
@@ -615,7 +695,24 @@ function PROG_Applicants({ programs, apps, onChange }) {
   const [pid, setPid] = useState('all');
   const rows = apps.filter(a => pid === 'all' || a.program_id === pid);
   const nameOf = (id) => { const p = programs.find(x => x.id === id); return p ? p.name : id; };
-  const setStatus = async (a, status) => { await dlUpdate(APP_TABLE, a.id, { status, updated_at: new Date().toISOString() }, APP_LS); onChange && onChange(); };
+  /* A BEADÁS nem sima mezőírás, hanem RPC: a hallgatói -> irodai szakaszváltás
+     egyirányú, és innen indul az ügyintézés. Egy elgépelt UPDATE ne tudja
+     visszatolni a sort a jelentkezőhöz. A szerver a 'check' lépésre fordítja,
+     oda, ahol a 27/30-as migráció interjúkapuja nyílik. */
+  const setStatus = async (a, status) => {
+    if (status === 'submitted') {
+      if (!window.sb) return;
+      const { error } = await window.sb.rpc('application_submit', { p_id: a.id });
+      if (error) {
+        // A szerver magyar mondata a legjobb üzenet — ha van, azt mutatjuk.
+        alert(error.message || error.details || 'A beadás nem sikerült. Próbáld újra.');
+        return;
+      }
+    } else {
+      await dlUpdate(APP_TABLE, a.id, { updated_at: new Date().toISOString() }, APP_LS);
+    }
+    onChange && onChange();
+  };
   return (
     <div>
       <div className="flex items-center gap-3 mb-5">
@@ -661,7 +758,16 @@ const ProgramsView = ({ user, scope = 'programs' }) => {
 
   const openApply = async (program) => {
     let app = myApps.find(a => a.program_id === program.id);
-    if (!app) { app = { id: uid('APP'), program_id: program.id, applicant_email: user.email, applicant_name: user.name, status: 'draft', step_index: 0, data: {}, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }; await dlInsert(APP_TABLE, app, APP_LS); await refetch(); }
+    if (!app) {
+      const sor = {
+        id: uid('APP'), program_id: program.id,
+        owner_email: (user.email || '').toLowerCase(), applicant_name: user.name,
+        stage: 'student', student_step: 0, step: 0, max_reached: 0, done: false,
+        data: {}, created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+      };
+      app = PROG_fromRow(await dlInsert(APP_TABLE, sor, APP_LS) || sor);
+      await refetch();
+    }
     setDetail(null); setApplying({ program, app });
   };
 

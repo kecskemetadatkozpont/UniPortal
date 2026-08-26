@@ -102,7 +102,13 @@ function ASSIST_Chat({ user, compact }) {
   const clear = () => { setMsgs([]); try { localStorage.removeItem(lsKey); } catch (e) {} };
 
   return (
-    <div className={'flex flex-col ' + (compact ? 'h-[540px]' : 'h-[calc(100vh-220px)] min-h-[440px]')}>
+    /* MIÉRT h-full ÉS NEM h-[540px] compact módban:
+       a lebegő panel legfeljebb min(70vh,560px) magas és overflow-hidden.
+       Fejléc (~48px) + p-4 (32px) + 540px chat = 620px tartalom egy 560px-es
+       dobozban, tehát a legalsó elem — pontosan a beviteli sor — levágódott.
+       700px magas ablaknál már 130px hiányzott. Fix magasság helyett a chat
+       most a panelhez igazodik. */
+    <div className={'flex flex-col min-h-0 ' + (compact ? 'h-full' : 'h-[calc(100vh-220px)] min-h-[440px]')}>
       {/* messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto custom-scrollbar px-1 space-y-4">
         {msgs.length === 0 && (
@@ -270,12 +276,12 @@ const AssistantWidget = ({ user }) => {
   return (
     <>
       {open && (
-        <div data-assistant-widget style={{ bottom: panelBottom }} className="fixed right-4 sm:right-6 z-[95] w-[min(400px,calc(100vw-2rem))] max-h-[min(70vh,560px)] bg-white rounded-3xl shadow-2xl border border-slate-100 flex flex-col overflow-hidden animate-in slide-in-from-bottom-4 fade-in duration-200">
+        <div data-assistant-widget style={{ bottom: panelBottom }} className="fixed right-4 sm:right-6 z-[95] w-[min(400px,calc(100vw-2rem))] h-[min(70vh,560px)] bg-white rounded-3xl shadow-2xl border border-slate-100 flex flex-col overflow-hidden animate-in slide-in-from-bottom-4 fade-in duration-200">
           <div className="flex items-center justify-between px-4 py-3 bg-primary text-white">
             <div className="flex items-center gap-2 font-black"><Lucide.Sparkles size={18} /> NJE Asszisztens</div>
             <button onClick={() => setOpen(false)} className="w-8 h-8 rounded-lg hover:bg-white/20 flex items-center justify-center"><Lucide.X size={17} /></button>
           </div>
-          <div className="p-4"><ASSIST_Chat user={user} compact={true} /></div>
+          <div className="p-4 flex-1 min-h-0"><ASSIST_Chat user={user} compact={true} /></div>
         </div>
       )}
       <button data-assistant-widget onClick={() => setOpen(o => !o)} style={{ bottom: btnBottom }} className="fixed right-4 sm:right-6 z-[95] w-14 h-14 rounded-2xl bg-primary text-white shadow-2xl shadow-primary/30 flex items-center justify-center hover:bg-primary/90 transition-all active:scale-95" aria-label="Kérdezd az NJE Asszisztenst" aria-expanded={open} title="Kérdezd az NJE Asszisztenst">
