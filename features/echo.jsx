@@ -4438,6 +4438,17 @@ function ECHO_Editor({ user }) {
   const sec = sections[si] || null;
   const q = (sec && Array.isArray(sec.questions)) ? (sec.questions[qi] || null) : null;
   const ro = !(doc && doc.szerkesztheto);
+
+  /* A validációs találatok KÉRDÉS szerint. A kétsávos elrendezésben a hiba
+     a saját kártyáján szólal meg, nem a képernyő másik szélén — ehhez kell
+     a kerdes mező szerinti csoportosítás. A kérdéshez nem köthető találatok
+     (üres kérdőív, ismétlődő azonosító) a jobb oldali listában maradnak. */
+  const checkByQ = {};
+  (checks || []).forEach(c => {
+    if (!c || !c.kerdes) return;
+    (checkByQ[c.kerdes] = checkByQ[c.kerdes] || []).push(c);
+  });
+  const hibaDb = (checks || []).filter(c => c && c.sulyossag === 'hiba').length;
   const allIds = [];
   sections.forEach(s => (s.questions || []).forEach(x => allIds.push(x.id)));
 
@@ -4655,43 +4666,82 @@ function ECHO_Editor({ user }) {
             )}
           </div>
 
-          <div className="grid gap-6 xl:grid-cols-12">
-            {/* SZERKEZET */}
-            <div className="xl:col-span-3 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Szerkezet</span>
-                {!ro && (
-                  <button onClick={addSection} className="text-[11px] font-black text-primary hover:underline flex items-center gap-1">
-                    <Lucide.Plus size={12} /> Szakasz
-                  </button>
+            {/* ===================================================================
+                KÉTSÁVOS SZERKESZTŐ
+
+                Korábban három sáv volt: Szerkezet | kérdés-szerkesztő | előnézet
+                + ellenőrzés. Egy kérdés megnézéséhez két lépés kellett (kiválasztás
+                balra, olvasás középen), a magyar és az angol szöveg nem látszott
+                egymás mellett, és a hiba a képernyő másik szélén jelent meg, mint
+                a kérdés, amire vonatkozott.
+
+                Mostantól a szerkesztő EGY oszlop: a szakaszok fejlécek, a kérdések
+                kártyák, a kiválasztott kártya helyben nyílik ki a teljes
+                metaadatával. Az előnézet mellette marad, és követi a kiválasztást.
+                A kérdéshez köthető hibák a saját kártyájukon szólalnak meg.
+                =================================================================== */}
+            <div className="grid gap-6 xl:grid-cols-12">
+
+              {/* ---------------- BAL: a szerkesztő ---------------- */}
+              <div className="xl:col-span-7 space-y-5">
+
+                {sections.length === 0 && (
+                  <div className="bg-white rounded-3xl border border-slate-100 p-10 text-center">
+                    <p className="font-black text-slate-700">Nincs szakasz</p>
+                    <p className="text-[12px] text-slate-400 mt-1">
+                      Az üres kérdőív nem élesíthető — kezdd egy szakasszal.
+                    </p>
+                  </div>
                 )}
-              </div>
-              {sections.length === 0 && (
-                <p className="text-[11px] font-bold text-slate-400">Nincs szakasz. Az üres kérdőív nem „majdnem kész”, hanem hibás.</p>
-              )}
-              {sections.map((s, i) => (
-                <div key={s.id || i} className={'rounded-2xl border ' + (si === i ? 'border-primary/30 bg-primary/5' : 'border-slate-100 bg-white')}>
-                  <div className="p-3">
-                    <div className="flex items-start gap-1.5">
-                      <button onClick={() => { setSi(i); setQi(null); }} className="min-w-0 text-left flex-1">
-                        <p className="text-xs font-black text-slate-800 truncate"><ECHO_Src>{s.hu || '(névtelen)'}</ECHO_Src></p>
-                        <p className="text-[10px] font-bold text-slate-400 truncate">{s.part || 'part2'} · {(s.questions || []).length} kérdés</p>
+
+                {sections.map((s, i) => (
+                  <div key={s.id || i} className="space-y-2">
+
+                    {/* szakaszfejléc */}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button onClick={() => setSi(si === i ? si : i)}
+                        className="text-[13px] font-black text-slate-900 text-left">
+                        <ECHO_Src>{s.hu || '(névtelen szakasz)'}</ECHO_Src>
                       </button>
+                      <span className="text-[10px] font-black uppercase tracking-wider rounded-lg px-2 py-0.5 bg-slate-100 text-slate-500">
+                        {(s.questions || []).length} kérdés
+                      </span>
+                      {!s.en && (
+                        <span className="text-[10px] font-black uppercase tracking-wider rounded-lg px-2 py-0.5 bg-amber-50 text-amber-700">
+                          hiányzó angol cím
+                        </span>
+                      )}
                       {!ro && (
-                        <div className="flex flex-none">
-                          <button onClick={() => moveSection(i, -1)} className="w-6 h-6 rounded-md hover:bg-slate-100 text-slate-400 flex items-center justify-center"><Lucide.ChevronUp size={13} /></button>
-                          <button onClick={() => moveSection(i, 1)} className="w-6 h-6 rounded-md hover:bg-slate-100 text-slate-400 flex items-center justify-center"><Lucide.ChevronDown size={13} /></button>
-                          <button onClick={() => delSection(i)} className="w-6 h-6 rounded-md hover:bg-red-50 text-red-400 flex items-center justify-center"><Lucide.Trash2 size={13} /></button>
+                        <div className="flex items-center gap-0.5 ml-auto">
+                          <button onClick={() => setSi(si === i ? -1 : i)} title="Szakasz beállításai"
+                            className="w-7 h-7 rounded-lg hover:bg-slate-100 text-slate-400 flex items-center justify-center">
+                            <Lucide.Settings2 size={14} />
+                          </button>
+                          <button onClick={() => moveSection(i, -1)} title="Feljebb"
+                            className="w-7 h-7 rounded-lg hover:bg-slate-100 text-slate-400 flex items-center justify-center">
+                            <Lucide.ChevronUp size={14} />
+                          </button>
+                          <button onClick={() => moveSection(i, 1)} title="Lejjebb"
+                            className="w-7 h-7 rounded-lg hover:bg-slate-100 text-slate-400 flex items-center justify-center">
+                            <Lucide.ChevronDown size={14} />
+                          </button>
+                          <button onClick={() => delSection(i)} title="Szakasz törlése"
+                            className="w-7 h-7 rounded-lg hover:bg-red-50 text-red-400 flex items-center justify-center">
+                            <Lucide.Trash2 size={13} />
+                          </button>
                         </div>
                       )}
                     </div>
 
-                    {si === i && (
-                      <div className="mt-3 space-y-2">
+                    {/* a szakasz saját beállításai — csak ha kinyitottad */}
+                    {si === i && !ro && (
+                      <div className="bg-white rounded-2xl border border-slate-100 p-3 space-y-2">
                         <input className={U_input + ' py-1.5 text-xs'} value={s.hu || ''} disabled={ro}
                           onChange={e => patchSection(i, { hu: e.target.value })} placeholder="szakaszcím (magyar)" />
-                        <input className={U_input + ' py-1.5 text-xs ' + (s.en ? '' : 'border-amber-200 bg-amber-50/50')} value={s.en || ''} disabled={ro}
-                          onChange={e => patchSection(i, { en: e.target.value })} placeholder="szakaszcím (angol) — kötelező" />
+                        <input className={U_input + ' py-1.5 text-xs ' + (s.en ? '' : 'border-amber-200 bg-amber-50/50')}
+                          value={s.en || ''} disabled={ro}
+                          onChange={e => patchSection(i, { en: e.target.value })}
+                          placeholder="szakaszcím (angol) — kötelező" />
                         <select className={U_input + ' py-1.5 text-xs'} value={s.part || 'part2'} disabled={ro}
                           onChange={e => patchSection(i, { part: e.target.value })}>
                           <option value="part1">part1 — félév eleji célmeghatározó</option>
@@ -4699,156 +4749,222 @@ function ECHO_Editor({ user }) {
                         </select>
                       </div>
                     )}
-                  </div>
 
-                  {si === i && (
-                    <div className="border-t border-slate-100 p-2 space-y-1">
-                      {(s.questions || []).map((x, k) => (
-                        <div key={x.id || k} className={'flex items-center gap-1 rounded-xl px-2 py-1.5 ' + (qi === k ? 'bg-white ring-1 ring-primary/30' : 'hover:bg-white/60')}>
-                          <button onClick={() => { setQi(k); setPv(null); }} className="min-w-0 text-left flex-1">
-                            <p className="text-[11px] font-bold text-slate-700 truncate"><ECHO_Src>{x.hu || x.id}</ECHO_Src></p>
-                            <p className="text-[9px] font-black text-slate-300 uppercase tracking-wider">{x.type}{x.required ? ' · kötelező' : ''}{x.cond ? ' · feltételes' : ''}</p>
-                          </button>
-                          {!ro && (
-                            <div className="flex flex-none">
-                              <button onClick={() => moveQuestion(i, k, -1)} className="w-5 h-5 rounded hover:bg-slate-100 text-slate-400 flex items-center justify-center"><Lucide.ChevronUp size={12} /></button>
-                              <button onClick={() => moveQuestion(i, k, 1)} className="w-5 h-5 rounded hover:bg-slate-100 text-slate-400 flex items-center justify-center"><Lucide.ChevronDown size={12} /></button>
-                              <button onClick={() => delQuestion(i, k)} className="w-5 h-5 rounded hover:bg-red-50 text-red-400 flex items-center justify-center"><Lucide.Trash2 size={12} /></button>
+                    {/* kérdés-kártyák */}
+                    {(s.questions || []).map((x, k) => {
+                      const nyitva = si === i && qi === k;
+                      const hibak = checkByQ[x.id] || [];
+                      const sulyos = hibak.some(c => c.sulyossag === 'hiba');
+                      return (
+                        <div key={x.id || k}
+                          className={'bg-white rounded-2xl border transition-colors ' +
+                            (nyitva ? 'border-primary/30 shadow-lg shadow-slate-900/5'
+                                    : sulyos ? 'border-red-100' : 'border-slate-100')}>
+
+                          {/* fejsor — összecsukva és kinyitva is ez látszik */}
+                          <div className="flex items-center gap-2.5 p-3">
+                            <button onClick={() => { setSi(i); setQi(nyitva ? null : k); setPv(null); }}
+                              className="flex items-center gap-2.5 min-w-0 flex-1 text-left">
+                              <span className={'w-7 h-7 rounded-lg flex-none flex items-center justify-center ' +
+                                (nyitva ? 'bg-primary/10 text-primary'
+                                        : sulyos ? 'bg-red-50 text-red-500' : 'bg-slate-50 text-slate-400')}>
+                                <Lucide.HelpCircle size={15} />
+                              </span>
+                              <span className="min-w-0 flex-1">
+                                <span className="block text-[13px] font-bold text-slate-800 truncate">
+                                  <ECHO_Src>{x.hu || x.id}</ECHO_Src>
+                                </span>
+                                {sulyos ? (
+                                  <span className="block text-[11px] font-bold text-red-600 truncate">
+                                    <ECHO_Src>{hibak[0].uzenet}</ECHO_Src>
+                                  </span>
+                                ) : (
+                                  <span className="block text-[11px] text-slate-400 truncate">
+                                    <ECHO_Src>{x.en || '— nincs angol szöveg —'}</ECHO_Src>
+                                  </span>
+                                )}
+                              </span>
+                            </button>
+                            <span className="text-[10px] font-black uppercase tracking-wider rounded-lg px-2 py-0.5 bg-slate-50 text-slate-500 font-mono flex-none">
+                              {x.id}
+                            </span>
+                            <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 flex-none hidden sm:inline">
+                              {x.type}{x.required ? ' · kötelező' : ''}
+                            </span>
+                            {!ro && (
+                              <div className="flex items-center gap-0.5 flex-none">
+                                <button onClick={() => moveQuestion(i, k, -1)} title="Feljebb"
+                                  className="w-6 h-6 rounded hover:bg-slate-100 text-slate-300 flex items-center justify-center">
+                                  <Lucide.ChevronUp size={13} />
+                                </button>
+                                <button onClick={() => moveQuestion(i, k, 1)} title="Lejjebb"
+                                  className="w-6 h-6 rounded hover:bg-slate-100 text-slate-300 flex items-center justify-center">
+                                  <Lucide.ChevronDown size={13} />
+                                </button>
+                                <button onClick={() => delQuestion(i, k)} title="Kérdés törlése"
+                                  className="w-6 h-6 rounded hover:bg-red-50 text-red-300 flex items-center justify-center">
+                                  <Lucide.Trash2 size={12} />
+                                </button>
+                              </div>
+                            )}
+                            <Lucide.ChevronDown size={15}
+                              className={'flex-none transition-transform ' +
+                                (nyitva ? 'rotate-180 text-primary' : 'text-slate-300')} />
+                          </div>
+
+                          {/* kinyitva: a teljes metaadat, helyben */}
+                          {nyitva && (
+                            <div className="border-t border-slate-50 p-4 space-y-3">
+                              {!ro && sections.length > 1 && (
+                                <UField label="Áthelyezés másik szakaszba">
+                                  <select className={U_input + ' py-2 text-xs'} value={si}
+                                    onChange={e => moveQToSection(si, qi, Number(e.target.value))}>
+                                    {sections.map((ss, ii) => (
+                                      <option key={ss.id || ii} value={ii}>{ss.hu || '(névtelen)'}</option>
+                                    ))}
+                                  </select>
+                                </UField>
+                              )}
+                              <ECHO_QuestionPanel q={x} allIds={allIds} ro={ro}
+                                onPatch={patchQuestion} lang={lang} />
                             </div>
                           )}
                         </div>
-                      ))}
-                      {!ro && (
-                        <div className="flex flex-wrap gap-1 pt-1">
-                          {ECHO_QTYPES.map(t => (
-                            <button key={t.v} onClick={() => addQuestion(i, t.v)} title={t.hint}
-                              className="text-[9px] font-black uppercase tracking-wider text-primary bg-primary/5 hover:bg-primary/10 rounded-lg px-2 py-1 flex items-center gap-1">
-                              <Lucide.Plus size={9} /> {t.label}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
+                      );
+                    })}
 
-            {/* KÉRDÉS-SZERKESZTŐ */}
-            <div className="xl:col-span-5">
-              {q && !ro && sections.length > 1 && (
-                <div className="mb-3">
-                  <UField label="Áthelyezés másik szakaszba">
-                    <select className={U_input + ' py-2 text-xs'} value={si}
-                      onChange={e => moveQToSection(si, qi, Number(e.target.value))}>
-                      {sections.map((s, i) => <option key={s.id || i} value={i}>{s.hu || '(névtelen)'}</option>)}
-                    </select>
-                  </UField>
-                </div>
-              )}
-              <ECHO_QuestionPanel q={q} allIds={allIds} ro={ro} onPatch={patchQuestion} lang={lang} />
-            </div>
-
-            {/* ELŐNÉZET + ELLENŐRZÉS */}
-            <div className="xl:col-span-4 space-y-6">
-              <div className="bg-white rounded-3xl border border-slate-100 p-5">
-                <div className="flex items-center justify-between gap-2 mb-4">
-                  <div className="flex items-center gap-2">
-                    <Lucide.Eye size={16} className="text-slate-400" />
-                    <h3 className="font-black text-slate-900 text-sm">Élő előnézet</h3>
-                  </div>
-                  <div className="flex gap-1">
-                    {[{ v: 'q', l: 'Kérdés' }, { v: 'sec', l: 'Szakasz' }, { v: 'all', l: 'Teljes' }].map(m => (
-                      <button key={m.v} onClick={() => setPvMode(m.v)}
-                        className={'text-[10px] font-black uppercase tracking-wider rounded-lg px-2 py-1 ' +
-                          (pvMode === m.v ? 'bg-primary/10 text-primary' : 'text-slate-400 hover:bg-slate-100')}>
-                        {m.l}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <p className="text-[10px] text-slate-400 font-medium mb-4 leading-relaxed">
-                  Ugyanazokkal a komponensekkel rajzoljuk, amikkel a hallgató kitölt
-                  (ECHO_Question). A helykitöltők ki vannak töltve mintaértékkel —
-                  pl. [Oktató neve] → {ECHO_TOKENS['[Oktató neve]']}.
-                </p>
-
-                <div className="rounded-2xl border border-slate-100 p-3">
-                  {pvMode === 'q' && (q
-                    ? <ECHO_Question q={ECHO_previewQuestion(q, lang)} index={(qi || 0) + 1}
-                        value={pv} onChange={setPv} lang={lang} seed="preview" ctx={ECHO_PREVIEW_CTX} />
-                    : <p className="text-xs font-bold text-slate-400 py-6 text-center">Nincs kiválasztott kérdés.</p>)}
-
-                  {pvMode === 'sec' && (sec
-                    ? <div>
-                        <h4 className="text-sm font-black text-slate-800 mb-1"><ECHO_Src>{ECHO_txt(sec, lang)}</ECHO_Src></h4>
-                        {(sec.questions || []).map((x, k) => (
-                          <ECHO_Question key={x.id || k} q={ECHO_previewQuestion(x, lang)} index={k + 1}
-                            value={undefined} onChange={() => {}} lang={lang} seed="preview" ctx={ECHO_PREVIEW_CTX} />
+                    {/* új kérdés ebbe a szakaszba */}
+                    {!ro && (
+                      <div className="flex flex-wrap gap-1 pt-0.5">
+                        {ECHO_QTYPES.map(t => (
+                          <button key={t.v} onClick={() => addQuestion(i, t.v)} title={t.hint}
+                            className="text-[10px] font-black uppercase tracking-wider text-primary bg-primary/5 hover:bg-primary/10 rounded-lg px-2.5 py-1.5 inline-flex items-center gap-1">
+                            <Lucide.Plus size={10} /> {t.label}
+                          </button>
                         ))}
                       </div>
-                    : <p className="text-xs font-bold text-slate-400 py-6 text-center">Nincs kiválasztott szakasz.</p>)}
+                    )}
+                  </div>
+                ))}
 
-                  {pvMode === 'all' && draft && <ECHO_FormPreview form={draft} lang={lang} />}
-                </div>
+                {!ro && (
+                  <button onClick={addSection}
+                    className="inline-flex items-center gap-2 rounded-xl border border-dashed border-slate-300 bg-white text-slate-500 px-4 py-2.5 text-[13px] font-bold hover:border-primary hover:text-primary transition-colors">
+                    <Lucide.Plus size={15} /> Szakasz hozzáadása
+                  </button>
+                )}
               </div>
 
-              {/* ÉLESÍTÉS ELŐTTI ELLENŐRZÉS */}
-              <div className="bg-white rounded-3xl border border-slate-100 p-5">
-                <div className="flex items-center justify-between gap-2 mb-3">
-                  <div className="flex items-center gap-2">
-                    <Lucide.ShieldCheck size={16} className={checks.length ? 'text-amber-500' : 'text-emerald-500'} />
-                    <h3 className="font-black text-slate-900 text-sm">Élesítés előtti ellenőrzés</h3>
-                  </div>
-                  {!ro && (
-                    <button onClick={async () => {
-                      setBusy(true);
-                      try { setChecks(await ECHO_api.templateValidate(vid) || []); }
-                      catch (e) { setErr(ECHO_msg(e)); } finally { setBusy(false); }
-                    }} className="text-[11px] font-black text-primary hover:underline">Újrafuttatás</button>
-                  )}
-                </div>
+              {/* ---------------- JOBB: előnézet és ellenőrzés ---------------- */}
+              <div className="xl:col-span-5">
+                <div className="xl:sticky xl:top-4 space-y-4">
 
-                {dirty && (
-                  <div className="bg-amber-50 border border-amber-100 rounded-2xl px-4 py-2.5 mb-3">
-                    <p className="text-[11px] font-bold text-amber-700">
-                      A lista a MENTETT tartalomra vonatkozik. Mentés után frissül.
-                    </p>
-                  </div>
-                )}
+                  <div className="bg-white rounded-3xl border border-slate-100 p-5">
+                    <div className="flex items-center justify-between gap-2 mb-4">
+                      <div className="flex items-center gap-2">
+                        <Lucide.Eye size={16} className="text-slate-400" />
+                        <h3 className="font-black text-slate-900 text-sm">Élő előnézet</h3>
+                      </div>
+                      <div className="flex gap-1">
+                        {[{ v: 'q', l: 'Kérdés' }, { v: 'sec', l: 'Szakasz' }, { v: 'all', l: 'Teljes' }].map(m => (
+                          <button key={m.v} onClick={() => setPvMode(m.v)}
+                            className={'text-[10px] font-black uppercase tracking-wider rounded-lg px-2 py-1 ' +
+                              (pvMode === m.v ? 'bg-primary/10 text-primary' : 'text-slate-400 hover:bg-slate-100')}>
+                            {m.l}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
 
-                {checks.length === 0 ? (
-                  <div className="bg-emerald-50 border border-emerald-100 rounded-2xl px-4 py-3">
-                    <p className="text-xs font-black text-emerald-700">Nincs hiba — a verzió élesíthető.</p>
-                    <p className="text-[10px] text-emerald-700/70 font-medium mt-1 leading-relaxed">
-                      Az élesítést a szerver is újraellenőrzi (echo_template_transition): ha közben
-                      bármi elromlott, ECHO_VALIDATION_FAILED-del elutasítja.
+                    <p className="text-[10px] text-slate-400 font-medium mb-4 leading-relaxed">
+                      Ugyanazokkal a komponensekkel rajzoljuk, amikkel a hallgató kitölt
+                      (ECHO_Question). A helykitöltők ki vannak töltve mintaértékkel —
+                      pl. [Oktató neve] → {ECHO_TOKENS['[Oktató neve]']}.
                     </p>
+
+                    <div className="rounded-2xl border border-slate-100 p-3">
+                      {pvMode === 'q' && (q
+                        ? <ECHO_Question q={ECHO_previewQuestion(q, lang)} index={(qi || 0) + 1}
+                            value={pv} onChange={setPv} lang={lang} seed="preview" ctx={ECHO_PREVIEW_CTX} />
+                        : <p className="text-xs font-bold text-slate-400 py-6 text-center">Nyiss ki egy kérdést a bal oldalon.</p>)}
+
+                      {pvMode === 'sec' && (sec
+                        ? <div>
+                            <h4 className="text-sm font-black text-slate-800 mb-1"><ECHO_Src>{ECHO_txt(sec, lang)}</ECHO_Src></h4>
+                            {(sec.questions || []).map((x, k) => (
+                              <ECHO_Question key={x.id || k} q={ECHO_previewQuestion(x, lang)} index={k + 1}
+                                value={undefined} onChange={() => {}} lang={lang} seed="preview" ctx={ECHO_PREVIEW_CTX} />
+                            ))}
+                          </div>
+                        : <p className="text-xs font-bold text-slate-400 py-6 text-center">Nincs kiválasztott szakasz.</p>)}
+
+                      {pvMode === 'all' && draft && <ECHO_FormPreview form={draft} lang={lang} />}
+                    </div>
+
+                    {/* A feltétel következménye kimondva. A cond mezőből ezt ma
+                        fejben kellett kikövetkeztetni — egy rosszul beállított
+                        feltétel csendben elrejti a kérdést a válaszadók egy része
+                        elől, és csak a kampány végén derül ki. */}
+                    {pvMode === 'q' && q && q.cond && (
+                      <div className="mt-3 rounded-2xl bg-amber-50 border border-amber-100 p-3 flex gap-2">
+                        <Lucide.GitBranch size={15} className="text-amber-700 flex-none mt-0.5" />
+                        <p className="text-[11px] text-amber-900 leading-relaxed">
+                          Ezt a kérdést nem mindenki látja: csak az, akire a beállított
+                          feltétel illik. A többieknél a kérdőív a következő kérdéssel
+                          folytatódik.
+                        </p>
+                      </div>
+                    )}
                   </div>
-                ) : (
-                  <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
-                    <p className="text-[11px] font-black text-amber-600 mb-1">{checks.length} találat — élesítés blokkolva</p>
-                    {checks.map((c, i) => (
-                      <button key={i} onClick={() => jumpTo(c)}
-                        className="w-full text-left border border-slate-100 rounded-2xl px-3.5 py-2.5 hover:border-primary/30 hover:bg-primary/5 transition-colors">
-                        <div className="flex items-center gap-2 mb-1">
-                          <UBadge tone={c.sulyossag === 'hiba' ? 'red' : 'amber'}>{c.sulyossag}</UBadge>
-                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider font-mono truncate">{c.kod}</span>
-                        </div>
-                        <p className="text-[11px] font-medium text-slate-600 leading-relaxed"><ECHO_Src>{c.uzenet}</ECHO_Src></p>
-                        {(c.szakasz || c.kerdes) && (
-                          <p className="text-[10px] font-black text-slate-300 mt-1 font-mono">
-                            {c.szakasz || '—'}{c.kerdes ? ' / ' + c.kerdes : ''}
-                          </p>
-                        )}
+
+                  {/* ÉLESÍTÉS ELŐTTI ELLENŐRZÉS — a kérdéshez köthető találatok
+                      már a saját kártyájukon is megjelentek; itt a teljes lista van,
+                      beleértve azt, ami egyik kérdéshez sem tartozik. */}
+                  <div className="bg-white rounded-3xl border border-slate-100 p-5">
+                    <div className="flex items-center justify-between gap-2 mb-3">
+                      <div className="flex items-center gap-2">
+                        <Lucide.ShieldCheck size={16}
+                          className={checks.length ? (hibaDb ? 'text-red-500' : 'text-amber-500') : 'text-emerald-500'} />
+                        <h3 className="font-black text-slate-900 text-sm">Élesítés előtti ellenőrzés</h3>
+                      </div>
+                      <button onClick={async () => {
+                        setBusy(true);
+                        try { setChecks(await ECHO_api.templateValidate(vid) || []); }
+                        catch (e) { setErr(ECHO_msg(e)); } finally { setBusy(false); }
+                      }} disabled={busy}
+                        className="text-[10px] font-black uppercase tracking-wider text-slate-400 hover:text-primary disabled:opacity-50">
+                        Újrafuttatás
                       </button>
-                    ))}
+                    </div>
+
+                    {checks.length === 0 ? (
+                      <p className="text-[11px] font-bold text-emerald-700">Nincs hiba — a verzió élesíthető.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        <p className={'text-[11px] font-black mb-1 ' + (hibaDb ? 'text-red-600' : 'text-amber-600')}>
+                          {checks.length} találat{hibaDb ? ` — ebből ${hibaDb} blokkolja az élesítést` : ''}
+                        </p>
+                        {checks.map((c, i) => (
+                          <div key={i} className="rounded-2xl border border-slate-100 p-3">
+                            <div className="flex items-center gap-2 mb-1">
+                              <UBadge tone={c.sulyossag === 'hiba' ? 'red' : 'amber'}>{c.sulyossag}</UBadge>
+                              <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider font-mono truncate">{c.kod}</span>
+                            </div>
+                            <p className="text-[11px] font-medium text-slate-600 leading-relaxed"><ECHO_Src>{c.uzenet}</ECHO_Src></p>
+                            {(c.szakasz || c.kerdes) && (
+                              <p className="text-[10px] font-bold text-slate-400 mt-1 font-mono">
+                                {c.szakasz || '—'}{c.kerdes ? ' / ' + c.kerdes : ''}
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                )}
+
+                </div>
               </div>
             </div>
-          </div>
         </>
       )}
 
