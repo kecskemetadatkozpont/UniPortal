@@ -59,6 +59,10 @@ const AppView = {
   // Oktatoi eredmenynezet. A szerkeszto es a moderalas NEM kap sajat nezetet:
   // az ECHO_ADMIN-on belul fulek (features/echo.jsx, 13. szakasz).
   ECHO_TEACHER: 'echo_teacher',
+  // Kurzusnyilvantartas (43_course_registry.sql). NEM az ECHO_ADMIN fule:
+  // az echo.course / echo.enrollment onallo torzsadat, amire az ECHO-n kivul
+  // is hivatkoznak majd. Sajat menupont, sajat nezet.
+  COURSES: 'courses',
   // Kollégiumi modul (26_dorm.sql). Három nézet, három közönség:
   // az üzemeltetés, a karbantartás és maga a lakó.
   DORM_OPS: 'dorm_ops',
@@ -70,6 +74,7 @@ const MENU_ITEMS = [
   { id: AppView.FEED, label: 'Hírfolyam', icon: <Lucide.Newspaper size={20} /> },
   { id: AppView.PROGRAMS, label: 'Programok', icon: <Lucide.BookOpen size={20} /> },
   { id: AppView.TRAININGS, label: 'Képzések', icon: <Lucide.GraduationCap size={20} /> },
+  { id: AppView.COURSES, label: 'Kurzusok', icon: <Lucide.Library size={20} /> },
   { id: AppView.ASSISTANT, label: 'AI Asszisztens', icon: <Lucide.Sparkles size={20} /> },
   { id: AppView.AGENT_PORTAL, label: 'Ügynök és partner portál', icon: <Lucide.Briefcase size={20} /> },
   { id: AppView.ADMISSIONS_CORE, label: 'Jelentkezés és Felvételi', icon: <Lucide.FileText size={20} /> },
@@ -11034,6 +11039,17 @@ const App: React.FC = () => {
     // (partnerügynökség) nem hallgató, ezért nem véleményez oktatót — a
     // 15_echo_core.sql 11.7 seedje sem veszi fel a kurzusokra.
     if (item.id === AppView.ECHO_STUDENT) return currentUser.role !== 'AGENT';
+    // A kurzusnyilvantartas ugyintezoi ES oktatoi kepernyo. A feltetel a
+    // szerver oldali parja: az echo_course_list() is_staff()-ot VAGY elo
+    // echo.teacher sort kovetel. Az 'OKTATO' ECHO-grantot is beengedjuk, mert
+    // az a kotes epp azt jelenti, hogy az illeto oktatokent van nyilvantartva.
+    // Ha valakinek megsincs echo.teacher sora, a kepernyo ezt KIMONDJA —
+    // nem uresen hallgat, es nem piros hibaval fogad.
+    if (item.id === AppView.COURSES) {
+      if (['SUPERADMIN', 'ADMIN', 'ADMISSIONS', 'FINANCE'].includes(currentUser.role)) return true;
+      if (currentUser.role === 'TEACHER') return true;
+      return (currentUser.echoRoles || []).indexOf('OKTATO') >= 0;
+    }
     // Az oktatoi eredmenynezet KET fele nyilik, es a ketto FUGGETLEN egymastol.
     //   (a) UniPortal-oldal, valtozatlanul: a negy belso szerepkor. MERVE: az
     //       echo_campaigns() es az echo_rate() torzse is_admin()-t kovetel, ezert
@@ -11123,6 +11139,14 @@ const App: React.FC = () => {
           ? <RegistrationsView user={currentUser} />
           : <FeedView user={currentUser} onNavigate={setActiveView} />;
       case AppView.ECHO_STUDENT: return <ECHO_StudentView user={currentUser} />;
+      case AppView.COURSES:
+        // Ugyanaz a ket feltetel, mint a menuszuresben — kulonben egy oktato
+        // latna a menupontot, es a Hirfolyam jonne fel helyette.
+        return (['SUPERADMIN', 'ADMIN', 'ADMISSIONS', 'FINANCE'].includes(currentUser.role)
+                || currentUser.role === 'TEACHER'
+                || (currentUser.echoRoles || []).indexOf('OKTATO') >= 0)
+          ? <CRS_View user={currentUser} />
+          : <FeedView user={currentUser} onNavigate={setActiveView} />;
       case AppView.ECHO_ADMIN:
         return (currentUser.role === 'SUPERADMIN' || currentUser.role === 'ADMIN')
           ? <ECHO_AdminView user={currentUser} />
@@ -11393,7 +11417,7 @@ Object.assign(HU_EN, {
   // az angolt. A képzés-, kar- és programnevek ADATOK, azok angolul maradnak.
   // ============================================================
   // Képzések (features/programs.jsx)
-  'Képzések kezelése':'Degree Management','Programok kezelése':'Program Management','Képzési kínálat':'Study Programmes','Képzések':'Degrees','Programok':'Programs','Képzések (BSc, MSc, MA, MBA, PhD), a felvételi folyamataik és a jelentkezők kezelése.':'Manage degree programmes (BSc, MSc, MA, MBA, PhD), their admission flows and applicants.','Előkészítő programok, rövid kurzusok és tanulmányi kirándulások kezelése.':'Manage preparatory programmes, short courses and educational excursions.','Böngészd az NJE angol nyelvű képzéseit és jelentkezz online.':'Explore English-taught programmes at NJE and apply online.','Jelentkezők':'Applicants','Új képzés':'New degree','Új program':'New programme','Még nincs képzés':'No degrees yet','Még nincs program':'No programmes yet','Vedd fel az első képzést (BSc, MSc, MA, MBA vagy PhD).':'Add your first degree programme (BSc, MSc, MA, MBA or PhD).','Vegyél fel egy előkészítő programot, rövid kurzust vagy tanulmányi kirándulást.':'Add a preparatory programme, short course or educational excursion.','Jelentkezéseim':'My applications','Minden képzés':'All programmes','Még nincs jelentkezés':'No applications yet','A hallgatói jelentkezések itt fognak megjelenni.':'Applications from students will appear here.','Előrehaladás':'Progress','Beadva':'Submitted','Szint':'Level','Tandíj':'Tuition','Határidő':'Deadline','Nyitva':'Open','Lezárva':'Closed','Jelentkezés lezárása':'Close applications','Jelentkezés megnyitása':'Open applications','Program':'Program',
+  'Kurzusok':'Courses','Kurzusnyilvántartás':'Course Registry','Képzések kezelése':'Degree Management','Programok kezelése':'Program Management','Képzési kínálat':'Study Programmes','Képzések':'Degrees','Programok':'Programs','Képzések (BSc, MSc, MA, MBA, PhD), a felvételi folyamataik és a jelentkezők kezelése.':'Manage degree programmes (BSc, MSc, MA, MBA, PhD), their admission flows and applicants.','Előkészítő programok, rövid kurzusok és tanulmányi kirándulások kezelése.':'Manage preparatory programmes, short courses and educational excursions.','Böngészd az NJE angol nyelvű képzéseit és jelentkezz online.':'Explore English-taught programmes at NJE and apply online.','Jelentkezők':'Applicants','Új képzés':'New degree','Új program':'New programme','Még nincs képzés':'No degrees yet','Még nincs program':'No programmes yet','Vedd fel az első képzést (BSc, MSc, MA, MBA vagy PhD).':'Add your first degree programme (BSc, MSc, MA, MBA or PhD).','Vegyél fel egy előkészítő programot, rövid kurzust vagy tanulmányi kirándulást.':'Add a preparatory programme, short course or educational excursion.','Jelentkezéseim':'My applications','Minden képzés':'All programmes','Még nincs jelentkezés':'No applications yet','A hallgatói jelentkezések itt fognak megjelenni.':'Applications from students will appear here.','Előrehaladás':'Progress','Beadva':'Submitted','Szint':'Level','Tandíj':'Tuition','Határidő':'Deadline','Nyitva':'Open','Lezárva':'Closed','Jelentkezés lezárása':'Close applications','Jelentkezés megnyitása':'Open applications','Program':'Program',
   'Személyes adatok':'Personal details','Angol nyelvtudás':'English proficiency','Online interjú':'Online interview','Beadás és ellenőrzés':'Submit & review','Útlevél (adatoldal)':'Passport (data page)','Érettségi bizonyítvány + leckekönyv':'Secondary-school certificate + transcript','Alapdiploma + leckekönyv':'Bachelor degree + transcript','Mesterdiploma + leckekönyv':'Master degree + transcript','Önéletrajz (CV)':'Curriculum vitae (CV)','Portfólió / munkaminták':'Portfolio / work samples','Kutatási terv':'Research proposal','Ajánlólevél':'Recommendation letter','Előkészítő':'Preparatory','Rövid kurzus':'Short course','Tanulmányi kirándulás':'Educational excursion','Mesterképzés (MA · MBA)':'Master (MA · MBA)','Doktori (PhD)':'Doctoral (PhD)','Piszkozat':'Draft','Bírálat alatt':'In review','Elfogadva':'Accepted','Várólistán':'Waitlisted',
   'A képzés felvételi lépései':'Admission steps for this programme','Szükséges dokumentumok':'Required documents','A jelentkezés lezárult':'Applications closed','Jelentkezés folytatása':'Continue application','Jelentkezem':'Apply now','Vissza a képzésekhez':'Back to programmes','Mentés és kilépés':'Save & exit later','Erősítsd meg a kapcsolattartási adataidat ehhez a jelentkezéshez.':'Confirm your contact information for this application.','Telefon':'Phone','Állampolgárság szerinti ország':'Country of citizenship','pl. Nigéria':'e.g. Nigeria','Ezek a fájlok kötelezőek ehhez a képzéshez.':'These files are required for this programme.','Add meg az angol nyelvvizsgád adatait (B2 vagy magasabb ajánlott).':'Tell us about your English certificate (B2 or higher recommended).','Bizonyítvány':'Certificate','Válassz…':'Select…','Oktatás nyelve':'Medium of instruction','Egyéb':'Other','Pontszám / szint':'Score / level','Miért ezt a képzést választod? Legalább ~40 karakter (egy rövid bekezdés ideális).':'Why this programme? Minimum ~40 characters (a short paragraph is ideal).','Tisztelt Felvételi Bizottság! …':'Dear Admissions Committee, …','Online interjú foglalása':'Book an online interview','Regisztrációs díj':'Registration fee','Foglald le a helyed — ez a díj erősíti meg a regisztrációdat.':'Secure your place — this fee confirms your registration.','A jelentkezés feldolgozásához egyszeri, vissza nem térítendő jelentkezési díj szükséges.':'A one-time, non-refundable application fee is required to process your application.','Nincs fizetendő díj — minden rendben.':"No fee required — you're all set.",'Kártya':'Card','Banki átutalás':'Bank transfer','Fizetés kártyával':'Pay by card','Banki átutalás rögzítése':'Mark bank transfer','Teszt üzemmód — valódi terhelés nem történik.':'Test mode — no real charge is made.','Jelentkezés beadva':'Application submitted','Ellenőrzés és beadás':'Review & submit','A jelentkezésed a felvételi csoportnál van.':'Your application is with the admissions team.','Ellenőrizd, hogy minden kész, majd add be bírálatra.':'Check everything is complete, then submit for review.','Kész':'Complete','Hiányos':'Incomplete','Jelentkezés beadása':'Submit application','A beadáshoz minden lépést teljesíts':'Complete all steps to submit','Ismeretlen lépés.':'Unknown step.','Három rövid feladat. A megfeleléshez legalább 2 helyes válasz kell.':'Three short tasks. You need at least 2 correct to pass.','Válaszok beadása':'Submit answers','Minden szint':'All levels','Keresés a képzések között…':'Search programmes…','Nincs találat':'No results','Próbálj másik szintet vagy keresőkifejezést.':'Try a different level or search term.','Az adatok és a képzés felvételi folyamatának beállítása':"Configure details and this programme's admission flow",'Képzés neve':'Programme name','Kar':'Faculty','Fokozat megnevezése':'Degree label','Tandíj / szemeszter (EUR)':'Tuition / semester (EUR)','Időtartam (szemeszter)':'Duration (semesters)','Létszámkeret':'Capacity','Jelentkezési határidő':'Application deadline','Címkék (vesszővel elválasztva)':'Tags (comma-separated)','Összefoglaló':'Summary','Képzés borítóképe':'Programme image','Feltöltött kép ✓':'Uploaded image ✓','Kép URL (https://…)':'Image URL (https://…)','Felvételi folyamat — lépések':'Admission flow — steps','Sorrend':'Order','Jelentkezés nyitva':'Applications open','Képzés mentése':'Save programme','Időtartam':'Duration','Nyelv':'Language',
   // Hírfolyam (features/feed.jsx)

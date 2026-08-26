@@ -43,7 +43,9 @@ async function CRS_rpc(fn, args) {
 const CRS_api = {
   list:     (term, q)        => CRS_rpc('echo_course_list', { p_term: term || null, p_q: q || null }),
   get:      (id)             => CRS_rpc('echo_course_get', { p_course: id }),
-  students: (id, q)          => CRS_rpc('echo_course_students', { p_course: id, p_q: q || null }),
+  students: (id, q, mind)    => CRS_rpc('echo_course_students',
+                                  { p_course: id, p_q: q || null, p_all_terms: !!mind }),
+  history:  (id)             => CRS_rpc('echo_course_history', { p_course: id }),
   options:  (kind, id, q)    => CRS_rpc('echo_course_options',
                                   { p_kind: kind, p_course: id || null, p_q: q || null, p_limit: 60 }),
   save:     (p)              => CRS_rpc('echo_course_save', p),
@@ -58,6 +60,16 @@ const CRS_api = {
                                   { p_course: id, p_cim: cim, p_fajlnev: fajlnev, p_path: path,
                                     p_mime: mime || null, p_meret: meret ?? null, p_fajta: fajta || 'egyeb' }),
   docDel:   (doc)            => CRS_rpc('echo_course_document_remove', { p_doc: doc }),
+};
+
+// A változásnapló mezőnevei emberi alakban. Ami nincs a listán, az nyersen
+// jelenik meg — jobb egy ismeretlen oszlopnév, mint egy hazug címke.
+const CRS_MEZO = {
+  letrehozas: 'létrehozás', code: 'kurzuskód', name_hu: 'megnevezés',
+  name_en: 'angol megnevezés', term: 'félév', lang: 'nyelv',
+  org_unit_id: 'szervezeti egység', letszam: 'létszám',
+  van_orarendi_info: 'órarendi információ', vizsgakurzus: 'vizsgakurzus',
+  leiras: 'leírás', leiras_en: 'angol leírás', oktato: 'oktató',
 };
 
 const CRS_FAJTA = {
@@ -282,6 +294,8 @@ function CRS_Tab({ user }) {
   const [detBusy, setDetBusy] = useState(false);
   const [nevsor, setNevsor] = useState(null);
   const [nq, setNq]         = useState('');
+  const [mind, setMind]     = useState(false);   // a nevsor a tantargy MINDEN felevet mutassa
+  const [hist, setHist]     = useState(null);    // echo_course_history()
   const [formOpen, setFormOpen] = useState(false);
   const [formKurzus, setFormKurzus] = useState(null);
   const [err, setErr]       = useState('');
@@ -304,27 +318,28 @@ function CRS_Tab({ user }) {
   }, []);
 
   const loadDet = async (id) => {
-    if (!id) { setDet(null); setNevsor(null); return; }
+    if (!id) { setDet(null); setNevsor(null); setHist(null); return; }
+    CRS_api.history(id).then(setHist).catch(() => setHist(null));
     setDetBusy(true);
     try { setDet(await CRS_api.get(id)); }
     catch (e) { setDet(null); setErr(CRS_msg(e)); }
     finally { setDetBusy(false); }
   };
-  useEffect(() => { loadDet(sel); setNq(''); }, [sel]);
+  useEffect(() => { loadDet(sel); setNq(''); setMind(false); }, [sel]);
   useEffect(() => {
     if (!sel) return;
     let el = true;
     const t = setTimeout(() => {
-      CRS_api.students(sel, nq)
+      CRS_api.students(sel, nq, mind)
         .then(d => { if (el) setNevsor(Array.isArray(d) ? d : []); })
         .catch(() => { if (el) setNevsor([]); });
     }, nq ? 300 : 0);
     return () => { el = false; clearTimeout(t); };
-  }, [sel, nq]);
+  }, [sel, nq, mind]);
 
   const szol = (m) => { setUzenet(m); setTimeout(() => setUzenet(''), 4000); };
   const ujra = async () => { await loadDet(sel); await load();
-                             CRS_api.students(sel, nq).then(d => setNevsor(Array.isArray(d) ? d : [])); };
+                             CRS_api.students(sel, nq, mind).then(d => setNevsor(Array.isArray(d) ? d : [])); };
 
   const tesz = async (fn, sikerUzenet) => {
     setErr('');
@@ -608,6 +623,21 @@ function CRS_Tab({ user }) {
                     </div>
                   )}
                 </div>
+                {/* A TANTARGY tobb feleve ugyanazt a kurzuskodot viseli — az
+                    echo.course egy sora tantargy EGY FELEVBEN. A kapcsolo ezt
+                    fuzi ossze, es minden sor mellett AZ A FELEV oktatoja all,
+                    nem a mai. */}
+                {hist && hist.felev_szam > 1 && (
+                  <div className="flex items-center gap-1 mb-3">
+                    {[[false, 'Csak ' + det.term], [true, 'Minden félév (' + hist.felev_szam + ')']].map(([v, c]) => (
+                      <button key={String(v)} onClick={() => setMind(v)}
+                        className={'text-[11px] font-black px-3 py-1.5 rounded-xl transition ' +
+                          (mind === v ? 'bg-primary text-white' : 'text-slate-400 hover:bg-slate-50')}>
+                        {c}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <input className={U_input + ' text-sm mb-3'} value={nq} onChange={e => setNq(e.target.value)}
                   placeholder="Szűrés névre vagy e-mailre…" />
                 {nevsor === null ? <SkeletonRows n={4} /> : nevsor.length === 0 ? (
@@ -617,7 +647,7 @@ function CRS_Tab({ user }) {
                 ) : (
                   <div className="max-h-80 overflow-y-auto divide-y divide-slate-50">
                     {nevsor.map(h => (
-                      <div key={h.profile_id} className="flex items-center gap-3 py-2">
+                      <div key={h.course_id + '|' + h.profile_id} className="flex items-center gap-3 py-2">
                         <div className="min-w-0 flex-1">
                           <div className="text-xs font-bold text-slate-700 truncate">{h.nev}</div>
                           <div className="text-[10px] font-bold text-slate-400 truncate">
@@ -625,9 +655,13 @@ function CRS_Tab({ user }) {
                             {h.tagozat ? ' · ' + h.tagozat : ''}
                             {h.szak ? ' · ' + h.szak : ''}
                           </div>
+                          <div className="text-[10px] font-bold text-slate-500 truncate mt-0.5">
+                            <span className="text-primary">{h.term}</span>
+                            {h.oktatok ? ' · ' + h.oktatok : ''}
+                          </div>
                         </div>
                         {h.status !== 'active' && <UBadge tone="slate">leadta</UBadge>}
-                        {szerk && (
+                        {szerk && h.ez_a_felev && (
                           <button onClick={() => tesz(() => CRS_api.enroll(det.id, [h.profile_id], null, 'remove'),
                                                       () => 'Törölve a névsorból: ' + h.nev)}
                             className="text-slate-300 hover:text-red-500 flex-none"><Lucide.X size={14} /></button>
@@ -641,6 +675,94 @@ function CRS_Tab({ user }) {
                   a kérdőívet a félév kurzusaira beiratkozott hallgatók kapják meg.
                 </p>
               </div>
+
+              {/* --- a kurzus története --- */}
+              {hist && (
+                <div className="bg-white rounded-3xl border border-slate-100 p-6">
+                  <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">
+                    A kurzus története
+                  </h4>
+                  <p className="text-[11px] text-slate-400 leading-relaxed mb-4">
+                    Az azonos <b>kurzuskódú</b> félévek egy tantárgy egymást követő futásai.
+                    Minden félév a saját akkori oktatóját és létszámát mutatja.
+                    {hist.teljes_felev_szam > hist.felev_szam && (
+                      <span className="text-amber-600">
+                        {' '}Ebből {hist.teljes_felev_szam - hist.felev_szam} félév nem látszik,
+                        mert azoknak nem te vagy az oktatója.
+                      </span>
+                    )}
+                  </p>
+
+                  {(hist.felevek || []).length <= 1 ? (
+                    <p className="text-[11px] text-slate-300 font-bold italic">
+                      Ez a tantárgy egyelőre egyetlen félévvel szerepel. Amint ugyanezzel a
+                      kurzuskóddal létrejön a következő félév, itt egymás alatt fognak állni.
+                    </p>
+                  ) : (
+                    <div className="space-y-2 mb-5">
+                      {hist.felevek.map(f => (
+                        <button key={f.course_id} onClick={() => setSel(f.course_id)}
+                          className={'w-full text-left border rounded-2xl px-4 py-3 transition ' +
+                            (f.ez_a_felev ? 'border-primary bg-orange-50/40'
+                                          : 'border-slate-100 hover:border-slate-200')}>
+                          <div className="flex items-baseline justify-between gap-3">
+                            <span className="text-xs font-black text-slate-800">{f.term}</span>
+                            <span className="text-[10px] font-black text-slate-400">
+                              {f.hallgato} hallgató
+                              {f.letszam != null && f.letszam !== f.hallgato
+                                ? ' · forrás szerint ' + f.letszam : ''}
+                              {f.kampany > 0 ? ' · ' + f.kampany + ' kampány' : ''}
+                            </span>
+                          </div>
+                          <div className="text-[11px] font-bold text-slate-500 mt-0.5 truncate">
+                            {f.name_hu}
+                          </div>
+                          <div className="text-[10px] font-bold text-slate-400 mt-1 truncate">
+                            {(f.oktatok || []).length === 0 ? 'nincs rögzített oktató'
+                              : f.oktatok.map(o => o.nev + ' (' + Math.round(o.share_pct) + '%)').join(', ')}
+                            {f.vizsgakurzus ? ' · vizsgakurzus' : ''}
+                            {!f.van_orarendi_info ? ' · nincs órarendi info' : ''}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="border-t border-slate-100 pt-4">
+                    <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
+                      Változásnapló
+                    </div>
+                    {(hist.valtozasok || []).length === 0 ? (
+                      <p className="text-[11px] text-slate-300 font-bold italic">
+                        Még nincs bejegyzés. A napló a 44-es migráció óta gyűjt — az az előtti
+                        módosításokra visszamenőleg nincs nyom.
+                      </p>
+                    ) : (
+                      <div className="max-h-72 overflow-y-auto space-y-1.5">
+                        {hist.valtozasok.map((v, i) => (
+                          <div key={i} className="flex items-baseline gap-2 text-[11px] leading-relaxed">
+                            <span className="text-slate-300 font-black flex-none tabular-nums">
+                              {ECHO_date(v.at)}
+                            </span>
+                            <span className="text-slate-400 font-black flex-none">{v.term}</span>
+                            <span className="font-black text-slate-600 flex-none">
+                              {CRS_MEZO[v.mezo] || v.mezo}
+                            </span>
+                            <span className="text-slate-500 truncate">
+                              {v.regi ? <span className="line-through text-slate-300">{v.regi}</span> : null}
+                              {v.regi && v.uj ? ' → ' : ''}
+                              {v.uj || (v.regi ? ' (törölve)' : '')}
+                            </span>
+                            <span className="text-slate-300 font-bold ml-auto flex-none truncate max-w-40">
+                              {v.ki}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </React.Fragment>
           )}
         </div>
@@ -666,6 +788,29 @@ function CRS_Tab({ user }) {
             className={U_btnPrimary + ' py-2.5 px-5 !bg-red-500'}>Törlés</button>
         </div>
       </UModal>
+    </div>
+  );
+}
+
+
+/* --- CRS_View — a Kurzusok FŐ MENÜPONT nézete --------------------------- 
+   Külön komponens a CRS_Tab köré: a fül változatában a fejlécet az ECHO
+   adta, itt viszont a nézet a sajátja. A kettő szétválasztva marad, mert a
+   CRS_Tab bárhova beágyazható — ha később egy másik képernyő is meg akarja
+   mutatni a kurzusokat, nem kell fejlécet cipelnie hozzá. */
+function CRS_View({ user }) {
+  return (
+    <div className="p-4 sm:p-8 max-w-6xl mx-auto">
+      <div className="mb-7">
+        <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
+          Kurzusnyilvántartás
+        </h1>
+        <p className="text-sm text-slate-400 font-medium mt-1">
+          Kurzusok, oktatók, hallgatói névsor és tananyagok · törzsadat, amire az
+          ECHO kampányok célközönsége is épül
+        </p>
+      </div>
+      <CRS_Tab user={user} />
     </div>
   );
 }

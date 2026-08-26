@@ -5889,7 +5889,6 @@ const ECHO_ADMIN_TABS = [
   // 0.4 szelet (19_echo_roles.sql). Azért IDE kerül, és nem új menüpontba:
   // a bal oldali menü 17 eleméhez nem teszünk továbbiakat, és a kiosztás
   // ugyanahhoz a körhöz tartozik, mint a kampánykezelés.
-  { id: 'courses',    label: 'Kurzusok',         icon: 'BookOpen' },
   { id: 'roles',      label: 'Szerepkörök',      icon: 'ShieldCheck' },
 ];
 
@@ -5913,15 +5912,12 @@ function ECHO_AdminView({ user }) {
       <div className="mb-7">
         <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
           {tab === 'editor' ? 'Kérdőívszerkesztő'
-            : tab === 'courses' ? 'Kurzusnyilvántartás'
             : tab === 'roles' ? 'ECHO-szerepkörök és oktatói kötés'
             : 'Moderálási sor'}
         </h1>
         <p className="text-sm text-slate-400 font-medium mt-1">
           {tab === 'editor'
             ? 'Sablonok, verziók, állapotgép · a szerkesztés csak piszkozatban engedett'
-            : tab === 'courses'
-            ? 'Kurzusok, oktatók, hallgatói névsor és tananyagok · a kampányok célközönsége innen dolgozik'
             : tab === 'roles'
             ? 'Oktató ↔ fiók összekötés · hatókörös, lejáró, iktatható felhatalmazás'
             : 'Szöveges válaszok érvényessége · 3. § (10) · a szöveg nem törlődik'}
@@ -5930,7 +5926,6 @@ function ECHO_AdminView({ user }) {
       {tab === 'editor'     && <ECHO_Editor user={user} />}
       {tab === 'moderation' && <ECHO_ModerationView user={user} />}
       {tab === 'roles'      && <ECHO_RolesPanel user={user} />}
-      {tab === 'courses'    && <CRS_Tab user={user} />}
     </div>
   );
 }
