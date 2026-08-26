@@ -10805,6 +10805,17 @@ const App: React.FC = () => {
       }
     } catch (e) { /* a 19-es migráció még nem futott le — a menü marad a régi */ }
 
+    // --- CSOPORT-JOGOSULTSÁGOK (38_student_groups.sql) ---
+    // A csoport csak ADHAT menüpontot, elvenni nem tud semmit: a szűrő alább
+    // előbb a szerepkört nézi, és a csoportos ág csak akkor jut szóhoz, ha a
+    // szerepkör nem adta meg. Egy elrontott csoportszabály tehát nem zárhat ki
+    // senkit a saját munkájából.
+    let groupPerms = [];
+    try {
+      const { data: gp, error: gpErr } = await sb.rpc('my_group_permissions');
+      if (!gpErr && Array.isArray(gp)) groupPerms = gp;
+    } catch (e) { /* a 38-as migráció még nem futott le — a menü marad a régi */ }
+
     // --- Kollégiumi modul HATÓKÖRÖS szerepkörei (26_dorm.sql) ---
     // Ugyanaz a minta, mint az ECHO-nál, és ugyanabból az okból: a menüszűrő
     // utolsó ága `return false`, ezért egy ÚJ profiles.role érték (GONDNOK,
@@ -10842,6 +10853,8 @@ const App: React.FC = () => {
       echoTeacherId,
       // A kollégiumi grantok sem keverednek a UniPortal szerepkörrel.
       dormRoles,
+      // Csoportból örökölt menüpont-jogosultságok (38_student_groups.sql).
+      groupPerms,
       dormResident,
       avatar: (profile && profile.avatar_url) || ov.avatar || 'https://i.pravatar.cc/150?u=' + encodeURIComponent(authUser.email),
     });
@@ -11045,6 +11058,11 @@ const App: React.FC = () => {
     if (currentUser.role === 'FINANCE') return [AppView.FEED, AppView.ASSISTANT, AppView.FINANCE, AppView.AGENT_PORTAL, AppView.INTERVIEWS, AppView.REPORTS].includes(item.id);
     if (currentUser.role === 'ADMISSIONS') return [AppView.FEED, AppView.ASSISTANT, AppView.ADMISSIONS_CORE, AppView.EVALUATION, AppView.ENGAGEMENT_CRM, AppView.IMMIGRATION, AppView.INTERVIEWS, AppView.MARKETING_LEADS, AppView.REPORTS, AppView.INTELLIGENCE].includes(item.id);
     if (currentUser.role === 'STUDENT') return [AppView.FEED, AppView.PROGRAMS, AppView.ASSISTANT, AppView.STUDENT_PORTAL].includes(item.id);
+    // CSOPORT-JOGOSULTSÁG — közvetlenül a fail-closed ág ELŐTT.
+    // Ez a sorrend a lényeg: a szerepkör-ágak már lefutottak, tehát a csoport
+    // csak olyan menüpontot nyithat meg, amit a szerepkör nem adott meg.
+    // ELVENNI nem tud semmit — a lenti `return false` marad a végszó.
+    if ((currentUser.groupPerms || []).includes(item.id)) return true;
     return false;
   });
 

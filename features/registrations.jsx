@@ -23,12 +23,30 @@ const REG_STATUS_STYLE = {
   rejected: { label: 'Elutasítva',       cls: 'bg-red-50 text-red-600 border-red-100' },
 };
 
+/* A registration_directory nézet a profilt ÉS a hallgatói besorolást
+   (tagozat, képzési szint, szak, kar) meg a csoporttagságot is hozza — egy
+   lekérdezésben. Ha a 38-as migráció még nem futott le, visszaesünk a puszta
+   profiles táblára, hogy a képernyő attól még használható maradjon. */
 async function REG_loadProfiles() {
   if (!window.sb) return [];
-  const { data, error } = await window.sb.from('profiles').select('*').order('created_at', { ascending: false });
+  const v = await window.sb.from('registration_directory').select('*')
+    .order('created_at', { ascending: false });
+  if (!v.error && Array.isArray(v.data)) return v.data;
+  const { data, error } = await window.sb.from('profiles').select('*')
+    .order('created_at', { ascending: false });
   if (error) throw error;
   return data || [];
 }
+
+/* Mi szerint lehet csoportosítani. A kulcs a nézet oszlopneve. */
+const REG_GROUP_BY = [
+  ['', 'Nincs csoportosítás'],
+  ['tagozat', 'Tagozat'],
+  ['kepzesi_szint', 'Képzési szint'],
+  ['szak', 'Szak'],
+  ['kar', 'Kar'],
+  ['role', 'Szerepkör'],
+];
 
 // A superadmin döntése. `role` csak jóváhagyáskor számít.
 async function REG_decide(row, status, role, reason) {
@@ -63,6 +81,36 @@ function REG_fmtDate(v) {
   catch (e) { return String(v).slice(0, 16); }
 }
 
+/* A hallgatói besorolás egy cellában. Csak azt mutatja, ami VAN — a
+   k-küszöb miatt egyes mezők szándékosan üresek maradhatnak, és az üres
+   mező nem hiba, hanem adatvédelmi döntés. */
+const REG_Chip = ({ text, tone }) => !text ? null : (
+  <span className={'inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold whitespace-nowrap ' +
+    (tone || 'bg-slate-50 text-slate-600 border-slate-200')}>{text}</span>
+);
+
+function REG_Besorolas({ r }) {
+  const van = r.tagozat || r.kepzesi_szint || r.szak || r.kar;
+  if (!van) return <span className="text-[11px] text-slate-300">—</span>;
+  return (
+    <div className="flex flex-col gap-1 min-w-[190px]">
+      {r.szak && <span className="text-[13px] font-bold text-slate-700 leading-tight">{r.szak}</span>}
+      <div className="flex flex-wrap gap-1">
+        <REG_Chip text={r.tagozat} tone="bg-indigo-50 text-indigo-700 border-indigo-100" />
+        <REG_Chip text={r.kepzesi_szint} />
+      </div>
+      {r.kar && <span className="text-[10px] text-slate-400 leading-tight">{r.kar}</span>}
+      {Array.isArray(r.csoportok) && r.csoportok.length > 0 && (
+        <div className="flex flex-wrap gap-1 mt-0.5">
+          {r.csoportok.map(g => (
+            <REG_Chip key={g} text={g} tone="bg-emerald-50 text-emerald-700 border-emerald-100" />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function RegistrationsView({ user, onCountChange }) {
   const [rows, setRows] = useState(null);
   const [err, setErr] = useState('');
@@ -72,6 +120,7 @@ function RegistrationsView({ user, onCountChange }) {
   const [rejecting, setRejecting] = useState(null); // profile row
   const [reason, setReason] = useState('');
   const [q, setQ] = useState('');
+  const [groupBy, setGroupBy] = useState('');
 
   const load = async () => {
     setErr('');
@@ -109,16 +158,35 @@ function RegistrationsView({ user, onCountChange }) {
     );
   }
 
+  /* A keresés a besorolásra is illeszkedik: "gépész" vagy "levelező"
+     beírásával közvetlenül lehet szűrni, csoportosítás nélkül is. */
   const match = (r) => {
     const needle = q.trim().toLowerCase();
     if (!needle) return true;
-    return String(r.email || '').toLowerCase().includes(needle)
-        || String(r.name || '').toLowerCase().includes(needle);
+    return ['email', 'name', 'szak', 'tagozat', 'kepzesi_szint', 'kar']
+      .some(k => String(r[k] || '').toLowerCase().includes(needle));
   };
   const pending  = rows.filter(r => r.approval_status === 'pending').filter(match);
   const active   = rows.filter(r => r.approval_status === 'approved').filter(match);
   const rejected = rows.filter(r => r.approval_status === 'rejected').filter(match);
   const list = tab === 'pending' ? pending : tab === 'users' ? active : rejected;
+
+  /* Csoportosítás. A csoport nélküli sorok a végére kerülnek, saját
+     "Nincs megadva" szakaszba — így látszik, kinél hiányzik a besorolás. */
+  const csoportok = React.useMemo(() => {
+    if (!groupBy) return null;
+    const m = new Map();
+    for (const r of list) {
+      const k = r[groupBy] || '__nincs__';
+      if (!m.has(k)) m.set(k, []);
+      m.get(k).push(r);
+    }
+    return [...m.entries()].sort((a, b) => {
+      if (a[0] === '__nincs__') return 1;
+      if (b[0] === '__nincs__') return -1;
+      return b[1].length - a[1].length;      // a legnépesebb elöl
+    });
+  }, [list, groupBy]);
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-6xl 2xl:max-w-[1500px]">
@@ -141,21 +209,30 @@ function RegistrationsView({ user, onCountChange }) {
       )}
 
       <div className="flex items-center gap-2 mt-7 flex-wrap">
-        {[['pending', 'Jóváhagyásra vár', pending.length], ['users', 'Felhasználók', active.length], ['rejected', 'Elutasítva', rejected.length]].map(([k, label, n]) => (
+        {[['pending', 'Jóváhagyásra vár', pending.length], ['users', 'Felhasználók', active.length], ['rejected', 'Elutasítva', rejected.length], ['groups', 'Csoportok', null]].map(([k, label, n]) => (
           <button key={k} onClick={() => setTab(k)}
             className={'px-4 py-2 rounded-xl text-sm font-bold transition-colors ' +
               (tab === k ? 'bg-slate-900 text-white' : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-50')}>
-            {label} <span className={'ml-1 ' + (tab === k ? 'text-white/60' : 'text-slate-400')}>{n}</span>
+            {label}{n !== null && <span className={'ml-1 ' + (tab === k ? 'text-white/60' : 'text-slate-400')}>{n}</span>}
           </button>
         ))}
-        <div className="relative ml-auto">
+        {tab !== 'groups' && <select value={groupBy} onChange={e => setGroupBy(e.target.value)}
+                title="Csoportosítás"
+                className="ml-auto bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-semibold text-slate-600 focus:outline-none focus:ring-2 focus:ring-primary/20">
+          {REG_GROUP_BY.map(([k, label]) => (
+            <option key={k || 'none'} value={k}>{k ? 'Csoportosítás: ' + label : label}</option>
+          ))}
+        </select>}
+        {tab !== 'groups' && <div className="relative">
           <Lucide.Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" />
-          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Keresés név vagy e-mail szerint…"
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Keresés név, e-mail vagy szak szerint…"
             className="w-64 bg-white border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20" />
-        </div>
+        </div>}
       </div>
 
-      {list.length === 0 ? (
+      {tab === 'groups' ? (
+        <GRP_Tab rows={rows || []} user={user} />
+      ) : list.length === 0 ? (
         <div className="mt-6 bg-white rounded-3xl border border-slate-100 p-14 text-center">
           <div className="w-14 h-14 rounded-2xl bg-slate-50 text-slate-300 flex items-center justify-center mx-auto mb-4">
             <Lucide.UserCheck size={26} />
@@ -177,13 +254,30 @@ function RegistrationsView({ user, onCountChange }) {
               <tr className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">
                 <th className="text-left px-5 py-3">Felhasználó</th>
                 <th className="text-left px-5 py-3">{tab === 'users' ? 'Szerepkör' : 'Kért szerepkör'}</th>
+                <th className="text-left px-5 py-3">Besorolás</th>
                 <th className="text-left px-5 py-3">Regisztrált</th>
                 <th className="text-left px-5 py-3">Állapot</th>
                 <th className="text-right px-5 py-3">Döntés</th>
               </tr>
             </thead>
             <tbody>
-              {list.map(r => {
+              {/* Csoportosításnál a táblát NEM bontjuk szét: a csoport
+                  fejléce egy teljes szélességű sor. Így a fejléc, a
+                  vízszintes görgetés és az oszlopszélességek egyben maradnak. */}
+              {(csoportok
+                ? csoportok.flatMap(([kulcs, sorok]) => [{ __fejlec: kulcs, __db: sorok.length }, ...sorok])
+                : list
+               ).map(r => {
+                if (r.__fejlec) return (
+                  <tr key={'h-' + r.__fejlec} className="bg-slate-50/80 border-b border-slate-100">
+                    <td colSpan={6} className="px-5 py-2.5">
+                      <span className="text-[11px] font-black text-slate-600 uppercase tracking-wide">
+                        {r.__fejlec === '__nincs__' ? 'Nincs megadva' : r.__fejlec}
+                      </span>
+                      <span className="ml-2 text-[11px] font-bold text-slate-400">{r.__db} fő</span>
+                    </td>
+                  </tr>
+                );
                 const st = REG_STATUS_STYLE[r.approval_status] || REG_STATUS_STYLE.pending;
                 const chosen = roleDraft[r.id] || r.requested_role || r.role || 'STUDENT';
                 const busy = busyId === r.id;
@@ -193,6 +287,9 @@ function RegistrationsView({ user, onCountChange }) {
                     <td className="px-5 py-4">
                       <div className="font-bold text-slate-800">{r.name || '—'}</div>
                       <div className="text-[13px] text-slate-400">{r.email}</div>
+                    </td>
+                    <td className="px-5 py-4">
+                      <REG_Besorolas r={r} />
                     </td>
                     <td className="px-5 py-4 text-sm font-semibold text-slate-600">
                       {tab === 'users' ? (

@@ -48,6 +48,7 @@ const FEATURE_FILES = [
   // hivatkozik ra, tehat a modul-kiertekeles sorrendje nem szamit.
   'features/agency.jsx',
   'features/multiprogram.jsx',
+  'features/groups.jsx',
 ];
 
 // `motion` is only referenced by the shim at the top of app.jsx, which renders
