@@ -50,6 +50,10 @@ const FEATURE_FILES = [
   'features/multiprogram.jsx',
   'features/groups.jsx',
   'features/roles.jsx',
+  // Kurzusnyilvantartas (43_course_registry.sql). Az echo.jsx hivatkozik a
+  // CRS_Tab-ra, de az fuggveny-deklaracio, tehat hoistolodik — a modul
+  // kiertekelesenek sorrendje emiatt kozombos.
+  'features/courses.jsx',
 ];
 
 // `motion` is only referenced by the shim at the top of app.jsx, which renders
