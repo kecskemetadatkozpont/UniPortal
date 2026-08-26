@@ -300,6 +300,10 @@ const ECHO_api = {
   audience:       (id)          => ECHO_rpc('echo_campaign_audience', { p_campaign: id }),
   audienceSet:    (id, items)   => ECHO_rpc('echo_campaign_audience_set',
                                     { p_campaign: id, p_items: items }),
+  audienceStudents:(id, items, q) => ECHO_rpc('echo_audience_target_students',
+                                    { p_campaign: id, p_items: items, p_q: q || null, p_limit: 300 }),
+  campaignStudents:(id, q)      => ECHO_rpc('echo_campaign_students',
+                                    { p_campaign: id, p_q: q || null, p_limit: 300 }),
   audiencePreview:(id, items)   => ECHO_rpc('echo_audience_preview',
                                     { p_campaign: id, p_items: items }),
   audienceOptions:(id, kind, q) => ECHO_rpc('echo_audience_options',
@@ -2236,6 +2240,106 @@ function ECHO_termOptions(rows, now) {
   return list.sort().map(term => ({ term, futo: db.get(term) || 0 }));
 }
 
+/* --- Hallgatói névsor modal ----------------------------------------------
+   Ket helyen nyilik: a szerkesztoben a MEG NEM MENTETT celkozonseghez, es a
+   kampany "Jogosult hallgato" kartyaja mogul a TENYLEGES jogosultakhoz. A
+   ket forras kulonbozo, ezert a hivo adja at a betoltot — a modal maga nem
+   tudja, honnan jon az adat, es nem is kell tudnia.
+
+   AMIT SZANDEKOSAN NEM MUTAT: ki kuldte be a kerdoivet. Az echo.participation
+   tarolja ezt (kell a ketszeres kitoltes ellen), de bongeszheto listaja mas
+   iranybol nyitna meg ugyanazt, amit a k-anonimitasi kuszobok vednek. */
+function ECHO_StudentListModal({ open, cim, alcim, betolt, onClose }) {
+  const [d, setD]     = useState(null);
+  const [q, setQ]     = useState('');
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!open) { setD(null); setQ(''); setErr(''); return; }
+    let el = true;
+    setBusy(true);
+    const t = setTimeout(() => {
+      betolt(q)
+        .then(r => { if (el) { setD(r); setErr(''); setBusy(false); } })
+        .catch(e => { if (el) { setD(null); setErr(ECHO_msg(e)); setBusy(false); } });
+    }, q ? 300 : 0);
+    return () => { el = false; clearTimeout(t); };
+  }, [open, q]);
+
+  const sorok = (d && Array.isArray(d.sorok)) ? d.sorok : [];
+
+  return (
+    <UModal open={open} onClose={onClose} max="max-w-3xl"
+      icon={<Lucide.Users size={20} />} title={cim} subtitle={alcim}>
+      {err && (
+        <div className="mb-4 bg-red-50 border border-red-100 rounded-2xl px-4 py-3 text-sm font-bold text-red-600 flex gap-2">
+          <Lucide.AlertCircle size={16} className="flex-none mt-0.5" /> {err}
+        </div>
+      )}
+
+      <div className="flex items-center gap-3 mb-3">
+        <input className={U_input + ' text-sm'} value={q} onChange={e => setQ(e.target.value)}
+          placeholder="Szűrés névre vagy e-mailre…" />
+        <RefreshingBadge on={busy} />
+      </div>
+
+      {d && (
+        <p className="text-[11px] font-black text-slate-400 mb-2">
+          {/* Szures kozben az 'ossz' tovabbra is a TELJES letszam — a mutatott
+              sorokat a szuro szukitette, nem a lista hatara. A ketto mast
+              jelent, ezert nem szabad ugyanugy fogalmazni. */}
+          {q
+            ? <span>{d.mutatva} találat · {d.ossz} hallgatóból</span>
+            : <span>{d.ossz} hallgató</span>}
+          {!q && d.mutatva < d.ossz && (
+            <span className="text-amber-600"> · ebből {d.mutatva} látszik (a lista {d.hatar} sornál megáll)</span>
+          )}
+          {q && d.mutatva >= d.hatar && (
+            <span className="text-amber-600"> · a lista {d.hatar} sornál megáll, szűkíts tovább</span>
+          )}
+        </p>
+      )}
+
+      {d === null ? <SkeletonRows n={6} /> : sorok.length === 0 ? (
+        <UEmpty icon={<Lucide.UserX size={22} />} title="Nincs találat"
+          text={q ? 'Ezzel a szűréssel senki.' : 'Ez a beállítás egyetlen hallgatót sem ér el.'} />
+      ) : (
+        <div className="max-h-[26rem] overflow-y-auto divide-y divide-slate-50 border border-slate-100 rounded-2xl">
+          {sorok.map(h => (
+            <div key={h.profile_id} className="flex items-center gap-3 px-4 py-2.5">
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-bold text-slate-700 truncate">{h.nev}</div>
+                <div className="text-[10px] font-bold text-slate-400 truncate">
+                  {h.email}
+                  {h.tagozat ? ' · ' + h.tagozat : ''}
+                  {h.kepzesi_szint ? ' · ' + h.kepzesi_szint : ''}
+                  {h.szak ? ' · ' + h.szak : ''}
+                </div>
+                {h.kar && (
+                  <div className="text-[10px] font-bold text-slate-300 truncate">{h.kar}</div>
+                )}
+              </div>
+              {h.kurzus != null && (
+                <span className="text-[10px] font-black text-slate-400 flex-none">
+                  {h.kurzus} kurzus
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <p className="text-[11px] text-slate-400 leading-relaxed mt-3">
+        A lista azt mutatja, <b>kit érint</b> a kampány. Azt, hogy ki küldte be a kérdőívet,
+        szándékosan nem mutatjuk: a kérdőív névtelen, és egy ilyen névsor a közzétett
+        eredménnyel együtt visszafejthetővé tenné a válaszokat.
+      </p>
+    </UModal>
+  );
+}
+
+
 /* --- Új kampány űrlapja ---------------------------------------------------
    A sablonverzió-választó KIZÁRÓLAG 'live' és 'approved' verziót kínál, mert
    az echo_campaign_create() is csak ezeket fogadja el. A megnyitáshoz viszont
@@ -2596,6 +2700,7 @@ function ECHO_CampaignEditor({ open, campaign, campaigns, onClose, onDone }) {
   const [tetel, setTetel] = useState([]);
   const [elo, setElo]     = useState(null);     // elonezet a MEG NEM MENTETT listara
   const [eloBusy, setEloBusy] = useState(false);
+  const [nevsorOpen, setNevsorOpen] = useState(false);
   const [busy, setBusy]   = useState(false);
   const [err, setErr]     = useState('');
 
@@ -2859,6 +2964,12 @@ function ECHO_CampaignEditor({ open, campaign, campaigns, onClose, onDone }) {
                 </p>
               )}
 
+              <button type="button" onClick={() => setNevsorOpen(true)}
+                className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-black
+                           text-primary hover:underline">
+                <Lucide.Users size={12} /> Kik ezek a hallgatók?
+              </button>
+
               <p className="text-[11px] text-slate-400 leading-relaxed mt-1.5">
                 Felső korlát: a kizárási szabályok (létszám, órarendi info, vizsgakurzus,
                 oktatói óraarány) csak az <b>alkalmasság újraépítésekor</b> futnak le — azt a
@@ -2868,6 +2979,12 @@ function ECHO_CampaignEditor({ open, campaign, campaigns, onClose, onDone }) {
           )}
         </div>
       </div>
+
+      <ECHO_StudentListModal open={nevsorOpen} onClose={() => setNevsorOpen(false)}
+        cim="A célközönség hallgatói"
+        alcim={'A MOSTANI, még nem mentett beállítás szerint · ' + campaign.code}
+        betolt={(q) => ECHO_api.audienceStudents(campaign.id,
+                         tetel.map(x => ({ kind: x.kind, id: x.ref })), q)} />
 
       <div className="flex items-center justify-end gap-2 mt-6 pt-5 border-t border-slate-100">
         <button onClick={onClose} disabled={busy} className={U_btnGhost + ' py-2.5 px-5'}>Mégse</button>
@@ -2887,6 +3004,7 @@ function ECHO_CampaignsPanel({ user }) {
   const [refreshing, setRefreshing] = useState(false);
   const [sel, setSel] = useState(null);        // kiválasztott kampány
   const [editOpen, setEditOpen] = useState(false);  // kampányszerkesztő
+  const [jogOpen, setJogOpen] = useState(false);    // a jogosult hallgatók névsora
   const [rate, setRate] = useState(null);      // echo_rate eredménye
   const [rateBusy, setRateBusy] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
@@ -3216,11 +3334,23 @@ function ECHO_CampaignsPanel({ user }) {
                   { k: 'Beérkezett', v: sel.responses, i: 'Inbox' },
                 ].map(x => {
                   const Ic = Lucide[x.i] || Lucide.Circle;
+                  // Csak a "Jogosult hallgato" nyithato meg: a tobbi szam mogott
+                  // vagy nincs nevsor (par), vagy epp azt NEM mutatjuk meg, hogy
+                  // ki mit tett (elkezdte / beerkezett) — a kerdoiv nevtelen.
+                  const nyit = x.k === 'Jogosult hallgató' && x.v > 0;
                   return (
-                    <div key={x.k} className="bg-slate-50 rounded-2xl p-4">
-                      <Ic size={16} className="text-slate-400 mb-2" />
+                    <div key={x.k}
+                      onClick={nyit ? () => setJogOpen(true) : undefined}
+                      role={nyit ? 'button' : undefined}
+                      title={nyit ? 'Kattints a névsorért' : undefined}
+                      className={'bg-slate-50 rounded-2xl p-4 ' +
+                        (nyit ? 'cursor-pointer hover:bg-orange-50/60 transition' : '')}>
+                      <Ic size={16} className={(nyit ? 'text-primary' : 'text-slate-400') + ' mb-2'} />
                       <p className="text-xl font-black text-slate-900">{x.v}</p>
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider mt-0.5">{x.k}</p>
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider mt-0.5">
+                        {x.k}
+                        {nyit && <Lucide.ChevronRight size={11} className="inline ml-0.5 -mt-0.5 text-primary" />}
+                      </p>
                     </div>
                   );
                 })}
@@ -3356,6 +3486,11 @@ function ECHO_CampaignsPanel({ user }) {
       {/* --- kampány-életciklus: létrehozás és állapotváltás --- */}
       <ECHO_CampaignCreate open={createOpen} onClose={() => setCreateOpen(false)}
                           onDone={onCreated} campaigns={rows} />
+
+      <ECHO_StudentListModal open={jogOpen} onClose={() => setJogOpen(false)}
+        cim="Jogosult hallgatók"
+        alcim={sel ? (sel.name + ' · az alkalmassági lista szerint') : ''}
+        betolt={(q) => ECHO_api.campaignStudents(sel.id, q)} />
 
       <ECHO_CampaignEditor open={editOpen} campaign={sel} campaigns={rows}
         onClose={() => setEditOpen(false)}
