@@ -4600,6 +4600,18 @@ function ECHO_Editor({ user }) {
                   </h3>
                 ) : (
                   <div className="flex items-center gap-2">
+                    {/* A size NÉLKÜL az input a böngésző alapértelmezett ~20
+                        karakteres belső szélességén marad, akármilyen hosszú a
+                        név — a min-w/max-w csak korlátot ad, szélességet nem.
+                        Mérve: az "OMHV alapkerdoiv (28/2023.)" névből 38 px
+                        levágódott. A size a tartalomhoz igazítja, ugyanazon a
+                        16–56 karakteres határon belül, amit az osztályok is
+                        kifejeznek.
+
+                        A felső határ fölött (a maxLength 120-at enged) a név
+                        továbbra sem férne ki — de ott már NEM némán: a title
+                        megmutatja a teljeset, az ellipszis pedig jelzi, hogy
+                        van még. A néma levágás volt az eredeti hiba. */}
                     <input
                       value={nameHu}
                       onChange={e => setNameHu(e.target.value)}
@@ -4608,8 +4620,10 @@ function ECHO_Editor({ user }) {
                       maxLength={120}
                       aria-label="A kérdőív neve"
                       placeholder="A kérdőív neve"
+                      size={Math.max(16, Math.min(56, (nameHu || '').length + 1))}
+                      title={nameHu || 'A kérdőív neve'}
                       className="font-black text-slate-900 bg-transparent border-b-2 border-dashed border-slate-200
-                                 focus:border-primary focus:outline-none px-0.5 py-0.5 min-w-[16ch] max-w-[38ch]"
+                                 focus:border-primary focus:outline-none px-0.5 py-0.5 min-w-[16ch] max-w-[56ch] text-ellipsis"
                     />
                     <span className="text-slate-300 font-black">· v{doc.version}</span>
                     {nameBusy && <Lucide.Loader2 size={13} className="animate-spin text-slate-300" />}
