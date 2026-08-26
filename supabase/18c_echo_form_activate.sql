@@ -33,9 +33,14 @@
 --      trigger a pecsét után minden visszalépést tilt. Lefut a
 --      echo.shuffle_responses() is, tehát a válaszok fizikai sorrendje
 --      elbomlik — ez a pecsét lényege, nem mellékhatás.
---      MIÉRT KELL: egy félévre EGY aktív kampány lehet
---      (echo_campaign_active_term_uidx + ECHO_TERM_BUSY), tehát az új
---      kampány csak a régi lezárása után jöhet létre.
+--      MIÉRT KELL: már NEM az adatbázis kényszeríti ki — egy félévre azóta
+--      bármennyi kampány lehet (41_campaign_term_free.sql). A lezárás itt
+--      szándékos döntés: a kérdőívet LECSERÉLTED, tehát a régi verzió ne
+--      gyűjtsön tovább válaszokat ugyanarra a kurzusra. Ha a régi kampány
+--      futva maradna, ugyanaz a hallgató kétszer értékelné ugyanazt az
+--      oktatót két különböző kérdőívvel, és az eredmény egyik verzióhoz
+--      sem tartozna tisztán. Aki SZÁNDÉKOSAN akar két párhuzamos kérdőívet,
+--      az két külön kampányt hoz létre — azt már semmi nem tiltja.
 --  (4) Új kampány jön létre a 2. verzióval, felépül a jogosultsági lista
 --      (echo.eligibility_rebuild), és a kampány MEGNYÍLIK.
 --

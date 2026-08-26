@@ -222,29 +222,18 @@ comment on table echo.campaign_log is
 -- RLS a naplón is: második védvonal, policy nélkül (lásd 16_echo_reports.sql 8.6).
 alter table echo.campaign_log enable row level security;
 
--- 1.3 Ugyanarra a félévre ne legyen két AKTÍV kampány.
--- MIÉRT: az echo.eligibility_rebuild() a kampány FÉLÉVÉRE szűrve gyűjti a
--- kurzusokat (where c.term = v_term). Két aktív kampány ugyanarra a félévre
--- tehát pontosan UGYANAZT a kurzushalmazt célozná meg, és minden hallgató
--- két kérdőívet kapna ugyanarról az oktatóról. A 'sealed'/'published'
--- kampányok kimaradnak a feltételből: azok már lezárt történelmi adatok,
--- melléjük a következő félév kampánya nyugodtan létrejöhet.
--- Ha valakinél mégis van két aktív kampány egy félévre, az index nem jön
--- létre, a migráció viszont NEM hasal el — a szabályt ilyenkor csak az RPC
--- kényszeríti ki, és erről NOTICE szól.
-do $idx$
-begin
-  begin
-    create unique index if not exists echo_campaign_active_term_uidx
-      on echo.campaign (term)
-      where state in ('draft','open','closed','processing');
-  exception when unique_violation then
-    raise notice 'ECHO 18: az echo_campaign_active_term_uidx NEM jott letre — '
-                 'mar most van ket aktiv kampany ugyanarra a felevre. '
-                 'A szabalyt ilyenkor csak az echo_campaign_create() ellenorzi.';
-  end;
-end
-$idx$;
+-- 1.3 Egy felevre BARMENNYI kampany lehet.
+-- Korabban itt allt egy echo_campaign_active_term_uidx egyedi index, ami
+-- felevenkent egyetlen aktiv (draft/open/closed/processing) kampanyt engedett.
+-- Az indoklas az volt, hogy az echo.eligibility_rebuild() a felev OSSZES
+-- kurzusat gyujti, tehat ket kampany ugyanazt a kort celozna meg ketszer.
+-- Ez igaz, de nem hiba: a felev nem foglalhato eroforras, csak metaadat, es
+-- egy felevben tobb kerdoiv is futhat egyszerre (felevkozi visszajelzes,
+-- felev vegi ertekeles, kulon meroeszkoz egy karnak). Hogy egy hallgato ket
+-- kerdoivet kap, az ilyenkor szandekos: az echo_my_courses() soronkent adja
+-- a campaign_id-t, es a felulet kampanynevvel kulonbozteti meg oket.
+-- A 41_campaign_term_free.sql ejti az indexet az elo adatbazisban.
+
 
 
 -- ============================================================
@@ -520,7 +509,6 @@ declare
   v_base   text;
   v_n      int := 1;
   v_id     uuid;
-  v_busy   text;
 begin
   if auth.uid() is null then raise exception 'ECHO_NOT_AUTHENTICATED'; end if;
   if not public.is_admin() then raise exception 'ECHO_FORBIDDEN'; end if;
@@ -557,20 +545,15 @@ begin
                     'kampanyhoz csak "approved" vagy "live" verzio hasznalhato.', v_tvst;
   end if;
 
-  -- Egy félévre egy aktív kampány. Az indoklás az 1.3 pontnál.
-  select c.code into v_busy
-    from echo.campaign c
-   where c.term = v_term
-     and c.state in ('draft','open','closed','processing')
-   limit 1;
-  if v_busy is not null then
-    raise exception 'ECHO_TERM_BUSY: a(z) % felevre mar van aktiv kampany (%). '
-                    'Az echo.eligibility_rebuild() a felev OSSZES kurzusat gyujti, '
-                    'igy ket aktiv kampany ugyanazt a kort celozna meg ketszer.',
-                    v_term, v_busy;
-  end if;
 
   -- Kód: emberi olvasásra, egyedi. Az echo.slug() a magyar ékezeteket is kezeli.
+  -- A kereses+beszuras nem atomi: ket egyideju letrehozas ugyanazt a kodot
+  -- talalhatna szabadnak, es a masodik az echo_campaign_code_uidx-en hasalna
+  -- el. Eddig ezt a felev-index takarta el (a masodik kampany ugyis elbukott);
+  -- most, hogy egy felevre tobb kampany lehet, ez a verseny valodiva valt.
+  -- Tranzakcio vegeig tarto tanacsado zar: a kampanyletrehozas ritka, a
+  -- sorositas ara elhanyagolhato.
+  perform pg_advisory_xact_lock(hashtextextended('echo_campaign_create', 0));
   v_base := 'OMHV-' || echo.slug(v_term);
   v_code := v_base;
   while exists (select 1 from echo.campaign where code = v_code) loop
@@ -1500,9 +1483,14 @@ select tv.version,
 --      trigger a pecsét után minden visszalépést tilt. Lefut a
 --      echo.shuffle_responses() is, tehát a válaszok fizikai sorrendje
 --      elbomlik — ez a pecsét lényege, nem mellékhatás.
---      MIÉRT KELL: egy félévre EGY aktív kampány lehet
---      (echo_campaign_active_term_uidx + ECHO_TERM_BUSY), tehát az új
---      kampány csak a régi lezárása után jöhet létre.
+--      MIÉRT KELL: már NEM az adatbázis kényszeríti ki — egy félévre azóta
+--      bármennyi kampány lehet (41_campaign_term_free.sql). A lezárás itt
+--      szándékos döntés: a kérdőívet LECSERÉLTED, tehát a régi verzió ne
+--      gyűjtsön tovább válaszokat ugyanarra a kurzusra. Ha a régi kampány
+--      futva maradna, ugyanaz a hallgató kétszer értékelné ugyanazt az
+--      oktatót két különböző kérdőívvel, és az eredmény egyik verzióhoz
+--      sem tartozna tisztán. Aki SZÁNDÉKOSAN akar két párhuzamos kérdőívet,
+--      az két külön kampányt hoz létre — azt már semmi nem tiltja.
 --  (4) Új kampány jön létre a 2. verzióval, felépül a jogosultsági lista
 --      (echo.eligibility_rebuild), és a kampány MEGNYÍLIK.
 --

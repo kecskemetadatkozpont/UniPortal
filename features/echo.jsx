@@ -2177,18 +2177,16 @@ function ECHO_fromLocalInput(v) {
   return isNaN(d.getTime()) ? null : d.toISOString();
 }
 
-/* --- Feleveek a legordulohoz ---------------------------------------------
+/* --- Felevek a legordulohoz ---------------------------------------------
    A felev formatuma '2025/26/2': a tanev elso eve / a masodik eve ket jegyen /
    1 = oszi, 2 = tavaszi. A lista a MAI datum kore general harom tanevet, es
    hozzaveszi azokat a feleveket, amikre mar van kampany — igy egy regebbi vagy
    kezzel felvitt felev sem tunik el a legordulobol.
 
-   Foglaltnak azt a felevet jeloljuk, amire mar van AKTIV kampany. Ez nem sajat
-   szigor: az echo_campaign_active_term_uidx egyedi index draft/open/closed/
-   processing allapotban tiltja a masodikat — egy sealed/published kampany
-   feleve viszont ujra szabad, ezert azt nem tiltjuk. Ha ezt nem irnank ki, a
-   felhasznalo a Letrehozas gombig eljutna, es ott kapna egy nyers
-   constraint-hibat arrol, amit a lista elore tud. */
+   A felev NEM foglalhato: egy felevre barmennyi kampany futhat (a tiltast a
+   41_campaign_term_free.sql szuntette meg). A mar futo kampanyok szamat azert
+   irjuk ki a sor vegen, mert tajekoztat — de nem tilt es nem tesz semmit
+   valaszthatatlanna. */
 const ECHO_TERM_ACTIVE = ['draft', 'open', 'closed', 'processing'];
 
 function ECHO_termCurrent(now) {
@@ -2214,14 +2212,14 @@ function ECHO_termOptions(rows, now) {
     const nx = String((y + 1) % 100).padStart(2, '0');
     list.push(y + '/' + nx + '/1', y + '/' + nx + '/2');
   }
-  const taken = new Map();
+  const db = new Map();
   (Array.isArray(rows) ? rows : []).forEach(c => {
     if (!c || !c.term) return;
     if (list.indexOf(c.term) < 0) list.push(c.term);
-    if (ECHO_TERM_ACTIVE.indexOf(c.state) >= 0) taken.set(c.term, c);
+    if (ECHO_TERM_ACTIVE.indexOf(c.state) >= 0) db.set(c.term, (db.get(c.term) || 0) + 1);
   });
   // A negyjegyu evszam miatt a sztringrendezes idorendet ad.
-  return list.sort().map(term => ({ term, taken: taken.get(term) || null }));
+  return list.sort().map(term => ({ term, futo: db.get(term) || 0 }));
 }
 
 /* --- Új kampány űrlapja ---------------------------------------------------
@@ -2247,13 +2245,9 @@ function ECHO_CampaignCreate({ open, onClose, onDone, campaigns }) {
   useEffect(() => {
     if (!open) return;
     setErr(''); setBusy(false);
-    // A mostani felevet felajanljuk, de csak ha szabad: egy foglalt felev
-    // elovalasztasa csak a Letrehozas gombnal derulne ki.
-    setTerm(prev => {
-      if (prev) return prev;
-      const hit = termOpts.find(t => t.term === termNow);
-      return hit && !hit.taken ? hit.term : '';
-    });
+    // A mostani felevet felajanljuk — a felev nem foglalhato, tehat ez
+    // mindig ervenyes valasztas marad.
+    setTerm(prev => prev || termNow);
     ECHO_api.templates()
       .then(d => {
         const arr = [];
@@ -2304,23 +2298,17 @@ function ECHO_CampaignCreate({ open, onClose, onDone, campaigns }) {
         </UField>
 
         <UField label="Félév"
-          hint="Az alkalmassági lista EBBŐL dolgozik: az echo.eligibility_rebuild() a félév minden kurzusát összegyűjti. Egy félévre egyszerre egy aktív kampány lehet.">
+          hint="Az alkalmassági lista EBBŐL dolgozik: az echo.eligibility_rebuild() a félév minden kurzusát összegyűjti. Egy félévre bármennyi kampány futhat egyszerre — a hallgató ilyenkor kampányonként külön kérdőívet kap.">
           <select className={U_input} value={term} onChange={e => setTerm(e.target.value)}>
             <option value="">Válassz félévet…</option>
             {termOpts.map(t => (
-              <option key={t.term} value={t.term} disabled={!!t.taken}>
+              <option key={t.term} value={t.term}>
                 {ECHO_termLabel(t.term)}
                 {t.term === termNow ? ' \u00b7 mostani' : ''}
-                {t.taken ? ' — foglalt: ' + (t.taken.name || t.taken.code || 'aktív kampány') : ''}
+                {t.futo ? ' \u00b7 ' + t.futo + ' futó kampány' : ''}
               </option>
             ))}
           </select>
-          {termOpts.some(t => t.taken) && (
-            <p className="text-[11px] text-slate-400 mt-1.5 leading-relaxed">
-              A foglalt félévek nem választhatók: egy félévre egyszerre egy aktív
-              kampány lehet. Lezárt (sealed) kampány féléve újra szabaddá válik.
-            </p>
-          )}
         </UField>
 
         <UField label="Kérdőív (sablonverzió)"
