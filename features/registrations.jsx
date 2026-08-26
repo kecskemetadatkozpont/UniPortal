@@ -89,12 +89,102 @@ const REG_Chip = ({ text, tone }) => !text ? null : (
     (tone || 'bg-slate-50 text-slate-600 border-slate-200')}>{text}</span>
 );
 
-function REG_Besorolas({ r }) {
-  const van = r.tagozat || r.kepzesi_szint || r.szak || r.kar;
-  if (!van) return <span className="text-[11px] text-slate-300">—</span>;
+/* A besorolás szerkesztése. Legördülőkkel, nem szabad szöveggel: egy kézzel
+   beírt "Levelezõ" némán külön kategóriát csinálna, a csoportszabályok pedig
+   pontos egyezésre mennek. Az értékkészlet a ténylegesen előforduló
+   értékekből jön, darabszámmal.
+
+   Az üres választás TÖRLI a mezőt — ez értelmes művelet, mert a k-küszöb
+   miatt egyes hallgatóknál szándékosan nincs kar megadva. */
+const REG_ATTR_MEZOK = [
+  ['tagozat',       'Tagozat'],
+  ['kepzesi_szint', 'Képzési szint'],
+  ['szak',          'Szak'],
+  ['kar',           'Kar'],
+];
+
+function REG_BesorolasSzerk({ r, opciok, onSaved, onClose }) {
+  const [ertek, setErtek] = useState({
+    tagozat: r.tagozat || '', kepzesi_szint: r.kepzesi_szint || '',
+    szak: r.szak || '', kar: r.kar || '',
+  });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  const ment = async () => {
+    setBusy(true); setErr('');
+    try {
+      const { error } = await window.sb.rpc('student_attributes_save', {
+        p_profile: r.id,
+        p_tagozat: ertek.tagozat, p_kepzesi_szint: ertek.kepzesi_szint,
+        p_szak: ertek.szak, p_kar: ertek.kar,
+      });
+      if (error) throw error;
+      onSaved && await onSaved();
+      onClose && onClose();
+    } catch (e) {
+      setErr((e && (e.message || e.details)) || 'A mentés nem sikerült.');
+    } finally { setBusy(false); }
+  };
+
   return (
-    <div className="flex flex-col gap-1 min-w-[190px]">
-      {r.szak && <span className="text-[13px] font-bold text-slate-700 leading-tight">{r.szak}</span>}
+    <div className="min-w-[260px] space-y-2">
+      {REG_ATTR_MEZOK.map(([k, cimke]) => (
+        <div key={k}>
+          <label className="text-[10px] font-bold text-slate-400 uppercase">{cimke}</label>
+          <select value={ertek[k]} onChange={e => setErtek(v => ({ ...v, [k]: e.target.value }))}
+            className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-[13px] text-slate-700 mt-0.5">
+            <option value="">— nincs megadva —</option>
+            {((opciok && opciok[k]) || []).map(o => (
+              <option key={o.ertek} value={o.ertek}>{o.ertek} ({o.db})</option>
+            ))}
+            {/* A jelenlegi érték akkor is választható maradjon, ha a
+                listában nem szerepel — különben mentéskor némán elveszne. */}
+            {ertek[k] && !((opciok && opciok[k]) || []).some(o => o.ertek === ertek[k]) && (
+              <option value={ertek[k]}>{ertek[k]}</option>
+            )}
+          </select>
+        </div>
+      ))}
+      {err && <div className="text-[11px] font-bold text-red-600 bg-red-50 border border-red-100 rounded-lg px-2 py-1.5">{err}</div>}
+      <div className="flex gap-2 pt-1">
+        <button onClick={ment} disabled={busy}
+          className="flex-1 rounded-lg bg-primary text-white text-xs font-bold py-1.5 disabled:opacity-50">
+          {busy ? 'Mentés…' : 'Mentés'}
+        </button>
+        <button onClick={onClose} className="rounded-lg border border-slate-200 text-slate-500 text-xs font-bold px-3 py-1.5">
+          Mégse
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function REG_Besorolas({ r, szerkesztheto, opciok, onSaved }) {
+  const [nyit, setNyit] = useState(false);
+  if (nyit) return <REG_BesorolasSzerk r={r} opciok={opciok} onSaved={onSaved} onClose={() => setNyit(false)} />;
+
+  const van = r.tagozat || r.kepzesi_szint || r.szak || r.kar;
+  if (!van) return (
+    <div className="flex items-center gap-2">
+      <span className="text-[11px] text-slate-300">—</span>
+      {szerkesztheto && (
+        <button onClick={() => setNyit(true)} title="Besorolás megadása"
+          className="text-[11px] font-bold text-primary hover:underline">megadom</button>
+      )}
+    </div>
+  );
+  return (
+    <div className="flex flex-col gap-1 min-w-[190px] group">
+      <div className="flex items-start gap-1.5">
+        {r.szak && <span className="text-[13px] font-bold text-slate-700 leading-tight flex-1">{r.szak}</span>}
+        {szerkesztheto && (
+          <button onClick={() => setNyit(true)} title="Besorolás módosítása"
+            className="flex-none text-slate-300 hover:text-primary transition-colors">
+            <Lucide.Pencil size={13} />
+          </button>
+        )}
+      </div>
       <div className="flex flex-wrap gap-1">
         <REG_Chip text={r.tagozat} tone="bg-indigo-50 text-indigo-700 border-indigo-100" />
         <REG_Chip text={r.kepzesi_szint} />
@@ -121,6 +211,7 @@ function RegistrationsView({ user, onCountChange }) {
   const [reason, setReason] = useState('');
   const [q, setQ] = useState('');
   const [groupBy, setGroupBy] = useState('');
+  const [attrOpciok, setAttrOpciok] = useState(null);
 
   const load = async () => {
     setErr('');
@@ -134,6 +225,16 @@ function RegistrationsView({ user, onCountChange }) {
     }
   };
   useEffect(() => { load(); }, []);
+
+  /* A besorolás legördülőinek értékkészlete. Külön hívás, mert a
+     registration_directory csak a MEGLÉVŐ értékeket hozza soronként — a
+     választható halmazhoz az összes előforduló érték kell. */
+  useEffect(() => {
+    if (!window.sb) return;
+    window.sb.rpc('student_attribute_options')
+      .then(({ data, error }) => { if (!error && data) setAttrOpciok(data); })
+      .catch(() => {});   /* a 40-es migráció még nem futott le */
+  }, []);
 
   const changeRole = async (row, role) => {
     setBusyId(row.id); setErr('');
@@ -296,7 +397,9 @@ function RegistrationsView({ user, onCountChange }) {
                       <div className="text-[13px] text-slate-400">{r.email}</div>
                     </td>
                     <td className="px-5 py-4">
-                      <REG_Besorolas r={r} />
+                      <REG_Besorolas r={r} opciok={attrOpciok}
+                        szerkesztheto={!!(user && ['SUPERADMIN','ADMIN'].includes(user.role) && attrOpciok)}
+                        onSaved={load} />
                     </td>
                     <td className="px-5 py-4 text-sm font-semibold text-slate-600">
                       {tab === 'users' ? (
