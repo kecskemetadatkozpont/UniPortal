@@ -11048,6 +11048,9 @@ const App: React.FC = () => {
     if (item.id === AppView.COURSES) {
       if (['SUPERADMIN', 'ADMIN', 'ADMISSIONS', 'FINANCE'].includes(currentUser.role)) return true;
       if (currentUser.role === 'TEACHER') return true;
+      // A HALLGATO is latja, de mast: a sajat kurzusait (CRS_StudentView).
+      // Nem a nyilvantartas kevesebb gombbal — mas kerdesre valaszol.
+      if (currentUser.role === 'STUDENT') return true;
       return (currentUser.echoRoles || []).indexOf('OKTATO') >= 0;
     }
     // Az oktatoi eredmenynezet KET fele nyilik, es a ketto FUGGETLEN egymastol.
@@ -11144,6 +11147,7 @@ const App: React.FC = () => {
         // latna a menupontot, es a Hirfolyam jonne fel helyette.
         return (['SUPERADMIN', 'ADMIN', 'ADMISSIONS', 'FINANCE'].includes(currentUser.role)
                 || currentUser.role === 'TEACHER'
+                || currentUser.role === 'STUDENT'
                 || (currentUser.echoRoles || []).indexOf('OKTATO') >= 0)
           ? <CRS_View user={currentUser} />
           : <FeedView user={currentUser} onNavigate={setActiveView} />;

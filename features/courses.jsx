@@ -60,10 +60,21 @@ const CRS_api = {
                                   { p_course: id, p_cim: cim, p_fajlnev: fajlnev, p_path: path,
                                     p_mime: mime || null, p_meret: meret ?? null, p_fajta: fajta || 'egyeb' }),
   docDel:   (doc)            => CRS_rpc('echo_course_document_remove', { p_doc: doc }),
+  mine:     ()               => CRS_rpc('echo_my_enrollments'),
 };
 
 // A változásnapló mezőnevei emberi alakban. Ami nincs a listán, az nyersen
 // jelenik meg — jobb egy ismeretlen oszlopnév, mint egy hazug címke.
+// Az oktatoi szerep az echo.course_teacher.role zart ertekkeszlete. Nyersen
+// "oktato"/"kurzusfelelos" alakban jelent meg a hallgatoi nezetben — ami nem
+// hibas, csak nem magyar. Ami nincs a listan, az nyersen marad.
+const CRS_OKT_ROLE = {
+  kurzusfelelos: 'kurzusfelelős',
+  oktato:        'oktató',
+  gyakvezeto:    'gyakorlatvezető',
+  vendeg:        'vendégoktató',
+};
+
 const CRS_MEZO = {
   letrehozas: 'létrehozás', code: 'kurzuskód', name_hu: 'megnevezés',
   name_en: 'angol megnevezés', term: 'félév', lang: 'nyelv',
@@ -798,7 +809,159 @@ function CRS_Tab({ user }) {
    adta, itt viszont a nézet a sajátja. A kettő szétválasztva marad, mert a
    CRS_Tab bárhova beágyazható — ha később egy másik képernyő is meg akarja
    mutatni a kurzusokat, nem kell fejlécet cipelnie hozzá. */
+/* --- CRS_StudentView — "A kurzusaim" ------------------------------------
+   A hallgatoi valtozat. NEM ugyanaz a kepernyo kevesebb gombbal: mas kerdesre
+   valaszol. Az ugyintezoi nyilvantartas azt kerdezi, "ki jar erre a kurzusra";
+   ez azt, "en mire jarok".
+
+   AMIT SZANDEKOSAN NEM MUTAT: tananyagokat es fajlokat (a 43-as migracional
+   kimondott dontes szerint azok belso nyilvantartasnak keszultek,
+   ugyintezonek es a kurzus oktatojanak), kurzustarsakat, es letszamot. A
+   szures a SZERVEREN van: az echo_my_enrollments() PARAMETER NELKULI, tehat
+   mas hallgatora nem is lehet kerdezni. */
+function CRS_StudentView({ user }) {
+  const [d, setD]     = useState(null);
+  const [err, setErr] = useState('');
+  const [nyit, setNyit] = useState({});
+
+  useEffect(() => {
+    CRS_api.mine().then(r => { setD(r); setErr(''); })
+      .catch(e => { setD(null); setErr(CRS_msg(e)); });
+  }, []);
+
+  const felevek = (d && Array.isArray(d.felevek)) ? d.felevek : [];
+
+  return (
+    <div className="p-4 sm:p-8 max-w-4xl mx-auto">
+      <div className="mb-7">
+        <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
+          A kurzusaim
+        </h1>
+        <p className="text-sm text-slate-400 font-medium mt-1">
+          Amikre félévről félévre beiratkoztál · oktatókkal és tárgyleírással
+        </p>
+      </div>
+
+      {err && (
+        <div className="bg-red-50 border border-red-100 rounded-2xl px-4 py-3 text-sm font-bold text-red-600 flex gap-2 mb-5">
+          <Lucide.AlertCircle size={16} className="flex-none mt-0.5" /> {err}
+        </div>
+      )}
+
+      {d === null && !err ? (
+        <div className="bg-white rounded-3xl border border-slate-100 p-6"><SkeletonRows n={5} /></div>
+      ) : felevek.length === 0 ? (
+        <div className="bg-white rounded-3xl border border-slate-100 p-6">
+          <UEmpty icon={<Lucide.BookOpen size={22} />} title="Még nincs kurzusod"
+            text="Amint a tanulmányi rendszerből felkerülnek a kurzusfelvételeid, itt fognak megjelenni." />
+        </div>
+      ) : (
+        <div className="space-y-6">
+          <div className="flex items-center gap-3 text-[11px] font-black text-slate-400">
+            <span>{d.kurzus_szam} kurzus</span>
+            <span className="text-slate-200">·</span>
+            <span>{d.felev_szam} félév</span>
+          </div>
+
+          {felevek.map(f => (
+            <div key={f.term} className="bg-white rounded-3xl border border-slate-100 p-6">
+              <div className="flex items-baseline justify-between gap-3 mb-4">
+                <h2 className="text-lg font-black text-slate-900">{f.term}</h2>
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                  {f.kurzus_szam} kurzus
+                </span>
+              </div>
+
+              <div className="space-y-2">
+                {(f.kurzusok || []).map(k => {
+                  const ki = !!nyit[k.course_id];
+                  const van = k.leiras || (k.oktatok || []).length > 0;
+                  return (
+                    <div key={k.course_id} className="border border-slate-100 rounded-2xl overflow-hidden">
+                      <button type="button" disabled={!van}
+                        onClick={() => setNyit(p => ({ ...p, [k.course_id]: !p[k.course_id] }))}
+                        className={'w-full text-left px-4 py-3 transition ' +
+                          (van ? 'hover:bg-slate-50' : 'cursor-default')}>
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="text-sm font-black text-slate-800 truncate">
+                              <ECHO_Src>{k.name_hu}</ECHO_Src>
+                            </div>
+                            <div className="text-[11px] font-bold text-slate-400 truncate mt-0.5">
+                              {k.code}
+                              {k.org_unit ? ' · ' + k.org_unit : ''}
+                              {k.lang && k.lang !== 'hu' ? ' · ' + k.lang : ''}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 flex-none">
+                            {k.status !== 'active' && <UBadge tone="slate">leadva</UBadge>}
+                            {k.vizsgakurzus && <UBadge tone="amber">vizsgakurzus</UBadge>}
+                            {van && (
+                              <Lucide.ChevronDown size={14}
+                                className={'text-slate-300 transition-transform ' + (ki ? 'rotate-180' : '')} />
+                            )}
+                          </div>
+                        </div>
+                      </button>
+
+                      {ki && (
+                        <div className="px-4 pb-4 pt-1 border-t border-slate-50 space-y-3">
+                          {(k.oktatok || []).length > 0 && (
+                            <div>
+                              <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
+                                Oktatók
+                              </div>
+                              {k.oktatok.map((o, i) => (
+                                <div key={i} className="text-xs font-bold text-slate-600">
+                                  {o.title ? o.title + ' ' : ''}{o.nev}
+                                  <span className="text-slate-400 font-medium">
+                                    {' · '}{CRS_OKT_ROLE[o.role] || o.role}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {k.leiras && (
+                            <div>
+                              <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
+                                Tárgyleírás
+                              </div>
+                              <p className="text-xs text-slate-600 leading-relaxed whitespace-pre-wrap">
+                                <ECHO_Src>{k.leiras}</ECHO_Src>
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+
+          <p className="text-[11px] text-slate-400 leading-relaxed">
+            Ez a lista a tanulmányi nyilvántartásból származik. Ha valami hiányzik vagy
+            tévesen szerepel benne, a tanulmányi osztály tudja javítani — ezen a felületen
+            nem szerkeszthető.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+/* --- CRS_View — a "Kurzusok" menupont, szerepkor szerint ---------------- */
 function CRS_View({ user }) {
+  // UGYANAZ a menupont, ket kulonbozo kepernyo. A hallgato nem a
+  // nyilvantartast latja kevesebb gombbal, hanem a sajat kurzusait — mas
+  // kerdesre valaszol a ketto. A szerver mindket agat kulon vedi: az
+  // echo_course_list() is_staff()-ot vagy elo oktatoi sort kovetel, az
+  // echo_my_enrollments() pedig parameter nelkul csak auth.uid() sorait adja.
+  const hallgato = user && user.role === 'STUDENT';
+  if (hallgato) return <CRS_StudentView user={user} />;
+
   return (
     <div className="p-4 sm:p-8 max-w-6xl mx-auto">
       <div className="mb-7">
