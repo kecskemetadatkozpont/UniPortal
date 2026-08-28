@@ -427,3 +427,15 @@ select mit as "mit ellenőrzünk", nev as "objektum", allapot as "állapot"
   from (select * from letezik union all select * from allapot
         union all select * from vedelem union all select * from anon_echo) x(s,mit,nev,allapot)
  order by s;
+
+
+-- ===========================================================================
+-- A POSTGREST SÉMA-GYORSÍTÓTÁRÁNAK FRISSÍTÉSE
+-- ===========================================================================
+-- A PostgREST gyorsítótárazza, milyen függvények léteznek, és rendszerint
+-- magától frissíti DDL után — de ez késhet vagy kimaradhat. Ilyenkor a
+-- felület "Could not find the function ... in the schema cache" (PGRST202)
+-- hibát ad egy olyan függvényre, ami VALÓJÁBAN létezik. Egy valós
+-- bejelentésnél pontosan ez történt az echo_my_enrollments()-szel.
+-- Ártalmatlan akkor is, ha nem volt rá szükség.
+notify pgrst, 'reload schema';
