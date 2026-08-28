@@ -507,6 +507,39 @@ function CRS_Tab({ user }) {
                   ))}
                 </div>
 
+                {/* A KIZARAS KIMONDVA. A jelzok eddig is latszottak (jelvenykent a
+                    listaban), de a KOVETKEZMENYUK nem: hogy a kurzus emiatt
+                    kimarad a velemenyezesbol. Valos bejelentesbol: egy hallgato
+                    harom kurzusra jart, a kampany kettot mutatott, es a
+                    kulonbseget csak a kizarasi naplobol lehetett kideriteni. */}
+                {(() => {
+                  const okok = [];
+                  if (!det.van_orarendi_info)
+                    okok.push('nincs órarendi információ');
+                  if (det.vizsgakurzus)
+                    okok.push('vizsgakurzus');
+                  if ((det.oktatok || []).length === 0)
+                    okok.push('nincs rögzített oktató');
+                  if (det.hallgato_szam < 3 && (det.letszam == null || det.letszam < 3))
+                    okok.push('a létszám a küszöb alatt van (3 fő)');
+                  if (okok.length === 0) return null;
+                  return (
+                    <div className="bg-amber-50 border border-amber-100 rounded-2xl px-4 py-3 flex gap-2.5 mb-4">
+                      <Lucide.AlertTriangle size={15} className="text-amber-500 flex-none mt-0.5" />
+                      <div className="text-[11px] text-amber-700 font-medium leading-relaxed">
+                        <b>Ez a kurzus kimarad a véleményezésből.</b> Oka:{' '}
+                        {okok.join(', ')}. A hallgatói oldalon tehát a kurzus látszik
+                        a saját kurzusai között, de <b>nem kap rá kérdőívet</b> — ezért
+                        térhet el a két szám.
+                        {!det.van_orarendi_info && det.szerkesztheto !== false && (
+                          <span> Ha a jelölés téves, a Szerkesztés alatt javítható; utána
+                          a kampánynál újra kell építeni a jogosultsági listát.</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {det.leiras && (
                   <div className="border-t border-slate-100 pt-4">
                     <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Leírás</div>
