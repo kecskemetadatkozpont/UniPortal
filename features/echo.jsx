@@ -303,6 +303,9 @@ const ECHO_api = {
   audienceStudents:(id, items, q) => ECHO_rpc('echo_audience_target_students',
                                     { p_campaign: id, p_items: items, p_q: q || null, p_limit: 300 }),
   campaignForm:   (id)          => ECHO_rpc('echo_campaign_form', { p_campaign: id }),
+  studentCourses: (id, profile, items) => ECHO_rpc('echo_student_courses',
+                                    { p_campaign: id, p_profile: profile,
+                                      p_items: items || null }),
   campaignStudents:(id, q)      => ECHO_rpc('echo_campaign_students',
                                     { p_campaign: id, p_q: q || null, p_limit: 300 }),
   audiencePreview:(id, items)   => ECHO_rpc('echo_audience_preview',
@@ -2250,14 +2253,20 @@ function ECHO_termOptions(rows, now) {
    AMIT SZANDEKOSAN NEM MUTAT: ki kuldte be a kerdoivet. Az echo.participation
    tarolja ezt (kell a ketszeres kitoltes ellen), de bongeszheto listaja mas
    iranybol nyitna meg ugyanazt, amit a k-anonimitasi kuszobok vednek. */
-function ECHO_StudentListModal({ open, cim, alcim, betolt, onClose }) {
+function ECHO_StudentListModal({ open, cim, alcim, betolt, betoltKurzus, onClose }) {
   const [d, setD]     = useState(null);
   const [q, setQ]     = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  // Melyik sor van kibontva, es mit toltottunk be hozza. KATTINTASRA keruk le,
+  // nem a listaval egyutt: merve a kurzuscimkek a valasz meretet a
+  // haromszorosara vinnek (a jogosultak kurzusszama 1-tol 20-ig terjed), olyan
+  // adatert, amit a legtobb sornal soha senki nem nyit ki.
+  const [nyit, setNyit] = useState(null);
+  const [kurzusok, setKurzusok] = useState({});
 
   useEffect(() => {
-    if (!open) { setD(null); setQ(''); setErr(''); return; }
+    if (!open) { setD(null); setQ(''); setErr(''); setNyit(null); setKurzusok({}); return; }
     let el = true;
     setBusy(true);
     const t = setTimeout(() => {
@@ -2269,6 +2278,16 @@ function ECHO_StudentListModal({ open, cim, alcim, betolt, onClose }) {
   }, [open, q]);
 
   const sorok = (d && Array.isArray(d.sorok)) ? d.sorok : [];
+
+  const bont = (pid) => {
+    if (nyit === pid) { setNyit(null); return; }
+    setNyit(pid);
+    if (kurzusok[pid] || !betoltKurzus) return;
+    setKurzusok(p => ({ ...p, [pid]: 'tolt' }));
+    betoltKurzus(pid)
+      .then(r => setKurzusok(p => ({ ...p, [pid]: (r && r.kurzusok) || [] })))
+      .catch(e => setKurzusok(p => ({ ...p, [pid]: { hiba: ECHO_msg(e) } })));
+  };
 
   return (
     <UModal open={open} onClose={onClose} max="max-w-3xl"
@@ -2307,27 +2326,63 @@ function ECHO_StudentListModal({ open, cim, alcim, betolt, onClose }) {
           text={q ? 'Ezzel a szűréssel senki.' : 'Ez a beállítás egyetlen hallgatót sem ér el.'} />
       ) : (
         <div className="max-h-[26rem] overflow-y-auto divide-y divide-slate-50 border border-slate-100 rounded-2xl">
-          {sorok.map(h => (
-            <div key={h.profile_id} className="flex items-center gap-3 px-4 py-2.5">
-              <div className="min-w-0 flex-1">
-                <div className="text-xs font-bold text-slate-700 truncate">{h.nev}</div>
-                <div className="text-[10px] font-bold text-slate-400 truncate">
-                  {h.email}
-                  {h.tagozat ? ' · ' + h.tagozat : ''}
-                  {h.kepzesi_szint ? ' · ' + h.kepzesi_szint : ''}
-                  {h.szak ? ' · ' + h.szak : ''}
+          {sorok.map(h => {
+            const ki  = nyit === h.profile_id;
+            const adat = kurzusok[h.profile_id];
+            return (
+              <div key={h.profile_id} className="px-4 py-2.5">
+                <div className="flex items-center gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-bold text-slate-700 truncate">{h.nev}</div>
+                    <div className="text-[10px] font-bold text-slate-400 truncate">
+                      {h.email}
+                      {h.tagozat ? ' · ' + h.tagozat : ''}
+                      {h.kepzesi_szint ? ' · ' + h.kepzesi_szint : ''}
+                      {h.szak ? ' · ' + h.szak : ''}
+                    </div>
+                    {h.kar && (
+                      <div className="text-[10px] font-bold text-slate-300 truncate">{h.kar}</div>
+                    )}
+                  </div>
+                  {h.kurzus != null && (betoltKurzus ? (
+                    <button type="button" onClick={() => bont(h.profile_id)}
+                      className={'text-[10px] font-black flex-none inline-flex items-center gap-1 ' +
+                        'px-2 py-1 rounded-lg transition ' +
+                        (ki ? 'bg-primary text-white' : 'text-primary hover:bg-orange-50')}>
+                      {h.kurzus} kurzus
+                      <Lucide.ChevronDown size={11}
+                        className={'transition-transform ' + (ki ? 'rotate-180' : '')} />
+                    </button>
+                  ) : (
+                    <span className="text-[10px] font-black text-slate-400 flex-none">
+                      {h.kurzus} kurzus
+                    </span>
+                  ))}
                 </div>
-                {h.kar && (
-                  <div className="text-[10px] font-bold text-slate-300 truncate">{h.kar}</div>
+
+                {ki && (
+                  <div className="mt-2 ml-1 pl-3 border-l-2 border-orange-100 space-y-1.5">
+                    {adat === 'tolt' || adat === undefined ? (
+                      <SkeletonBar h={14} />
+                    ) : adat && adat.hiba ? (
+                      <p className="text-[11px] font-bold text-red-500">{adat.hiba}</p>
+                    ) : (adat || []).length === 0 ? (
+                      <p className="text-[11px] font-bold text-slate-300 italic">nincs kurzus</p>
+                    ) : adat.map(k => (
+                      <div key={k.course_id}>
+                        <div className="text-[11px] font-bold text-slate-600">
+                          <ECHO_Src>{k.code} · {k.name}</ECHO_Src>
+                        </div>
+                        <div className="text-[10px] font-bold text-slate-400">
+                          {k.term}{k.oktatok ? ' · ' + k.oktatok : ''}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 )}
               </div>
-              {h.kurzus != null && (
-                <span className="text-[10px] font-black text-slate-400 flex-none">
-                  {h.kurzus} kurzus
-                </span>
-              )}
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -2985,7 +3040,9 @@ function ECHO_CampaignEditor({ open, campaign, campaigns, onClose, onDone }) {
         cim="A célközönség hallgatói"
         alcim={'A MOSTANI, még nem mentett beállítás szerint · ' + campaign.code}
         betolt={(q) => ECHO_api.audienceStudents(campaign.id,
-                         tetel.map(x => ({ kind: x.kind, id: x.ref })), q)} />
+                         tetel.map(x => ({ kind: x.kind, id: x.ref })), q)}
+        betoltKurzus={(pid) => ECHO_api.studentCourses(campaign.id, pid,
+                         tetel.map(x => ({ kind: x.kind, id: x.ref })))} />
 
       <div className="flex items-center justify-end gap-2 mt-6 pt-5 border-t border-slate-100">
         <button onClick={onClose} disabled={busy} className={U_btnGhost + ' py-2.5 px-5'}>Mégse</button>
@@ -3497,7 +3554,8 @@ function ECHO_CampaignsPanel({ user }) {
       <ECHO_StudentListModal open={jogOpen} onClose={() => setJogOpen(false)}
         cim="Jogosult hallgatók"
         alcim={sel ? (sel.name + ' · az alkalmassági lista szerint') : ''}
-        betolt={(q) => ECHO_api.campaignStudents(sel.id, q)} />
+        betolt={(q) => ECHO_api.campaignStudents(sel.id, q)}
+        betoltKurzus={(pid) => ECHO_api.studentCourses(sel.id, pid, null)} />
 
       <ECHO_CampaignEditor open={editOpen} campaign={sel} campaigns={rows}
         onClose={() => setEditOpen(false)}
