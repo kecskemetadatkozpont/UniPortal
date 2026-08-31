@@ -714,6 +714,206 @@ function DORM_BuildingsPanel({ buildings, sites, landlords, summary, canEdit, on
   );
 }
 
+/* ---------- 4.2b Szoba részletei és elhelyezés --------------------------
+   MIÉRT ÚJ KÉPERNYŐ: a "Szobák" fül eddig tisztán olvasó lista volt — nem
+   lehetett rákattintani, és a beköltöztetés a felületről SEHOGY nem ment.
+   A szerveroldal viszont készen állt: a public.dorm_assign() telepítve van,
+   teljes ellenőrzéssel (jogosultság, ágyállapot, szobaállapot, ütközés,
+   üres időszak), a JS-burkoló is megvolt (DORM_api.assign) — csak EGYETLEN
+   hívási helye sem létezett a kódbázisban. Ez a képernyő az a hívási hely.
+
+   AMIT AZ ADATBÁZIS DÖNT EL, AZT NEM ISMÉTELJÜK MEG ITT: a felület nem
+   próbálja kitalálni, hogy egy ágy kiadható-e — felkínálja, és ha a szerver
+   elutasítja, a hibaüzenetét mutatjuk. Így a két oldal nem tud szétcsúszni. */
+function DORM_RoomDetail({ room, roles, onClose, onDone }) {
+  const [beds, setBeds]     = useState(null);
+  const [occ, setOcc]       = useState([]);
+  const [persons, setPersons] = useState(null);
+  const [terms, setTerms]   = useState([]);
+  const [err, setErr]       = useState('');
+  const [msg, setMsg]       = useState('');
+  const [target, setTarget] = useState(null);   // melyik ágyba helyezünk
+  const [pq, setPq]         = useState('');
+  const [from, setFrom]     = useState('');
+  const [to, setTo]         = useState('');
+  const [busy, setBusy]     = useState(false);
+
+  // Elhelyezni GONDNOK (saját épület), KOLI_ADMIN vagy KOLI_SYSADMIN tud —
+  // ugyanaz a kör, amit a dorm.can_place() a szerveren megkövetel.
+  const canPlace = !!(roles && (roles.admin ||
+    (roles.roles || []).some(r => ['GONDNOK', 'KOLI_ADMIN', 'KOLI_SYSADMIN'].includes(r))));
+
+  const load = async () => {
+    if (!room) return;
+    const [b, o, p, t] = await Promise.all([
+      DORM_sel('bed', q => q.eq('room_id', room.room_id).order('bed_label')),
+      DORM_sel('v_room_occupancy', q => q.eq('room_id', room.room_id)),
+      DORM_sel('person', q => q.eq('is_active', true).order('display_name').limit(500)),
+      DORM_sel('term', q => q.order('starts_on', { ascending: false }).limit(5)),
+    ]);
+    setBeds(b.rows); setOcc(o.rows); setPersons(p.rows); setTerms(t.rows);
+    setErr(b.error || o.error || p.error || '');
+  };
+  useEffect(() => { setBeds(null); setPersons(null); setTarget(null); setMsg(''); load(); },
+            [room && room.room_id]);
+
+  // Az aktív félév kezdete jó alapértelmezés: a beköltözés jellemzően ahhoz
+  // igazodik, és így nem kell kézzel dátumot pötyögni a gyakori esetben.
+  useEffect(() => {
+    if (!target) return;
+    const akt = terms.find(t => t.is_active) || terms[0];
+    const ma  = DORM_today();
+    setFrom(akt && akt.starts_on > ma ? akt.starts_on : ma);
+    setTo(akt ? akt.ends_on : '');
+  }, [target, terms.length]);
+
+  const ma = DORM_today();
+  const foglalt = (bedId) => occ.find(o => {
+    if (o.bed_id !== bedId) return false;
+    if (o.state === 'MOVED_OUT' || o.state === 'CANCELLED') return false;
+    const p = DORM_period(o.period);
+    if (p.from && String(p.from) > ma) return false;
+    if (p.to && String(p.to) <= ma) return false;
+    return true;
+  });
+
+  const needle = pq.trim().toLowerCase();
+  const jeloltek = (persons || []).filter(p =>
+    !needle || [p.display_name, p.email, p.student_id]
+      .some(v => String(v || '').toLowerCase().indexOf(needle) >= 0));
+
+  const elhelyez = async (personId) => {
+    setBusy(true); setErr(''); setMsg('');
+    try {
+      const akt = terms.find(t => t.is_active) || null;
+      await DORM_api.assign({
+        p_person: personId, p_bed: target.id,
+        p_from: from || ma, p_to: to || null,
+        p_term: akt ? akt.id : null, p_mode: 'MANUAL',
+        p_note: 'Elhelyezés a szoba adatlapjáról',
+      });
+      setTarget(null); setPq('');
+      await load();
+      setMsg('Elhelyezve.');
+      if (onDone) onDone();
+    } catch (e) { setErr(DORM_msg(e)); }
+    finally { setBusy(false); }
+  };
+
+  if (!room) return null;
+
+  return (
+    <UModal open={!!room} onClose={busy ? () => {} : onClose} max="max-w-3xl"
+      icon={<DORM_Ic n="DoorOpen" size={20} />} title={room.room_code}
+      subtitle={`${room.building_name} · ${room.level_no == null ? '—' : room.level_no + '. szint'}${room.is_accessible ? ' · akadálymentes' : ''}`}>
+
+      <DORM_Err msg={err} onClose={() => setErr('')} />
+      {msg && (
+        <div className="mb-4 bg-emerald-50 border border-emerald-100 rounded-2xl px-4 py-3 text-sm font-bold text-emerald-700 flex gap-2">
+          <DORM_Ic n="CheckCircle2" size={16} className="flex-none mt-0.5" /> {msg}
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+        {[['Ágy', room.beds_registered], ['Kiadható', room.beds_lettable],
+          ['Foglalt ma', room.occupied_now], ['Nyitott hiba', room.open_issues]].map(([c, v]) => (
+          <div key={c} className="border border-slate-100 rounded-2xl px-3 py-2.5">
+            <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{c}</div>
+            <div className="text-lg font-black text-slate-800">{DORM_num(v || 0)}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Ágyak</div>
+      {beds === null ? <SkeletonRows n={3} /> : !beds.length ? (
+        <DORM_Empty icon="Bed" title="Ehhez a szobához nincs ágy rögzítve"
+          subtitle="Elhelyezni csak ágyra lehet — az ágyakat az Épületek fülön kell felvenni." />
+      ) : (
+        <div className="space-y-2">
+          {beds.map(b => {
+            const f = foglalt(b.id);
+            const nyit = target && target.id === b.id;
+            return (
+              <div key={b.id} className="border border-slate-100 rounded-2xl overflow-hidden">
+                <div className="flex items-center gap-3 px-4 py-3">
+                  <DORM_Ic n="Bed" size={15} className={f ? 'text-slate-300' : 'text-emerald-500'} />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-black text-slate-800">{b.bed_label || b.full_code}</div>
+                    <div className="text-[11px] font-bold text-slate-400">
+                      {b.status || '—'}{b.note ? ' · ' + b.note : ''}
+                    </div>
+                  </div>
+                  {f ? (
+                    <div className="text-right">
+                      <div className="text-xs font-bold text-slate-700 truncate max-w-[200px]">
+                        {f.display_name || 'foglalt (a név rejtve)'}
+                      </div>
+                      <div className="text-[10px] font-bold text-slate-400">
+                        {DORM_period(f.period).text}{f.state ? ' · ' + f.state : ''}
+                      </div>
+                    </div>
+                  ) : canPlace ? (
+                    <button onClick={() => setTarget(nyit ? null : b)}
+                      className={(nyit ? U_btnPrimary : U_btnGhost) + ' py-2 px-3 text-xs flex-none'}>
+                      <DORM_Ic n="UserPlus" size={14} /> {nyit ? 'Mégse' : 'Elhelyezés'}
+                    </button>
+                  ) : (
+                    <span className="text-[11px] font-black text-emerald-600">szabad</span>
+                  )}
+                </div>
+
+                {nyit && (
+                  <div className="border-t border-slate-50 px-4 py-3 bg-slate-50/60">
+                    <div className="grid sm:grid-cols-2 gap-3 mb-3">
+                      <UField label="Beköltözés">
+                        <input type="date" className={U_input} value={from}
+                          onChange={e => setFrom(e.target.value)} />
+                      </UField>
+                      <UField label="Kiköltözés (üresen: nyitott)">
+                        <input type="date" className={U_input} value={to}
+                          onChange={e => setTo(e.target.value)} />
+                      </UField>
+                    </div>
+                    <input className={U_input + ' text-sm mb-2'} value={pq} autoFocus
+                      onChange={e => setPq(e.target.value)}
+                      placeholder="Kollégista keresése név, e-mail vagy azonosító szerint…" />
+                    {persons === null ? <SkeletonRows n={2} /> : !jeloltek.length ? (
+                      <p className="text-[11px] font-bold text-slate-400 italic py-2">
+                        {pq ? 'Nincs találat.' : 'Nincs felvett kollégista. A Kollégisták fülön vehetsz fel újat egy regisztrált felhasználóból.'}
+                      </p>
+                    ) : (
+                      <div className="max-h-56 overflow-y-auto space-y-1">
+                        {jeloltek.slice(0, 60).map(p => (
+                          <button key={p.id} disabled={busy} onClick={() => elhelyez(p.id)}
+                            className="w-full text-left px-3 py-2 rounded-xl border border-slate-100 bg-white
+                                       hover:border-primary hover:bg-orange-50/40 transition disabled:opacity-50">
+                            <span className="block text-xs font-bold text-slate-700 truncate">{p.display_name}</span>
+                            <span className="block text-[10px] text-slate-400 font-bold truncate">
+                              {p.email || '—'}{p.student_id ? ' · ' + p.student_id : ''}
+                              {p.profile_id ? '' : ' · nincs portálfiókhoz kötve'}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <p className="text-[11px] text-slate-400 leading-relaxed mt-4">
+        Az elhelyezést az adatbázis ellenőrzi: jogosultság, ágy- és szobaállapot,
+        időszak-ütközés. Ha elutasítja, itt a saját indoklása jelenik meg — a felület
+        nem próbálja kitalálni helyette.
+      </p>
+    </UModal>
+  );
+}
+
+
 /* ---------- 4.2 Szobák ----------------------------------------------------
    Forrás: dorm.v_room_operational — ÜZEMELTETŐI olvasat, ami a FOGLALTAK
    SZÁMÁT adja, nevet NEM. Ez szándékos: a szobalistához nem kell tudni, ki
@@ -728,11 +928,13 @@ const DORM_ROOM_STATUS_TONE = {
   closed:    'bg-slate-100 text-slate-500 border-slate-200',
 };
 
-function DORM_RoomsPanel({ buildings, building, roomTypes, roomStatuses }) {
+function DORM_RoomsPanel({ buildings, building, roomTypes, roomStatuses, roles }) {
   const [rows, setRows] = useState(null);
   const [err, setErr]   = useState('');
   const [q, setQ]       = useState('');
   const [onlyFree, setOnlyFree] = useState(false);
+
+  const [sel, setSel] = useState(null);   // a megnyitott szoba (4.2b)
 
   useEffect(() => {
     let alive = true;
@@ -809,7 +1011,9 @@ function DORM_RoomsPanel({ buildings, building, roomTypes, roomStatuses }) {
                 const occ = Number(r.occupied_now || 0);
                 const free = Math.max(lettable - occ, 0);
                 return (
-                  <tr key={r.room_id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50/60">
+                  <tr key={r.room_id} onClick={() => setSel(r)} role="button"
+                    title="Kattints a szoba adatlapjáért és az elhelyezésért"
+                    className="border-b border-slate-50 last:border-0 hover:bg-orange-50/50 cursor-pointer transition">
                     <DORM_Td>
                       <div className="font-black text-slate-800">{r.room_code}</div>
                       <div className="text-[11px] text-slate-400 font-bold">
@@ -847,6 +1051,12 @@ function DORM_RoomsPanel({ buildings, building, roomTypes, roomStatuses }) {
           </DORM_Table>
         </>
       )}
+
+      {/* A szoba adatlapja: agyak, foglaltsag, es innen megy az elhelyezes.
+          A lista frissul, ha a modal valtoztatott (onDone). */}
+      <DORM_RoomDetail room={sel} roles={roles}
+        onClose={() => setSel(null)}
+        onDone={() => { setRows(null); setSel(null); }} />
     </div>
   );
 }
@@ -2106,7 +2316,7 @@ function DORM_OpsView({ user }) {
               )}
               {active === 'rooms' && (
                 <DORM_RoomsPanel buildings={buildings} building={building}
-                  roomTypes={roomTypes} roomStatuses={roomStatuses} />
+                  roomTypes={roomTypes} roomStatuses={roomStatuses} roles={R} />
               )}
               {active === 'residents' && <DORM_ResidentsPanel building={building} canSeeNames={canNames} />}
               {active === 'movement'  && <DORM_MoveInOutPanel buildings={buildings} building={building} canWrite={canNames} />}
