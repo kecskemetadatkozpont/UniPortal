@@ -1061,6 +1061,110 @@ function DORM_RoomsPanel({ buildings, building, roomTypes, roomStatuses, roles }
   );
 }
 
+/* ---------- 4.3b Kollégista felvétele regisztrált felhasználóból --------
+   MIÉRT ITT, ÉS NEM A REGISZTRÁCIÓK ALATT: a Regisztrációk képernyő
+   SUPERADMIN-ra van szűrve (app.jsx), a kollégiumi ügyintéző tehát oda nem
+   jut be. Ha ott lenne a jelölés, éppen az nem érné el, akinek a munkája.
+   Itt viszont abban a listában keletkezik az új sor, amit nézni fog.
+
+   MI TÖRTÉNIK: a dorm.person kap egy sort, profile_id-vel a portálfiókhoz
+   kötve. Ettől lesz valaki kollégista — nem egy jelző a profiles-on. Ez a
+   modul saját döntése (26_dorm.sql 5. szerkezeti döntés): a dorm nem bővíti
+   a profiles-t, hanem saját személy-dimenziót vezet. Egy portálfiók így
+   lehet kollégista úgy is, hogy a profilja egyébként bármilyen szerepkörű. */
+function DORM_AddResident({ open, onClose, onDone }) {
+  const [q, setQ]         = useState('');
+  const [users, setUsers] = useState(null);
+  const [taken, setTaken] = useState(new Set());
+  const [busy, setBusy]   = useState('');
+  const [err, setErr]     = useState('');
+
+  useEffect(() => {
+    if (!open) { setQ(''); setErr(''); return; }
+    let alive = true;
+    (async () => {
+      const [p, per] = await Promise.all([
+        (async () => {
+          const { data, error } = await window.sb.from('profiles')
+            .select('id,email,name,role,approval_status')
+            .eq('approval_status', 'approved').order('name').limit(1000);
+          return { rows: data || [], error: error ? DORM_msg(error) : '' };
+        })(),
+        DORM_sel('person', qq => qq.limit(2000)),
+      ]);
+      if (!alive) return;
+      setUsers(p.rows);
+      setTaken(new Set((per.rows || []).map(x => x.profile_id).filter(Boolean)));
+      setErr(p.error || per.error || '');
+    })();
+    return () => { alive = false; };
+  }, [open]);
+
+  const needle = q.trim().toLowerCase();
+  const lista = (users || [])
+    .filter(u => !taken.has(u.id))
+    .filter(u => !needle || [u.name, u.email, u.role]
+      .some(v => String(v || '').toLowerCase().indexOf(needle) >= 0));
+
+  const felvesz = async (u) => {
+    setBusy(u.id); setErr('');
+    try {
+      await DORM_ins('person', {
+        display_name: u.name || u.email,
+        email: u.email || null,
+        // A 'kind' zart ertekkeszlet: APPLICANT / STUDENT / GUEST / STAFF /
+        // EXTERNAL / OTHER. A portalon regisztralt hallgato STUDENT, minden
+        // mas belso szerepkor STAFF — igy a nyilvantartas kesobb is meg tudja
+        // kulonboztetni oket.
+        kind: u.role === 'STUDENT' ? 'STUDENT' : 'STAFF',
+        profile_id: u.id,
+        is_active: true,
+        protected: false,
+        note: 'Felvéve a portál regisztrált felhasználói közül',
+      });
+      setTaken(prev => new Set([...prev, u.id]));
+      if (onDone) onDone();
+    } catch (e) { setErr(DORM_msg(e)); }
+    finally { setBusy(''); }
+  };
+
+  return (
+    <UModal open={open} onClose={busy ? () => {} : onClose} max="max-w-2xl"
+      icon={<DORM_Ic n="UserPlus" size={20} />} title="Kollégista felvétele"
+      subtitle="A portál regisztrált felhasználói közül">
+      <DORM_Err msg={err} onClose={() => setErr('')} />
+      <input className={U_input + ' text-sm mb-3'} value={q} autoFocus
+        onChange={e => setQ(e.target.value)}
+        placeholder="Keresés név, e-mail vagy szerepkör szerint…" />
+      {users === null ? <SkeletonRows n={5} /> : !lista.length ? (
+        <DORM_Empty icon="UserCheck" title={q ? 'Nincs találat' : 'Mindenki fel van már véve'}
+          subtitle={q ? 'Ezzel a szűréssel egy felhasználó sem maradt.'
+                      : 'Minden jóváhagyott felhasználóhoz tartozik már kollégista-sor.'} />
+      ) : (
+        <div className="max-h-[26rem] overflow-y-auto space-y-1">
+          {lista.slice(0, 200).map(u => (
+            <div key={u.id} className="flex items-center gap-3 px-3 py-2 rounded-xl border border-slate-100">
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-bold text-slate-700 truncate">{u.name || u.email}</div>
+                <div className="text-[10px] font-bold text-slate-400 truncate">{u.email} · {u.role}</div>
+              </div>
+              <button disabled={!!busy} onClick={() => felvesz(u)}
+                className={U_btnGhost + ' py-1.5 px-3 text-xs flex-none disabled:opacity-40'}>
+                {busy === u.id ? 'Felvétel…' : 'Felvétel'}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <p className="text-[11px] text-slate-400 leading-relaxed mt-3">
+        A felvétel után a kollégista megjelenik a listában — előbb <b>elhelyezés nélkül</b>.
+        Szobát a Szobák fülön kaphat: kattints egy szobára, és tedd egy szabad ágyra.
+      </p>
+    </UModal>
+  );
+}
+
+
 /* ---------- 4.3 Lakók -----------------------------------------------------
    Forrás: dorm.v_room_occupancy — a modul LEGÉRZÉKENYEBB nézete, "ki hol
    lakik". Az adatbázis dönti el, ki látja: GONDNOK (saját épület), KOLI_ADMIN,
@@ -1098,32 +1202,37 @@ function DORM_balanceOf(charges, personId) {
   return Math.round(open);
 }
 
-function DORM_ResidentsPanel({ building, canSeeNames }) {
+function DORM_ResidentsPanel({ building, canSeeNames, canWrite }) {
   const [rows, setRows] = useState(null);
   const [charges, setCharges] = useState([]);
   const [err, setErr] = useState('');
   const [q, setQ] = useState('');
   const [onlyCurrent, setOnlyCurrent] = useState(true);
+  const [persons, setPersons] = useState([]);   // dorm.person — a teljes keszlet
+  const [addOpen, setAddOpen] = useState(false);
+  const [tick, setTick] = useState(0);          // ujratoltes a felvetel utan
 
   useEffect(() => {
     let alive = true;
     setRows(null);
     (async () => {
-      const [occ, ch] = await Promise.all([
+      const [occ, ch, per] = await Promise.all([
         DORM_sel('v_room_occupancy', qq => {
           let x = qq.order('building_code', { ascending: true }).order('room_code', { ascending: true }).limit(2000);
           if (building) x = x.eq('building_id', building);
           return x;
         }),
         DORM_sel('charge', qq => qq.limit(4000)),
+        DORM_sel('person', qq => qq.eq('is_active', true).order('display_name').limit(2000)),
       ]);
       if (!alive) return;
       setErr(occ.error);
       setRows(occ.rows);
       setCharges(ch.rows);
+      setPersons(per.rows || []);
     })();
     return () => { alive = false; };
-  }, [building]);
+  }, [building, tick]);
 
   if (!canSeeNames) {
     return <DORM_Empty icon="EyeOff" title="A kollégisták névsora ehhez a szerepkörhöz nem tartozik"
@@ -1159,6 +1268,11 @@ function DORM_ResidentsPanel({ building, canSeeNames }) {
             <button onClick={() => setOnlyCurrent(v => !v)} className={(onlyCurrent ? U_btnPrimary : U_btnGhost) + ' min-h-[44px]'}>
               <DORM_Ic n="CalendarCheck" size={15} /> {onlyCurrent ? 'Csak a mai nap' : 'Teljes előzmény'}
             </button>
+            {canWrite && (
+              <button onClick={() => setAddOpen(true)} className={U_btnPrimary + ' py-2.5 px-4 text-sm flex-none'}>
+                <DORM_Ic n="UserPlus" size={15} /> Kollégista felvétele
+              </button>
+            )}
           </>
         } />
 
@@ -1223,6 +1337,48 @@ function DORM_ResidentsPanel({ building, canSeeNames }) {
           </DORM_Table>
         </>
       )}
+
+      {/* ELHELYEZES NELKULI KOLLEGISTAK.
+          A fenti tabla az ELHELYEZESEKBOL epul (v_room_occupancy), tehat aki
+          fel van veve, de meg nincs szobaja, ott nem jelenne meg — pont az
+          tunne el, akivel dolgozni kell. Ezert kap sajat szakaszt. */}
+      {(() => {
+        const elhelyezett = new Set((rows || []).map(r => r.person_id).filter(Boolean));
+        const nelkul = (persons || []).filter(p => !elhelyezett.has(p.id));
+        if (!nelkul.length) return null;
+        return (
+          <div className="mt-6 border border-amber-100 bg-amber-50/40 rounded-2xl p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <DORM_Ic n="UserMinus" size={15} className="text-amber-500" />
+              <span className="text-[10px] font-black text-amber-700 uppercase tracking-widest">
+                Még nincs elhelyezve · {DORM_num(nelkul.length)}
+              </span>
+            </div>
+            <p className="text-[11px] text-amber-700 font-medium leading-relaxed mb-3">
+              Fel vannak véve kollégistaként, de nincs ágyuk. Szobát a <b>Szobák</b> fülön
+              kaphatnak: kattints egy szobára, és tedd őket egy szabad ágyra.
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {nelkul.slice(0, 60).map(p => (
+                <span key={p.id}
+                  className="inline-flex items-center gap-1.5 bg-white border border-amber-100
+                             rounded-xl px-2.5 py-1 text-[11px] font-bold text-slate-600">
+                  {p.display_name}
+                  {p.email ? <span className="text-slate-300">· {p.email}</span> : null}
+                </span>
+              ))}
+              {nelkul.length > 60 && (
+                <span className="text-[11px] font-bold text-amber-600 self-center">
+                  … és még {DORM_num(nelkul.length - 60)}
+                </span>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
+      <DORM_AddResident open={addOpen} onClose={() => setAddOpen(false)}
+        onDone={() => setTick(t => t + 1)} />
     </div>
   );
 }
@@ -2318,7 +2474,7 @@ function DORM_OpsView({ user }) {
                 <DORM_RoomsPanel buildings={buildings} building={building}
                   roomTypes={roomTypes} roomStatuses={roomStatuses} roles={R} />
               )}
-              {active === 'residents' && <DORM_ResidentsPanel building={building} canSeeNames={canNames} />}
+              {active === 'residents' && <DORM_ResidentsPanel building={building} canSeeNames={canNames} canWrite={canAllocate} />}
               {active === 'movement'  && <DORM_MoveInOutPanel buildings={buildings} building={building} canWrite={canNames} />}
               {active === 'waitlist'  && <DORM_WaitlistPanel building={building} canOffer={canAllocate} />}
               {active === 'leases'    && <DORM_LeasesPanel buildings={buildings} landlords={landlords} building={building} />}
