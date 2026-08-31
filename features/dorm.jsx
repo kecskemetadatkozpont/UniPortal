@@ -1061,6 +1061,47 @@ function DORM_RoomsPanel({ buildings, building, roomTypes, roomStatuses, roles }
   );
 }
 
+/* ---------- Csatolt képek megjelenítése --------------------------------
+   A dorm.handover.photos / dorm.damage.photos jsonb-t mutatja. Az aláírt
+   URL-t a dorm-views.jsx meglévő DORMV_photoUrl segédfüggvénye adja
+   (gyorsítótárral, 50 percre) — nem írunk másodikat mellé. */
+function DORM_Photos({ photos }) {
+  const [urls, setUrls] = useState(null);
+  const lista = Array.isArray(photos) ? photos : [];
+
+  useEffect(() => {
+    let alive = true;
+    if (!lista.length) { setUrls([]); return; }
+    (async () => {
+      const out = [];
+      for (const p of lista) {
+        const u = await DORMV_photoUrl(p);
+        if (u) out.push({ u, name: (p && p.name) || '' });
+      }
+      if (alive) setUrls(out);
+    })();
+    return () => { alive = false; };
+  }, [JSON.stringify(lista.map(x => (x && x.path) || x))]);
+
+  if (!lista.length) return <span className="text-slate-300">—</span>;
+  if (urls === null) return <span className="text-[11px] font-bold text-slate-400">{lista.length} kép…</span>;
+  if (!urls.length) {
+    // A sor megvan, a fajl nem tolthetu le: ezt KIMONDJUK, nem mutatunk ures helyet.
+    return <span className="text-[11px] font-bold text-amber-600">{lista.length} kép · nem érhető el</span>;
+  }
+  return (
+    <div className="flex flex-wrap gap-1">
+      {urls.map((x, i) => (
+        <a key={i} href={x.u} target="_blank" rel="noopener" title={x.name || 'kép megnyitása'}>
+          <img src={x.u} alt={x.name || 'kép'}
+            className="w-10 h-10 object-cover rounded-lg border border-slate-200 hover:border-primary transition" />
+        </a>
+      ))}
+    </div>
+  );
+}
+
+
 /* ---------- 4.3b Kollégista felvétele regisztrált felhasználóból --------
    MIÉRT ITT, ÉS NEM A REGISZTRÁCIÓK ALATT: a Regisztrációk képernyő
    SUPERADMIN-ra van szűrve (app.jsx), a kollégiumi ügyintéző tehát oda nem
@@ -1425,6 +1466,8 @@ function DORM_MoveInOutPanel({ buildings, building, canWrite }) {
     kind: 'ROOM_MOVE_IN', building_id: '', happened_at: '', participants: '',
     keys_listed: '', deficiencies: '', remarks: '',
   });
+  const [fotok, setFotok] = useState([]);   // a jegyzőkönyvhöz csatolt képek
+  const [tolt, setTolt]   = useState(false);  // épp tölt-e fel
 
   const load = async () => {
     setRows(null);
@@ -1449,6 +1492,19 @@ function DORM_MoveInOutPanel({ buildings, building, canWrite }) {
     if (!f.building_id) { setFerr('Épületet választani kell — jegyzőkönyv épület nélkül nem kereshető vissza.'); return; }
     setBusy(true); setFerr('');
     try {
+      // A KEPEK ELOSZOR A TAROLOBA. Ha a feltoltes elbukik, NEM mentunk
+      // jegyzokonyvet fel-kepekkel: inkabb szoljunk, mint hogy csendben
+      // hianyos legyen az, ami kesobb bizonyitek.
+      let feltoltott = [];
+      if (fotok.length) {
+        setTolt(true);
+        feltoltott = await DORMV_uploadPhotos(fotok, 'kollegium/jegyzokonyv');
+        setTolt(false);
+        if (feltoltott.length !== fotok.length) {
+          throw new Error('A képek egy része nem töltődött fel ('
+            + feltoltott.length + '/' + fotok.length + '). A jegyzőkönyvet nem mentettük el.');
+        }
+      }
       await DORM_ins('handover', {
         kind: f.kind,
         building_id: f.building_id,
@@ -1459,9 +1515,11 @@ function DORM_MoveInOutPanel({ buildings, building, canWrite }) {
           : null,
         deficiencies: f.deficiencies.trim() || null,
         remarks: f.remarks.trim() || null,
+        photos: feltoltott.length ? feltoltott : null,
       });
       setOpen(false);
       setF({ kind: 'ROOM_MOVE_IN', building_id: '', happened_at: '', participants: '', keys_listed: '', deficiencies: '', remarks: '' });
+      setFotok([]);
       load();
     } catch (e) { setFerr(DORM_msg(e)); }
     setBusy(false);
@@ -1512,6 +1570,7 @@ function DORM_MoveInOutPanel({ buildings, building, canWrite }) {
               <DORM_Th>Mikor</DORM_Th>
               <DORM_Th>Résztvevők</DORM_Th>
               <DORM_Th>Kulcsok</DORM_Th>
+              <DORM_Th>Képek</DORM_Th>
               <DORM_Th>Hiányosság</DORM_Th>
             </tr>
           </thead>
@@ -1525,6 +1584,7 @@ function DORM_MoveInOutPanel({ buildings, building, canWrite }) {
                   <DORM_Td className="text-slate-600 whitespace-nowrap font-semibold">{DORM_dt(h.happened_at)}</DORM_Td>
                   <DORM_Td className="text-slate-600 max-w-[220px]"><span className="break-words">{h.participants || '—'}</span></DORM_Td>
                   <DORM_Td className="text-slate-600">{kl.length ? kl.length + ' tétel' : '—'}</DORM_Td>
+                  <DORM_Td><DORM_Photos photos={h.photos} /></DORM_Td>
                   <DORM_Td className="max-w-[240px]">
                     {h.deficiencies
                       ? <span className="text-red-600 font-semibold break-words">{h.deficiencies}</span>
@@ -1639,6 +1699,46 @@ function DORM_MoveInOutPanel({ buildings, building, canWrite }) {
               <textarea rows={3} className={U_input} value={f.deficiencies} onChange={e => setF({ ...f, deficiencies: e.target.value })} />
             </UField>
           </div>
+
+          {/* KEPEK A SERULESEKROL. A dorm.handover.photos oszlop mar letezett,
+              es a feltolto segedfuggveny is (DORMV_uploadPhotos) — csak eddig
+              SEMMI nem hivta, es a celzott 'dorm-photos' tarolo sem letezett.
+              Az 51_dorm_photos.sql letrehozza, kollegiumi szerepkorhoz kotott
+              jogosultsaggal: a hallgato nem lat bele. */}
+          <div className="sm:col-span-2">
+            <UField label="Fényképek a sérülésekről, hiányosságokról"
+              hint="Amit ma nem fotózunk le, azt később nem lehet bizonyítani. Csak kollégiumi szerepkörrel látható.">
+              <div className="flex flex-wrap items-center gap-2">
+                <label className={U_btnGhost + ' py-2 px-3 text-xs cursor-pointer ' + (tolt ? 'opacity-50' : '')}>
+                  <DORM_Ic n="Camera" size={14} /> {tolt ? 'Feltöltés…' : 'Képek választása'}
+                  <input type="file" accept="image/*" multiple className="hidden" disabled={tolt}
+                    onChange={e => { setFotok(Array.from(e.target.files || [])); e.target.value = ''; }} />
+                </label>
+                {fotok.length > 0 && (
+                  <>
+                    <span className="text-[11px] font-black text-slate-500">
+                      {fotok.length} kép kiválasztva
+                    </span>
+                    <button type="button" onClick={() => setFotok([])}
+                      className="text-[11px] font-black text-slate-400 hover:text-red-500">
+                      törlés
+                    </button>
+                  </>
+                )}
+              </div>
+              {fotok.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {fotok.map((x, i) => (
+                    <span key={i} className="text-[10px] font-bold text-slate-500 bg-slate-50
+                                             border border-slate-100 rounded-lg px-2 py-1 truncate max-w-[180px]">
+                      {x.name}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </UField>
+          </div>
+
           <div className="sm:col-span-2">
             <UField label="Megjegyzés"><textarea rows={2} className={U_input} value={f.remarks} onChange={e => setF({ ...f, remarks: e.target.value })} /></UField>
           </div>
