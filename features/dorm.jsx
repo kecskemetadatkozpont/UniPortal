@@ -50,10 +50,10 @@ const DORM_ERR = {
   DORM_ROOM_UNKNOWN:             'Nincs ilyen szoba.',
   DORM_ROOM_NOT_OPERABLE:        'A szoba nem üzemképes (javítás vagy felújítás alatt), ezért nem osztható ki.',
   DORM_ROOM_STATUS_INVALID:      'Ez a szobaállapot-átmenet nem megengedett.',
-  DORM_PERSON_UNKNOWN:           'Nincs ilyen lakó a nyilvántartásban.',
+  DORM_PERSON_UNKNOWN:           'Nincs ilyen kollégista a nyilvántartásban.',
   DORM_PROFILE_NOT_FOUND:        'Nincs ilyen e-mail-címmel UniPortal-fiók. A fióknak előbb regisztrálnia kell, és jóváhagyottnak kell lennie.',
-  DORM_PROFILE_TAKEN:            'Ez a fiók már egy másik lakóhoz van kötve.',
-  DORM_STUDENT_TAKEN:            'Ez a jelentkezői azonosító már egy másik lakóhoz van kötve.',
+  DORM_PROFILE_TAKEN:            'Ez a fiók már egy másik kollégistához van kötve.',
+  DORM_STUDENT_TAKEN:            'Ez a jelentkezői azonosító már egy másik kollégistához van kötve.',
   DORM_PERIOD_EMPTY:             'Üres időszak: a záró dátum nem lehet korábbi vagy azonos a kezdő dátumnál.',
   DORM_CATEGORY_UNKNOWN:         'Ismeretlen hibakategória.',
   DORM_QR_UNKNOWN:               'Ismeretlen férőhely-azonosító (QR-kód).',
@@ -916,10 +916,10 @@ function DORM_ResidentsPanel({ building, canSeeNames }) {
   }, [building]);
 
   if (!canSeeNames) {
-    return <DORM_Empty icon="EyeOff" title="A lakói névsor ehhez a szerepkörhöz nem tartozik"
+    return <DORM_Empty icon="EyeOff" title="A kollégisták névsora ehhez a szerepkörhöz nem tartozik"
       subtitle="A „ki hol lakik” adatot az adatbázis GONDNOK (saját épület), KOLI_ADMIN, KOLI_SYSADMIN és admin körre szűkíti. A karbantartói és az ingatlangazdai munkához a szoba és a hiba elég — a felület ezt a korlátot nem kerüli meg." />;
   }
-  if (rows === null) return <DORM_Loading text="Lakók betöltése…" />;
+  if (rows === null) return <DORM_Loading text="Kollégisták betöltése…" />;
 
   const today = DORM_today();
   const needle = q.trim().toLowerCase();
@@ -938,7 +938,7 @@ function DORM_ResidentsPanel({ building, canSeeNames }) {
   return (
     <div>
       <DORM_PanelHead
-        title="Lakók"
+        title="Kollégisták"
         desc="Ki hol lakik, mettől meddig, milyen szerződéssel, mekkora nyitott egyenleggel. Minden megtekintés naplózódik — a modulnál a jogosulatlan OLVASÁS a kár, nem a módosítás."
         right={
           <>
@@ -955,7 +955,7 @@ function DORM_ResidentsPanel({ building, canSeeNames }) {
       <DORM_Err msg={err} onClose={() => setErr('')} />
 
       {!list.length ? (
-        <DORM_Empty icon="Users" title="Nincs megjeleníthető lakó"
+        <DORM_Empty icon="Users" title="Nincs megjeleníthető kollégista"
           subtitle="Az üres lista itt helyes válasz is lehet: az adatbázis a hatóköre szerint szűr. Ha teljes előzményre vált, a korábbi elhelyezések is megjelennek." />
       ) : (
         <>
@@ -963,7 +963,7 @@ function DORM_ResidentsPanel({ building, canSeeNames }) {
           <DORM_Table>
             <thead className="border-b border-slate-100">
               <tr>
-                <DORM_Th>Lakó</DORM_Th>
+                <DORM_Th>Kollégista</DORM_Th>
                 <DORM_Th>Hol lakik</DORM_Th>
                 <DORM_Th>Mettől meddig</DORM_Th>
                 <DORM_Th>Állapot</DORM_Th>
@@ -980,7 +980,7 @@ function DORM_ResidentsPanel({ building, canSeeNames }) {
                   <tr key={r.occupancy_id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50/60">
                     <DORM_Td>
                       {hidden ? (
-                        <DORM_Hidden label="Lakó neve" reason="Védett lakó, vagy a szerepköre nem jogosít a névre. Az adatbázis rejtette el, nem a felület." />
+                        <DORM_Hidden label="Kollégista neve" reason="Védett kollégista, vagy a szerepköre nem jogosít a névre. Az adatbázis rejtette el, nem a felület." />
                       ) : (
                         <>
                           <div className="font-black text-slate-800 break-words">{r.display_name}</div>
@@ -1179,7 +1179,7 @@ function DORM_MoveInOutPanel({ buildings, building, canWrite }) {
           <thead className="border-b border-slate-100">
             <tr>
               <DORM_Th>Kiadva</DORM_Th>
-              <DORM_Th>Lakó</DORM_Th>
+              <DORM_Th>Kollégista</DORM_Th>
               <DORM_Th>Visszavéve</DORM_Th>
               <DORM_Th>Elveszett</DORM_Th>
               <DORM_Th>Zárcsere</DORM_Th>
@@ -1190,7 +1190,7 @@ function DORM_MoveInOutPanel({ buildings, building, canWrite }) {
             {keys.map(k => (
               <tr key={k.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50/60">
                 <DORM_Td className="text-slate-600 whitespace-nowrap font-semibold">{DORM_dt(k.issued_at)}</DORM_Td>
-                <DORM_Td><DORM_Hidden label="Lakó" reason="A kulcsnyilvántartás a személyt azonosítóval hivatkozza; a névhez a Lakók fül jogosultsága kell." /></DORM_Td>
+                <DORM_Td><DORM_Hidden label="Kollégista" reason="A kulcsnyilvántartás a személyt azonosítóval hivatkozza; a névhez a Kollégisták fül jogosultsága kell." /></DORM_Td>
                 <DORM_Td>
                   {k.returned_at
                     ? <span className="text-emerald-600 font-semibold whitespace-nowrap">{DORM_dt(k.returned_at)}</span>
@@ -1206,13 +1206,13 @@ function DORM_MoveInOutPanel({ buildings, building, canWrite }) {
       ))}
 
       {sub === 'deposits' && (!deposits.length ? (
-        <DORM_Empty icon="PiggyBank" title="Nincs lakói kaució nyilvántartva"
-          subtitle="A lakótól átvett kaució kötelezettség, nem bevétel. Az elszámolás zárt levezetés: kaució − igazolt kár − elmaradt díj = visszafizetendő." />
+        <DORM_Empty icon="PiggyBank" title="Nincs kollégistától átvett kaució nyilvántartva"
+          subtitle="A kollégistától átvett kaució kötelezettség, nem bevétel. Az elszámolás zárt levezetés: kaució − igazolt kár − elmaradt díj = visszafizetendő." />
       ) : (
         <DORM_Table>
           <thead className="border-b border-slate-100">
             <tr>
-              <DORM_Th>Lakó</DORM_Th>
+              <DORM_Th>Kollégista</DORM_Th>
               <DORM_Th className="text-right">Kaució</DORM_Th>
               <DORM_Th className="text-right">Levonás</DORM_Th>
               <DORM_Th className="text-right">Visszafizetendő</DORM_Th>
@@ -1225,7 +1225,7 @@ function DORM_MoveInOutPanel({ buildings, building, canWrite }) {
               const back = Number(d.amount || 0) - Number(d.deductions || 0);
               return (
                 <tr key={d.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50/60">
-                  <DORM_Td><DORM_Hidden label="Lakó" reason="A kaució-sor a személyt azonosítóval hivatkozza; a névhez a Lakók fül jogosultsága kell." /></DORM_Td>
+                  <DORM_Td><DORM_Hidden label="Kollégista" reason="A kaució-sor a személyt azonosítóval hivatkozza; a névhez a Kollégisták fül jogosultsága kell." /></DORM_Td>
                   <DORM_Td className="text-right tabular-nums font-black text-slate-800">{DORM_money(d.amount, d.currency)}</DORM_Td>
                   <DORM_Td className="text-right tabular-nums text-red-600 font-semibold">{DORM_money(d.deductions, d.currency)}</DORM_Td>
                   <DORM_Td className="text-right tabular-nums font-black text-emerald-700">{DORM_money(back, d.currency)}</DORM_Td>
@@ -1260,7 +1260,7 @@ function DORM_MoveInOutPanel({ buildings, building, canWrite }) {
           <UField label="Mikor történt" hint="Üresen hagyva a mostani időpont.">
             <input type="datetime-local" className={U_input} value={f.happened_at} onChange={e => setF({ ...f, happened_at: e.target.value })} />
           </UField>
-          <UField label="Résztvevők" hint="Ki volt jelen: gondnok, lakó, bérbeadó képviselője.">
+          <UField label="Résztvevők" hint="Ki volt jelen: gondnok, kollégista, bérbeadó képviselője.">
             <input className={U_input} value={f.participants} onChange={e => setF({ ...f, participants: e.target.value })} />
           </UField>
           <div className="sm:col-span-2">
@@ -1269,7 +1269,7 @@ function DORM_MoveInOutPanel({ buildings, building, canWrite }) {
             </UField>
           </div>
           <div className="sm:col-span-2">
-            <UField label="Hiányosságok, sérülések" hint="A leltár és az állapot rögzítése. Ez a mező védi a lakót és az egyetemet is.">
+            <UField label="Hiányosságok, sérülések" hint="A leltár és az állapot rögzítése. Ez a mező védi a kollégistát és az egyetemet is.">
               <textarea rows={3} className={U_input} value={f.deficiencies} onChange={e => setF({ ...f, deficiencies: e.target.value })} />
             </UField>
           </div>
@@ -1777,7 +1777,7 @@ function DORM_RolesPanel({ buildings }) {
         p_student: s.suggested_student || null,
         p_profile: s.suggested_profile || null,
       });
-      setNote('Összekötve: ' + (s.display_name || 'a lakó') + '. Mostantól látja a saját szállását a Szállásom menüpontban.');
+      setNote('Összekötve: ' + (s.display_name || 'a kollégista') + '. Mostantól látja a saját szállását a Szállásom menüpontban.');
       await load();
     } catch (e) { setErr(DORM_msg(e)); }
     setBusy('');
@@ -1885,13 +1885,13 @@ function DORM_RolesPanel({ buildings }) {
       )}
 
       {sub === 'link' && (!sugg.length ? (
-        <DORM_Empty icon="Link2" title="Nincs összekötésre váró lakó"
-          subtitle="A javaslatok e-mail-cím alapján készülnek. Ha nincs találat, vagy minden lakó össze van kötve, vagy nincs egyértelmű pár — az utóbbi emberi döntés." />
+        <DORM_Empty icon="Link2" title="Nincs összekötésre váró kollégista"
+          subtitle="A javaslatok e-mail-cím alapján készülnek. Ha nincs találat, vagy minden kollégista össze van kötve, vagy nincs egyértelmű pár — az utóbbi emberi döntés." />
       ) : (
         <DORM_Table>
           <thead className="border-b border-slate-100">
             <tr>
-              <DORM_Th>Lakó</DORM_Th>
+              <DORM_Th>Kollégista</DORM_Th>
               <DORM_Th>E-mail</DORM_Th>
               <DORM_Th>Javasolt jelentkező</DORM_Th>
               <DORM_Th>Javasolt fiók</DORM_Th>
@@ -2021,7 +2021,7 @@ function DORM_OpsView({ user }) {
   const allTabs = [
     { id: 'buildings', label: 'Épületek',       icon: 'Building2',     show: anyRole },
     { id: 'rooms',     label: 'Szobák',         icon: 'DoorClosed',    show: anyRole },
-    { id: 'residents', label: 'Lakók',          icon: 'Users',         show: canNames },
+    { id: 'residents', label: 'Kollégisták',          icon: 'Users',         show: canNames },
     { id: 'movement',  label: 'Be-/Kiköltözés', icon: 'ArrowLeftRight',show: canNames },
     { id: 'waitlist',  label: 'Várólista',      icon: 'ListOrdered',   show: canAllocate },
     { id: 'leases',    label: 'Bérlemények',    icon: 'FileSignature', show: canEstate },

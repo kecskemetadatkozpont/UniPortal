@@ -188,7 +188,7 @@ const DORMV_PRIO = {
 const DORMV_prio = (p) => DORMV_PRIO[p] || DORMV_PRIO.P3;
 
 const DORMV_LIABLE = {
-  UNIVERSITY: 'Egyetem', LANDLORD: 'Bérbeadó', RESIDENT: 'Lakó',
+  UNIVERSITY: 'Egyetem', LANDLORD: 'Bérbeadó', RESIDENT: 'Kollégista',
   SERVICE_CONTRACT: 'Szolgáltatói szerződés', INSURANCE: 'Biztosító',
 };
 const DORMV_ROUTE = {
@@ -642,7 +642,7 @@ function DORMV_IssueModal({ ticketNo, buildings, respRows, landlords, onClose, o
             {issue.needs_triage && <DORMV_Chip icon="Search" cls="bg-amber-50 text-amber-700 border-amber-200">Megállapítás szükséges</DORMV_Chip>}
             {issue.entry_permitted
               ? <DORMV_Chip icon="KeyRound" cls="bg-emerald-50 text-emerald-700 border-emerald-200">Belépés engedélyezve távollétben</DORMV_Chip>
-              : <DORMV_Chip icon="Lock">Belépés csak a lakó jelenlétében</DORMV_Chip>}
+              : <DORMV_Chip icon="Lock">Belépés csak a kollégista jelenlétében</DORMV_Chip>}
           </div>
 
           <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -872,7 +872,7 @@ function DORMV_IssuesPanel({ buildings, building, respRows, landlords, canWrite 
                   {DORMV_isLeased(r.tenure) && <DORMV_TenureChip tenure={r.tenure} />}
                 </div>
                 <div className="mt-3">
-                  <DORMV_Hidden label="Lakó" reason="A hibajegy a szobára hivatkozik. A lakó nevét a karbantartási nézet adatvédelmi okból nem kapja meg." />
+                  <DORMV_Hidden label="Kollégista" reason="A hibajegy a szobára hivatkozik. A kollégista nevét a karbantartási nézet adatvédelmi okból nem kapja meg." />
                 </div>
               </button>
             ))}
@@ -891,7 +891,7 @@ function DORMV_IssuesPanel({ buildings, building, respRows, landlords, canWrite 
                     <th className="text-left px-4 py-3">Állapot</th>
                     <th className="text-left px-4 py-3">Felelős</th>
                     <th className="text-left px-4 py-3">Kor / határidő</th>
-                    <th className="text-left px-4 py-3">Lakó</th>
+                    <th className="text-left px-4 py-3">Kollégista</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -924,7 +924,7 @@ function DORMV_IssuesPanel({ buildings, building, respRows, landlords, canWrite 
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <DORMV_Hidden label="Lakó" reason="A hibajegy a szobára hivatkozik. A lakó nevét a karbantartási nézet adatvédelmi okból nem kapja meg." />
+                        <DORMV_Hidden label="Kollégista" reason="A hibajegy a szobára hivatkozik. A kollégista nevét a karbantartási nézet adatvédelmi okból nem kapja meg." />
                       </td>
                     </tr>
                   ))}
@@ -2165,7 +2165,7 @@ function DORM_StudentView({ user }) {
               </li>
               <li className="flex items-start gap-3">
                 <span className="w-6 h-6 rounded-lg bg-primary/10 text-primary flex items-center justify-center flex-none text-[11px] font-black">3</span>
-                <span>Ha úgy tudod, hogy <b>már van helyed</b>, de itt mégsem látszik, akkor a kollégiumi nyilvántartásban a fiókod még nincs összekötve a lakói törzsadatoddal. Szólj a kollégiumi ügyintézőnek — egy kattintással összekötik.</span>
+                <span>Ha úgy tudod, hogy <b>már van helyed</b>, de itt mégsem látszik, akkor a kollégiumi nyilvántartásban a fiókod még nincs összekötve a kollégista-ói törzsadatoddal. Szólj a kollégiumi ügyintézőnek — egy kattintással összekötik.</span>
               </li>
             </ul>
             <button onClick={load} className={U_btnGhost + ' mt-5 min-h-[48px] w-full sm:w-auto'}>
@@ -2411,7 +2411,7 @@ function DORMV_MyRoom({ placement, current, ctx }) {
         ) : (
           <div className="mt-3">
             <DORMV_Hidden label="Szobatársak"
-              reason="A „ki hol lakik” a modul legérzékenyebb adata: a lakótársak nevét az adatbázis nem adja ki más lakónak. Ha meg szeretnétek ismerni egymást, a gondnok tud segíteni." />
+              reason="A „ki hol lakik” a modul legérzékenyebb adata: a szobatársak nevét az adatbázis nem adja ki más lakónak. Ha meg szeretnétek ismerni egymást, a gondnok tud segíteni." />
             <p className="text-sm text-slate-500 mt-3 leading-relaxed">
               A szobatársak neve <b>adatvédelmi okból rejtett</b>. Ezt nem a felület dönti el:
               a szűrés az adatbázisban történik, és rád ugyanígy vonatkozik — a te nevedet
