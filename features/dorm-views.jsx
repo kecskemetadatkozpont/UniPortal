@@ -2064,6 +2064,21 @@ function DORM_MaintenanceView({ user }) {
    pénzügyes vagy admin fiók se lássa itt véletlenül mások tételeit.
    ============================================================ */
 
+/* Oszinte ures allapot a meg meg nem irt hallgatoi fulekhez. Inkabb mondjuk
+   ki, hogy nincs kesz, mint hogy a nezet osszeomoljon — vagy hogy a fulet
+   csendben eltuntessuk, es senki ne tudja, hogy tervben van. */
+function DORMV_Keszul({ cim, szoveg, ikon }) {
+  return (
+    <div className="bg-white rounded-3xl border border-slate-100 p-8 text-center">
+      <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-slate-50 mb-3">
+        <DORMV_Ic n={ikon || 'Construction'} size={22} className="text-slate-300" />
+      </div>
+      <h3 className="font-black text-slate-800">{cim}</h3>
+      <p className="text-sm text-slate-400 font-medium mt-1.5 max-w-md mx-auto leading-relaxed">{szoveg}</p>
+    </div>
+  );
+}
+
 const DORMV_STUDENT_TABS = [
   { id: 'contract', label: 'Szerződésem',    icon: 'FileSignature' },
   { id: 'room',     label: 'Szobám',         icon: 'DoorOpen' },
@@ -2178,8 +2193,25 @@ function DORM_StudentView({ user }) {
           <DORMV_Tabs tabs={DORMV_STUDENT_TABS} tab={tab} setTab={setTab} />
           {tab === 'contract' && <DORMV_MyContract placement={placement} current={current} />}
           {tab === 'room' && <DORMV_MyRoom placement={placement} current={current} ctx={ctx} />}
-          {tab === 'report' && <DORMV_MyReport placement={placement} current={current} ctx={ctx} user={user} />}
-          {tab === 'bills' && <DORMV_MyBills placement={placement} current={current} />}
+          {/* KIADOTT HIBA VOLT: ez a ket ful a DORMV_MyReport / DORMV_MyBills
+              komponensre hivatkozott, amiket SOHA senki nem irt meg — a
+              hallgato ReferenceError-t es feher kepernyot kapott, amint
+              rakattintott. A ful megmarad (a funkcio tervezett), de mostantol
+              kimondja, hogy meg nincs kesz, ahelyett hogy osszeomlana. */}
+          {tab === 'report' && (
+            <DORMV_Keszul
+              cim="Hibabejelentés"
+              szoveg="Ez a felület még nem készült el. Addig a hibát a gondnoknak jelezd — a
+                      kollégiumi ügyintézők a Karbantartás menüpontban rögzítik és követik."
+              ikon="AlertTriangle" />
+          )}
+          {tab === 'bills' && (
+            <DORMV_Keszul
+              cim="Számláim"
+              szoveg="Ez a felület még nem készült el. A díjaidról és a kaucióról a kollégiumi
+                      ügyintéző tud felvilágosítást adni."
+              ikon="Wallet" />
+          )}
         </div>
       )}
     </div>
