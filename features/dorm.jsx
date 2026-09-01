@@ -550,6 +550,8 @@ function DORM_BuildingsPanel({ buildings, sites, landlords, summary, canEdit, on
   const blank = {
     code: '', name: '', tenure: 'OWNED', address: '', site_id: '', landlord_id: '',
     house_manager: '', house_manager_phone: '', floors_count: '', is_active: true, note: '',
+    gross_area_sqm: '', has_lift: false, is_accessible: false,
+    in_portfolio_from: '', in_portfolio_to: '',
   };
   const start = (row) => {
     setEdit(row || null);
@@ -558,6 +560,9 @@ function DORM_BuildingsPanel({ buildings, sites, landlords, summary, canEdit, on
       address: row.address || '', site_id: row.site_id || '', landlord_id: row.landlord_id || '',
       house_manager: row.house_manager || '', house_manager_phone: row.house_manager_phone || '',
       floors_count: row.floors_count == null ? '' : String(row.floors_count),
+      gross_area_sqm: row.gross_area_sqm == null ? '' : String(row.gross_area_sqm),
+      has_lift: !!row.has_lift, is_accessible: !!row.is_accessible,
+      in_portfolio_from: row.in_portfolio_from || '', in_portfolio_to: row.in_portfolio_to || '',
       is_active: row.is_active !== false, note: row.note || '',
     } : blank);
     setErr('');
@@ -579,6 +584,15 @@ function DORM_BuildingsPanel({ buildings, sites, landlords, summary, canEdit, on
       house_manager: f.house_manager.trim() || null,
       house_manager_phone: f.house_manager_phone.trim() || null,
       floors_count: f.floors_count === '' ? null : Number(f.floors_count),
+      // A 18 oszlopbol eddig 11 volt szerkesztheto. A hianyzo otbol negy
+      // OPERATIV jelentosegu: a lift es az akadalymentesseg a kiosztasnal
+      // szamit, a portfolio-datumok pedig azt mondjak meg, mikortol meddig a
+      // mienk az epulet — enelkul egy kivezetett epulet is aktivnak latszik.
+      gross_area_sqm: f.gross_area_sqm === '' ? null : Number(f.gross_area_sqm),
+      has_lift: !!f.has_lift,
+      is_accessible: !!f.is_accessible,
+      in_portfolio_from: f.in_portfolio_from || null,
+      in_portfolio_to: f.in_portfolio_to || null,
       is_active: !!f.is_active,
       note: f.note.trim() || null,
     };
@@ -700,6 +714,24 @@ function DORM_BuildingsPanel({ buildings, sites, landlords, summary, canEdit, on
           <UField label="Gondnok neve" hint="Szöveges mező. A JOGOSULTSÁGOT nem ez adja, hanem a Szerepkörök fül."><input className={U_input} value={f.house_manager} onChange={e => setF({ ...f, house_manager: e.target.value })} /></UField>
           <UField label="Gondnok telefon"><input className={U_input} value={f.house_manager_phone} onChange={e => setF({ ...f, house_manager_phone: e.target.value })} /></UField>
           <UField label="Szintek száma"><input type="number" className={U_input} value={f.floors_count} onChange={e => setF({ ...f, floors_count: e.target.value })} /></UField>
+          <UField label="Bruttó alapterület (m²)"><input type="number" step="0.1" min="0" className={U_input}
+            value={f.gross_area_sqm} onChange={e => setF({ ...f, gross_area_sqm: e.target.value })} /></UField>
+          <UField label="Portfólióban ettől" hint="Mikortól a miénk vagy bérelt.">
+            <input type="date" className={U_input} value={f.in_portfolio_from}
+              onChange={e => setF({ ...f, in_portfolio_from: e.target.value })} /></UField>
+          <UField label="Portfólióban eddig" hint="Üresen: még a portfólió része. Kitöltve: kivezetett épület.">
+            <input type="date" className={U_input} value={f.in_portfolio_to}
+              onChange={e => setF({ ...f, in_portfolio_to: e.target.value })} /></UField>
+          <div className="sm:col-span-2 flex flex-wrap gap-5">
+            <label className="flex items-center gap-2 text-xs font-bold text-slate-600">
+              <input type="checkbox" checked={!!f.has_lift}
+                onChange={e => setF({ ...f, has_lift: e.target.checked })} /> Van lift
+            </label>
+            <label className="flex items-center gap-2 text-xs font-bold text-slate-600">
+              <input type="checkbox" checked={!!f.is_accessible}
+                onChange={e => setF({ ...f, is_accessible: e.target.checked })} /> Akadálymentes épület
+            </label>
+          </div>
           <UField label="Státusz">
             <select className={U_input} value={f.is_active ? '1' : '0'} onChange={e => setF({ ...f, is_active: e.target.value === '1' })}>
               <option value="1">Aktív — használatban</option>
@@ -2459,7 +2491,336 @@ const DORM_UTIL_MODE = {
   DIRECT_CONTRACT:   'Közvetlen közműszerződés',
 };
 
-function DORM_LeasesPanel({ buildings, landlords, building }) {
+/* ---------- 4.6b Bérlemény-, bérbeadó- és rezsiszerkesztő ---------------
+   A Bérlemények fül eddig CSAK OLVASOTT: a bérleti szerződés, a bérbeadó és a
+   rezsiszámla mind a három tábla szerkeszthetetlen volt a felületről, pedig
+   az RLS (dorm_lease_write / dorm_landlord_write / dorm_utility_bill_write)
+   az INGATLAN / KOLI_SYSADMIN / admin körnek engedi az írást. */
+function DORM_LeaseEdit({ open, lease, buildings, landlords, onClose, onDone }) {
+  const uj = !lease;
+  const [f, setF] = useState({});
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  useEffect(() => {
+    if (!open) return;
+    setErr(''); setBusy(false);
+    const l = lease || {};
+    setF({
+      building_id: l.building_id || '', landlord_id: l.landlord_id || '',
+      iktatoszam: l.iktatoszam || '',
+      starts_on: l.starts_on || '', ends_on: l.ends_on || '',
+      notice_months: l.notice_months == null ? 3 : l.notice_months,
+      decision_buffer_days: l.decision_buffer_days == null ? 30 : l.decision_buffer_days,
+      auto_renew: !!l.auto_renew,
+      monthly_rent: l.monthly_rent == null ? '' : l.monthly_rent,
+      rent_currency: l.rent_currency || 'HUF',
+      utilities_mode: l.utilities_mode || 'FLAT_RATE',
+      deposit_amount: l.deposit_amount == null ? '' : l.deposit_amount,
+      deposit_currency: l.deposit_currency || 'HUF',
+      indexation_note: l.indexation_note || '', option_right: l.option_right || '',
+      signed_by: l.signed_by || '', is_active: l.is_active == null ? true : !!l.is_active,
+      note: l.note || '',
+    });
+  }, [open, lease && lease.id]);
+
+  const set = (k) => (v) => setF(p => ({ ...p, [k]: v }));
+  const ok = f.building_id && f.starts_on && !busy;
+
+  const ment = async () => {
+    setBusy(true); setErr('');
+    try {
+      const row = {
+        building_id: f.building_id,
+        landlord_id: f.landlord_id || null,
+        iktatoszam: (f.iktatoszam || '').trim() || null,
+        starts_on: f.starts_on, ends_on: f.ends_on || null,
+        notice_months: Math.max(Number(f.notice_months) || 0, 0),
+        decision_buffer_days: Math.max(Number(f.decision_buffer_days) || 0, 0),
+        auto_renew: !!f.auto_renew,
+        monthly_rent: f.monthly_rent === '' ? null : Number(f.monthly_rent),
+        rent_currency: f.rent_currency || 'HUF',
+        utilities_mode: f.utilities_mode,
+        deposit_amount: f.deposit_amount === '' ? null : Number(f.deposit_amount),
+        deposit_currency: (f.deposit_currency || '').trim() || null,
+        indexation_note: (f.indexation_note || '').trim() || null,
+        option_right: (f.option_right || '').trim() || null,
+        signed_by: (f.signed_by || '').trim() || null,
+        is_active: !!f.is_active,
+        note: (f.note || '').trim() || null,
+      };
+      if (lease) await DORM_upd('lease', lease.id, row); else await DORM_ins('lease', row);
+      onDone && onDone(); onClose && onClose();
+    } catch (e) { setErr(DORM_msg(e)); }
+    finally { setBusy(false); }
+  };
+
+  if (!open) return null;
+  return (
+    <UModal open={open} onClose={busy ? () => {} : onClose} max="max-w-3xl"
+      icon={<DORM_Ic n="FileSignature" size={20} />}
+      title={uj ? 'Új bérleti szerződés' : 'Bérleti szerződés szerkesztése'}
+      subtitle="A felmondási idő és a döntési puffer együtt adja a határidőt, ameddig dönteni kell.">
+      <DORM_Err msg={err} onClose={() => setErr('')} />
+      <div className="grid gap-4 sm:grid-cols-2">
+        <UField label="Épület" hint="Csak bérelt jogcímű épülethez van értelme.">
+          <select className={U_input} value={f.building_id || ''} onChange={e => set('building_id')(e.target.value)}>
+            <option value="">Válassz…</option>
+            {(buildings || []).map(b => <option key={b.id} value={b.id}>{b.name} ({b.code})</option>)}
+          </select>
+        </UField>
+        <UField label="Bérbeadó">
+          <select className={U_input} value={f.landlord_id || ''} onChange={e => set('landlord_id')(e.target.value)}>
+            <option value="">—</option>
+            {(landlords || []).map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+          </select>
+        </UField>
+        <UField label="Kezdet"><input type="date" className={U_input} value={f.starts_on || ''}
+          onChange={e => set('starts_on')(e.target.value)} /></UField>
+        <UField label="Lejárat" hint="Üresen: határozatlan idejű.">
+          <input type="date" className={U_input} value={f.ends_on || ''}
+            onChange={e => set('ends_on')(e.target.value)} /></UField>
+        <UField label="Felmondási idő (hónap)">
+          <input type="number" min="0" className={U_input} value={f.notice_months}
+            onChange={e => set('notice_months')(e.target.value)} /></UField>
+        <UField label="Döntési puffer (nap)" hint="Ennyivel a felmondási határidő előtt kell dönteni.">
+          <input type="number" min="0" className={U_input} value={f.decision_buffer_days}
+            onChange={e => set('decision_buffer_days')(e.target.value)} /></UField>
+        <UField label="Havi bérleti díj">
+          <input type="number" step="1" min="0" className={U_input} value={f.monthly_rent}
+            onChange={e => set('monthly_rent')(e.target.value)} /></UField>
+        <UField label="Pénznem"><input className={U_input} value={f.rent_currency || ''} maxLength={3}
+          onChange={e => set('rent_currency')(e.target.value.toUpperCase())} /></UField>
+        <UField label="Rezsi elszámolása">
+          <select className={U_input} value={f.utilities_mode || ''} onChange={e => set('utilities_mode')(e.target.value)}>
+            {Object.entries(DORM_UTIL_MODE).map(([v, c]) => <option key={v} value={v}>{c}</option>)}
+          </select>
+        </UField>
+        <UField label="Kaució">
+          <input type="number" step="1" min="0" className={U_input} value={f.deposit_amount}
+            onChange={e => set('deposit_amount')(e.target.value)} /></UField>
+        <UField label="Indexálás" hint="Pl. évente KSH-inflációval.">
+          <input className={U_input} value={f.indexation_note || ''} maxLength={200}
+            onChange={e => set('indexation_note')(e.target.value)} /></UField>
+        <UField label="Opciós jog">
+          <input className={U_input} value={f.option_right || ''} maxLength={200}
+            onChange={e => set('option_right')(e.target.value)} /></UField>
+        <UField label="Aláírta"><input className={U_input} value={f.signed_by || ''} maxLength={120}
+          onChange={e => set('signed_by')(e.target.value)} /></UField>
+        <UField label="Iktatószám"><input className={U_input} value={f.iktatoszam || ''} maxLength={64}
+          onChange={e => set('iktatoszam')(e.target.value)} /></UField>
+      </div>
+      <div className="flex flex-wrap gap-4 mt-4">
+        <label className="flex items-center gap-2 text-xs font-bold text-slate-600">
+          <input type="checkbox" checked={!!f.auto_renew} onChange={e => set('auto_renew')(e.target.checked)} />
+          Automatikusan megújul
+        </label>
+        <label className="flex items-center gap-2 text-xs font-bold text-slate-600">
+          <input type="checkbox" checked={!!f.is_active} onChange={e => set('is_active')(e.target.checked)} />
+          Élő szerződés
+        </label>
+      </div>
+      <div className="mt-4"><UField label="Megjegyzés">
+        <textarea rows={2} className={U_input} value={f.note || ''} onChange={e => set('note')(e.target.value)} />
+      </UField></div>
+      <div className="flex items-center justify-end gap-2 mt-6 pt-5 border-t border-slate-100">
+        <button onClick={onClose} disabled={busy} className={U_btnGhost + ' py-2.5 px-5'}>Mégse</button>
+        <button onClick={ment} disabled={!ok}
+          className={U_btnPrimary + ' py-2.5 px-5 disabled:opacity-40'}>
+          {busy ? 'Mentés…' : (uj ? 'Szerződés felvétele' : 'Mentés')}</button>
+      </div>
+    </UModal>
+  );
+}
+
+
+function DORM_LandlordEdit({ open, landlord, onClose, onDone }) {
+  const uj = !landlord;
+  const [f, setF] = useState({});
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  useEffect(() => {
+    if (!open) return;
+    setErr(''); setBusy(false);
+    const l = landlord || {};
+    setF({ name: l.name || '', is_company: l.is_company == null ? true : !!l.is_company,
+      tax_number: l.tax_number || '', registry_number: l.registry_number || '',
+      representative: l.representative || '', email: l.email || '', phone: l.phone || '',
+      duty_phone: l.duty_phone || '', billing_address: l.billing_address || '',
+      bank_account: l.bank_account || '', note: l.note || '' });
+  }, [open, landlord && landlord.id]);
+  const set = (k) => (v) => setF(p => ({ ...p, [k]: v }));
+  const t = (v) => (String(v || '').trim() || null);
+  const ment = async () => {
+    setBusy(true); setErr('');
+    try {
+      const row = { name: String(f.name).trim(), is_company: !!f.is_company,
+        tax_number: t(f.tax_number), registry_number: t(f.registry_number),
+        representative: t(f.representative), email: t(f.email), phone: t(f.phone),
+        duty_phone: t(f.duty_phone), billing_address: t(f.billing_address),
+        bank_account: t(f.bank_account), note: t(f.note) };
+      if (landlord) await DORM_upd('landlord', landlord.id, row); else await DORM_ins('landlord', row);
+      onDone && onDone(); onClose && onClose();
+    } catch (e) { setErr(DORM_msg(e)); }
+    finally { setBusy(false); }
+  };
+  if (!open) return null;
+  return (
+    <UModal open={open} onClose={busy ? () => {} : onClose} max="max-w-2xl"
+      icon={<DORM_Ic n="Briefcase" size={20} />}
+      title={uj ? 'Új bérbeadó' : 'Bérbeadó szerkesztése'}
+      subtitle="Az ügyeleti telefon az, amit egy hétvégi csőtörésnél hívunk.">
+      <DORM_Err msg={err} onClose={() => setErr('')} />
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="sm:col-span-2"><UField label="Név">
+          <input className={U_input} value={f.name || ''} maxLength={160}
+            onChange={e => set('name')(e.target.value)} /></UField></div>
+        <UField label="Adószám"><input className={U_input} value={f.tax_number || ''} maxLength={32}
+          onChange={e => set('tax_number')(e.target.value)} /></UField>
+        <UField label="Cégjegyzékszám"><input className={U_input} value={f.registry_number || ''} maxLength={32}
+          onChange={e => set('registry_number')(e.target.value)} /></UField>
+        <UField label="Képviselő"><input className={U_input} value={f.representative || ''} maxLength={120}
+          onChange={e => set('representative')(e.target.value)} /></UField>
+        <UField label="E-mail"><input type="email" className={U_input} value={f.email || ''} maxLength={160}
+          onChange={e => set('email')(e.target.value)} /></UField>
+        <UField label="Telefon"><input className={U_input} value={f.phone || ''} maxLength={40}
+          onChange={e => set('phone')(e.target.value)} /></UField>
+        <UField label="Ügyeleti telefon" hint="Hétvégi, munkaidőn kívüli elérhetőség.">
+          <input className={U_input} value={f.duty_phone || ''} maxLength={40}
+            onChange={e => set('duty_phone')(e.target.value)} /></UField>
+        <UField label="Számlázási cím"><input className={U_input} value={f.billing_address || ''} maxLength={200}
+          onChange={e => set('billing_address')(e.target.value)} /></UField>
+        <UField label="Bankszámla"><input className={U_input} value={f.bank_account || ''} maxLength={40}
+          onChange={e => set('bank_account')(e.target.value)} /></UField>
+      </div>
+      <label className="flex items-center gap-2 text-xs font-bold text-slate-600 mt-4">
+        <input type="checkbox" checked={!!f.is_company} onChange={e => set('is_company')(e.target.checked)} />
+        Cég (nem magánszemély)
+      </label>
+      <div className="mt-4"><UField label="Megjegyzés">
+        <textarea rows={2} className={U_input} value={f.note || ''} onChange={e => set('note')(e.target.value)} />
+      </UField></div>
+      <div className="flex items-center justify-end gap-2 mt-6 pt-5 border-t border-slate-100">
+        <button onClick={onClose} disabled={busy} className={U_btnGhost + ' py-2.5 px-5'}>Mégse</button>
+        <button onClick={ment} disabled={!String(f.name || '').trim() || busy}
+          className={U_btnPrimary + ' py-2.5 px-5 disabled:opacity-40'}>
+          {busy ? 'Mentés…' : (uj ? 'Bérbeadó felvétele' : 'Mentés')}</button>
+      </div>
+    </UModal>
+  );
+}
+
+
+function DORM_UtilityEdit({ open, bill, buildings, onClose, onDone }) {
+  const uj = !bill;
+  const [f, setF] = useState({});
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  useEffect(() => {
+    if (!open) return;
+    setErr(''); setBusy(false);
+    const b = bill || {};
+    const p = DORM_period(b.period);
+    setF({ building_id: b.building_id || '', utility_type: b.utility_type || 'ELECTRICITY',
+      issuer: b.issuer || 'UTILITY', invoice_ref: b.invoice_ref || '',
+      from: p.from || '', to: p.to || '',
+      amount: b.amount == null ? '' : b.amount, currency: b.currency || 'HUF',
+      consumption: b.consumption == null ? '' : b.consumption,
+      allocation_basis: b.allocation_basis || 'FLOOR_AREA',
+      verified: !!b.verified_against_own_reading, verification_note: b.verification_note || '',
+      paid_on: b.paid_on || '' });
+  }, [open, bill && bill.id]);
+  const set = (k) => (v) => setF(p => ({ ...p, [k]: v }));
+  const ok = f.building_id && f.from && f.to && f.amount !== '' && !busy;
+  const ment = async () => {
+    setBusy(true); setErr('');
+    try {
+      // A period daterange: a FELSO hatar NYITOTT, ahogy a modul mindenhol
+      // kezeli — a februar 1-jei felso hatar a januari szamlat jelenti.
+      const row = { building_id: f.building_id, utility_type: f.utility_type,
+        issuer: f.issuer, invoice_ref: String(f.invoice_ref || '').trim() || null,
+        period: '[' + f.from + ',' + f.to + ')',
+        amount: Number(f.amount), currency: f.currency || 'HUF',
+        consumption: f.consumption === '' ? null : Number(f.consumption),
+        allocation_basis: f.allocation_basis,
+        verified_against_own_reading: !!f.verified,
+        verification_note: String(f.verification_note || '').trim() || null,
+        paid_on: f.paid_on || null };
+      if (bill) await DORM_upd('utility_bill', bill.id, row); else await DORM_ins('utility_bill', row);
+      onDone && onDone(); onClose && onClose();
+    } catch (e) { setErr(DORM_msg(e)); }
+    finally { setBusy(false); }
+  };
+  if (!open) return null;
+  return (
+    <UModal open={open} onClose={busy ? () => {} : onClose} max="max-w-2xl"
+      icon={<DORM_Ic n="Receipt" size={20} />}
+      title={uj ? 'Új rezsiszámla' : 'Rezsiszámla szerkesztése'}
+      subtitle="A „saját leolvasással ellenőrizve” jelölés dönti el, van-e mivel vitatkozni egy továbbszámlázásnál.">
+      <DORM_Err msg={err} onClose={() => setErr('')} />
+      <div className="grid gap-4 sm:grid-cols-2">
+        <UField label="Épület">
+          <select className={U_input} value={f.building_id || ''} onChange={e => set('building_id')(e.target.value)}>
+            <option value="">Válassz…</option>
+            {(buildings || []).map(b => <option key={b.id} value={b.id}>{b.name} ({b.code})</option>)}
+          </select></UField>
+        <UField label="Közmű" hint="Pl. ELECTRICITY, GAS, WATER, HEATING, WASTE.">
+          <input className={U_input} value={f.utility_type || ''} maxLength={40}
+            onChange={e => set('utility_type')(e.target.value.toUpperCase())} /></UField>
+        <UField label="Számlázó">
+          <select className={U_input} value={f.issuer || ''} onChange={e => set('issuer')(e.target.value)}>
+            <option value="UTILITY">Közműszolgáltató</option>
+            <option value="LANDLORD">Bérbeadó (továbbszámlázás)</option>
+          </select></UField>
+        <UField label="Számla hivatkozás"><input className={U_input} value={f.invoice_ref || ''} maxLength={64}
+          onChange={e => set('invoice_ref')(e.target.value)} /></UField>
+        <UField label="Időszak kezdete"><input type="date" className={U_input} value={f.from || ''}
+          onChange={e => set('from')(e.target.value)} /></UField>
+        <UField label="Időszak vége" hint="Nyitott felső határ: a következő időszak első napja.">
+          <input type="date" className={U_input} value={f.to || ''}
+            onChange={e => set('to')(e.target.value)} /></UField>
+        <UField label="Összeg"><input type="number" step="1" className={U_input} value={f.amount}
+          onChange={e => set('amount')(e.target.value)} /></UField>
+        <UField label="Pénznem"><input className={U_input} value={f.currency || ''} maxLength={3}
+          onChange={e => set('currency')(e.target.value.toUpperCase())} /></UField>
+        <UField label="Fogyasztás" hint="Mennyiség a számla szerint (kWh, m³ stb.).">
+          <input type="number" step="0.01" className={U_input} value={f.consumption}
+            onChange={e => set('consumption')(e.target.value)} /></UField>
+        <UField label="Felosztás alapja">
+          <select className={U_input} value={f.allocation_basis || ''} onChange={e => set('allocation_basis')(e.target.value)}>
+            <option value="BED_NIGHTS">Vendégéjszaka</option>
+            <option value="FLOOR_AREA">Alapterület</option>
+            <option value="SUBMETER">Almérő</option>
+            <option value="FLAT_RATE">Átalány</option>
+          </select></UField>
+        <UField label="Kifizetve"><input type="date" className={U_input} value={f.paid_on || ''}
+          onChange={e => set('paid_on')(e.target.value)} /></UField>
+      </div>
+      <label className="flex items-center gap-2 text-xs font-bold text-slate-600 mt-4">
+        <input type="checkbox" checked={!!f.verified} onChange={e => set('verified')(e.target.checked)} />
+        Saját leolvasással ellenőrizve
+      </label>
+      <div className="mt-3"><UField label="Ellenőrzés megjegyzése"
+        hint="Ha eltér a saját leolvasástól, ide írd — ez lesz a hivatkozás egy vitánál.">
+        <textarea rows={2} className={U_input} value={f.verification_note || ''}
+          onChange={e => set('verification_note')(e.target.value)} />
+      </UField></div>
+      <div className="flex items-center justify-end gap-2 mt-6 pt-5 border-t border-slate-100">
+        <button onClick={onClose} disabled={busy} className={U_btnGhost + ' py-2.5 px-5'}>Mégse</button>
+        <button onClick={ment} disabled={!ok}
+          className={U_btnPrimary + ' py-2.5 px-5 disabled:opacity-40'}>
+          {busy ? 'Mentés…' : (uj ? 'Számla rögzítése' : 'Mentés')}</button>
+      </div>
+    </UModal>
+  );
+}
+
+
+function DORM_LeasesPanel({ buildings, landlords, building, canWrite, onReload }) {
+  const [szerz, setSzerz] = useState(null);   // {lease} vagy {lease:null} = uj
+  const [bado, setBado]   = useState(null);   // berbeado szerkesztese
+  const [rezsi, setRezsi] = useState(null);   // rezsiszamla
+  const [tick, setTick]   = useState(0);      // ujratoltes mentes utan
   const [leases, setLeases] = useState(null);
   const [alerts, setAlerts] = useState([]);
   const [bills, setBills]   = useState([]);
@@ -2491,7 +2852,7 @@ function DORM_LeasesPanel({ buildings, landlords, building }) {
       setAlerts(Array.isArray(al) ? al : []);
     })();
     return () => { alive = false; };
-  }, [building]);
+  }, [building, tick]);
 
   if (leases === null) return <DORM_Loading text="Bérleti szerződések betöltése…" />;
 
@@ -2509,6 +2870,19 @@ function DORM_LeasesPanel({ buildings, landlords, building }) {
     <div>
       <DORM_PanelHead
         title="Bérlemények"
+        right={canWrite ? (
+          <>
+            <button onClick={() => setBado({})} className={U_btnGhost + ' py-2.5 px-4 text-sm'}>
+              <DORM_Ic n="Briefcase" size={15} /> Bérbeadó
+            </button>
+            <button onClick={() => setRezsi({})} className={U_btnGhost + ' py-2.5 px-4 text-sm'}>
+              <DORM_Ic n="Receipt" size={15} /> Rezsiszámla
+            </button>
+            <button onClick={() => setSzerz({})} className={U_btnPrimary + ' py-2.5 px-4 text-sm'}>
+              <DORM_Ic n="FilePlus2" size={15} /> Új szerződés
+            </button>
+          </>
+        ) : null}
         desc="Csak a külsős (bérelt) épületek. A saját tulajdonú épületeknek nincs bérleti szerződésük, ezért itt nem is jelennek meg." />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
@@ -2674,7 +3048,16 @@ function DORM_LeasesPanel({ buildings, landlords, building }) {
           ))}
         </div>
       ))}
+
+      <DORM_LeaseEdit open={!!szerz} lease={szerz && szerz.id ? szerz : null}
+        buildings={buildings} landlords={landlords}
+        onClose={() => setSzerz(null)} onDone={() => { setTick(t => t + 1); onReload && onReload(); }} />
+      <DORM_LandlordEdit open={!!bado} landlord={bado && bado.id ? bado : null}
+        onClose={() => setBado(null)} onDone={() => { setTick(t => t + 1); onReload && onReload(); }} />
+      <DORM_UtilityEdit open={!!rezsi} bill={rezsi && rezsi.id ? rezsi : null} buildings={buildings}
+        onClose={() => setRezsi(null)} onDone={() => setTick(t => t + 1)} />
     </div>
+
   );
 }
 
@@ -3073,7 +3456,8 @@ function DORM_OpsView({ user }) {
               {active === 'residents' && <DORM_ResidentsPanel building={building} canSeeNames={canNames} canWrite={canAllocate} />}
               {active === 'movement'  && <DORM_MoveInOutPanel buildings={buildings} building={building} canWrite={canNames} />}
               {active === 'waitlist'  && <DORM_WaitlistPanel building={building} canOffer={canAllocate} />}
-              {active === 'leases'    && <DORM_LeasesPanel buildings={buildings} landlords={landlords} building={building} />}
+              {active === 'leases'    && <DORM_LeasesPanel buildings={buildings} landlords={landlords} building={building} canWrite={canEstate}
+                  onReload={async () => { await loadBase(); }} />}
               {active === 'roles'     && <DORM_RolesPanel buildings={buildings} />}
             </>
           )}
