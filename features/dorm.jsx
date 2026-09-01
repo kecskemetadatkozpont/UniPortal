@@ -122,6 +122,8 @@ const DORM_api = {
   assign:        (o)           => DORM_rpc('dorm_assign', o),
   roomsGen:      (o)           => DORM_rpc('dorm_rooms_generate', o),
   roomBeds:      (o)           => DORM_rpc('dorm_room_beds_set', o),
+  roomStatus:    (o)           => DORM_rpc('dorm_room_status_set', o),
+  bedStatus:     (o)           => DORM_rpc('dorm_bed_status_set', o),
   roleGrant:     (o)           => DORM_rpc('dorm_role_grant', o),
   personLink:    (o)           => DORM_rpc('dorm_person_link', o),
   linkSuggest:   ()            => DORM_rpc('dorm_person_link_suggestions'),
@@ -1018,6 +1020,155 @@ function DORM_BuildingDetail({ building, roles, roomTypes, onClose, onChanged })
 }
 
 
+/* ---------- 4.2c Állapotváltás és férőhely-szerkesztés ------------------
+   A szoba- és férőhely-állapot MA a felületről nem volt változtatható, pedig
+   az állapotgép teljes: nyolc szobaállapot, 24 megengedett átmenet
+   (dorm.room_status_transition), őr trigger, ami a tiltott lépést elutasítja
+   és magától naplóz.
+
+   AMIT A FELÜLET NEM TALÁL KI: nem ő dönti el, mi a megengedett átmenet —
+   az adatbázisból OLVASSA. Ha holnap változik a szabály, ez a képernyő
+   magától követi. */
+function DORM_StatusBlock({ room, onDone }) {
+  const [statuses, setStatuses] = useState([]);
+  const [trans, setTrans]   = useState([]);
+  const [bedSt, setBedSt]   = useState([]);
+  const [beds, setBeds]     = useState(null);
+  const [cel, setCel]       = useState('');
+  const [indok, setIndok]   = useState('');
+  const [busy, setBusy]     = useState(false);
+  const [err, setErr]       = useState('');
+  const [msg, setMsg]       = useState('');
+  const [nyit, setNyit]     = useState(false);
+
+  const tolt = async () => {
+    if (!room) return;
+    const [s, t, bs, b] = await Promise.all([
+      DORM_sel('room_status', q => q.order('sort_order')),
+      DORM_sel('room_status_transition', q => q.eq('from_code', room.status)),
+      DORM_sel('bed_status', q => q.order('sort_order')),
+      DORM_sel('bed', q => q.eq('room_id', room.id).order('bed_label')),
+    ]);
+    setStatuses(s.rows); setTrans(t.rows); setBedSt(bs.rows); setBeds(b.rows);
+  };
+  useEffect(() => { setCel(''); setIndok(''); setMsg(''); tolt(); }, [room && room.id, room && room.status]);
+
+  const cimke = (kod, lista) => (lista.find(x => x.code === kod) || {}).label_hu || kod;
+
+  const valt = async () => {
+    setBusy(true); setErr(''); setMsg('');
+    try {
+      const r = await DORM_api.roomStatus({ p_room: room.id, p_to: cel, p_reason: indok || null });
+      setMsg(`A szoba állapota: ${r.megnevezes}.`);
+      setCel(''); setIndok('');
+      onDone && onDone();
+    } catch (e) { setErr(DORM_msg(e)); }
+    finally { setBusy(false); }
+  };
+
+  const agyValt = async (bed, kod) => {
+    setBusy(true); setErr(''); setMsg('');
+    try {
+      const r = await DORM_api.bedStatus({ p_bed: bed.id, p_to: kod, p_reason: null });
+      setMsg(`${r.ferohely}: ${r.megnevezes}.`);
+      await tolt();
+      onDone && onDone();
+    } catch (e) { setErr(DORM_msg(e)); }
+    finally { setBusy(false); }
+  };
+
+  if (!room || !room.id) return null;
+
+  return (
+    <div className="mt-5 border-t border-slate-100 pt-4">
+      <button type="button" onClick={() => setNyit(v => !v)}
+        className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
+        <DORM_Ic n="Activity" size={13} /> Állapot és férőhelyek
+        <DORM_Ic n="ChevronDown" size={12} className={nyit ? 'rotate-180 transition-transform' : 'transition-transform'} />
+      </button>
+
+      {nyit && (
+        <div className="space-y-4">
+          <DORM_Err msg={err} onClose={() => setErr('')} />
+          {msg && (
+            <div className="bg-emerald-50 border border-emerald-100 rounded-2xl px-4 py-2.5 text-[11px] font-bold text-emerald-700">
+              {msg}
+            </div>
+          )}
+
+          <div className="border border-slate-100 rounded-2xl p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">A szoba állapota</span>
+              <DORM_Chip cls={DORM_ROOM_STATUS_TONE[room.status] || 'bg-slate-50 text-slate-600 border-slate-200'}>
+                {cimke(room.status, statuses)}
+              </DORM_Chip>
+            </div>
+            {!trans.length ? (
+              <p className="text-[11px] font-bold text-slate-400 italic">
+                Ebből az állapotból nincs megengedett továbblépés.
+              </p>
+            ) : (
+              <>
+                <div className="grid sm:grid-cols-2 gap-3">
+                  <UField label="Új állapot" hint="Csak a megengedett átmenetek szerepelnek — a listát az adatbázis adja.">
+                    <select className={U_input} value={cel} onChange={e => setCel(e.target.value)}>
+                      <option value="">Válassz…</option>
+                      {trans.map(t => (
+                        <option key={t.to_code} value={t.to_code}>
+                          {cimke(t.to_code, statuses)}{t.label_hu ? ' — ' + t.label_hu : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </UField>
+                  <UField label="Indoklás" hint="Fél év múlva pont ez lesz a kérdés: miért került ide.">
+                    <input className={U_input} value={indok} maxLength={200}
+                      onChange={e => setIndok(e.target.value)} placeholder="pl. csőtörés a fürdőben" />
+                  </UField>
+                </div>
+                <button type="button" onClick={valt} disabled={!cel || busy}
+                  className={U_btnPrimary + ' py-2 px-4 text-sm mt-3 disabled:opacity-40'}>
+                  {busy ? 'Váltás…' : 'Állapot váltása'}
+                </button>
+              </>
+            )}
+          </div>
+
+          <div className="border border-slate-100 rounded-2xl p-4">
+            <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
+              Férőhelyek egyenként
+            </div>
+            {beds === null ? <SkeletonRows n={2} /> : !beds.length ? (
+              <p className="text-[11px] font-bold text-slate-400 italic">
+                Ehhez a szobához még nincs férőhely. A férőhelyszámot fent állíthatod.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {beds.map(b => (
+                  <div key={b.id} className="flex items-center gap-3">
+                    <DORM_Ic n="Bed" size={14} className="text-slate-300 flex-none" />
+                    <span className="text-xs font-bold text-slate-700 flex-none w-24 truncate">
+                      {b.bed_label}
+                    </span>
+                    <select className={U_input + ' text-xs py-1.5'} value={b.status} disabled={busy}
+                      onChange={e => agyValt(b, e.target.value)}>
+                      {bedSt.map(x => <option key={x.code} value={x.code}>{x.label_hu || x.code}</option>)}
+                    </select>
+                  </div>
+                ))}
+              </div>
+            )}
+            <p className="text-[11px] text-slate-400 leading-relaxed mt-3">
+              Élő elhelyezés alatt álló férőhelyet a rendszer nem enged kivonni a forgalomból —
+              előbb ki kell költöztetni vagy át kell helyezni a kollégistát.
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 /* ---------- 4.1b Szobaszerkesztő ----------------------------------------
    A dorm.room 33 oszlopából a felület eddig EGYET sem tudott írni — a szoba
    csak olvasható lista volt. Az RLS viszont a GONDNOK / KOLI_ADMIN /
@@ -1229,6 +1380,10 @@ function DORM_RoomEdit({ open, room, floor, building, roomTypes, onClose, onDone
             onChange={e => set('note')(e.target.value)} />
         </UField>
       </div>
+
+      {/* Allapotvaltas es ferohely-szerkesztes — csak MAR LETEZO szoban:
+          uj szoba meg nem tud allapotot valtani, es agya sincs. */}
+      <DORM_StatusBlock room={room} onDone={() => onDone && onDone()} />
 
       <div className="flex items-center justify-end gap-2 mt-6 pt-5 border-t border-slate-100">
         <button onClick={onClose} disabled={busy} className={U_btnGhost + ' py-2.5 px-5'}>Mégse</button>
