@@ -120,6 +120,8 @@ const DORM_api = {
   openIssues:    (b, overdue)  => DORM_rpc('dorm_open_issues', { p_building: b || null, p_only_overdue: !!overdue }),
   reportIssue:   (o)           => DORM_rpc('dorm_issue_report', o),
   assign:        (o)           => DORM_rpc('dorm_assign', o),
+  roomsGen:      (o)           => DORM_rpc('dorm_rooms_generate', o),
+  roomBeds:      (o)           => DORM_rpc('dorm_room_beds_set', o),
   roleGrant:     (o)           => DORM_rpc('dorm_role_grant', o),
   personLink:    (o)           => DORM_rpc('dorm_person_link', o),
   linkSuggest:   ()            => DORM_rpc('dorm_person_link_suggestions'),
@@ -537,7 +539,8 @@ function DORM_PanelHead({ title, desc, right }) {
    szoba→ágy szerkezetből adódik, és egy kézzel írt szám azonnal hazudni
    kezdene. A bérelt sor "Bérlemény" jelvényt kap — ez dönti el, hogy a
    Bérlemények fülön egyáltalán megjelenik-e. */
-function DORM_BuildingsPanel({ buildings, sites, landlords, summary, canEdit, onReload }) {
+function DORM_BuildingsPanel({ buildings, sites, landlords, summary, canEdit, onReload, roles, roomTypes }) {
+  const [reszlet, setReszlet] = useState(null);   // a megnyitott épület adatlapja
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -655,6 +658,11 @@ function DORM_BuildingsPanel({ buildings, sites, landlords, summary, canEdit, on
                       <button onClick={() => start(b)} className={U_btnGhost + ' !px-3 min-h-[44px]'}>
                         <DORM_Ic n="Pencil" size={14} /> Szerkeszt
                       </button>
+                      <button onClick={() => setReszlet(b)}
+                        className={U_btnGhost + ' !px-3 min-h-[44px] ml-1.5'}
+                        title="Szintek, szobák és férőhelyek">
+                        <DORM_Ic n="Layers" size={14} /> Szintek és szobák
+                      </button>
                     </DORM_Td>
                   )}
                 </tr>
@@ -710,9 +718,497 @@ function DORM_BuildingsPanel({ buildings, sites, landlords, summary, canEdit, on
           </button>
         </div>
       </UModal>
+
+      {/* Az epulet adatlapja: szintek, szobak, ferohelyek. Ez zarja be a
+          lancot — eddig az "Uj epulet" olyan rekordot hozott letre, amit a
+          felulet soha nem tudott hasznalhatova tenni. */}
+      <DORM_BuildingDetail building={reszlet} roles={roles} roomTypes={roomTypes}
+        onClose={() => setReszlet(null)}
+        onChanged={() => onReload && onReload()} />
     </div>
   );
 }
+
+/* ---------- 4.1c Épület adatlapja: szintek és szobák -------------------
+   Eddig az "Új épület" gomb olyan rekordot hozott létre, amit a felület soha
+   nem tudott használhatóvá tenni: szint, szoba és férőhely felvitelére nem
+   volt képernyő, pedig az RLS mindhármat engedi a GONDNOK / KOLI_ADMIN /
+   KOLI_SYSADMIN körnek. Ez a nézet zárja be a láncot. */
+function DORM_BuildingDetail({ building, roles, roomTypes, onClose, onChanged }) {
+  const [floors, setFloors] = useState(null);
+  const [rooms, setRooms]   = useState([]);
+  const [beds, setBeds]     = useState([]);
+  const [err, setErr]       = useState('');
+  const [msg, setMsg]       = useState('');
+  const [ujSzint, setUjSzint] = useState(null);      // {level_no, label, wing}
+  const [szerk, setSzerk]   = useState(null);        // { room, floor }
+  const [tomeg, setTomeg]   = useState(null);        // a tömeges felvitel űrlapja
+  const [busy, setBusy]     = useState(false);
+
+  const irhat = !!(roles && (roles.admin ||
+    (roles.roles || []).some(r => ['GONDNOK', 'KOLI_ADMIN', 'KOLI_SYSADMIN'].includes(r))));
+
+  const load = async () => {
+    if (!building) return;
+    const [f, r, b] = await Promise.all([
+      DORM_sel('floor', q => q.eq('building_id', building.id).order('level_no')),
+      DORM_sel('room',  q => q.eq('building_id', building.id).order('door_number').limit(2000)),
+      DORM_sel('bed',   q => q.eq('building_id', building.id).limit(4000)),
+    ]);
+    setFloors(f.rows); setRooms(r.rows); setBeds(b.rows);
+    setErr(f.error || r.error || b.error || '');
+  };
+  useEffect(() => { setFloors(null); setMsg(''); load(); }, [building && building.id]);
+
+  const agySzam = (roomId) => beds.filter(b => b.room_id === roomId).length;
+
+  const szintFelvesz = async () => {
+    setBusy(true); setErr('');
+    try {
+      await DORM_ins('floor', {
+        building_id: building.id,
+        level_no: Number(ujSzint.level_no),
+        label: (ujSzint.label || '').trim() || null,
+        wing: (ujSzint.wing || '').trim() || null,
+        is_accessible: !!ujSzint.is_accessible,
+      });
+      setUjSzint(null); await load(); onChanged && onChanged();
+      setMsg('Szint felvéve.');
+    } catch (e) { setErr(DORM_msg(e)); }
+    finally { setBusy(false); }
+  };
+
+  const tomegesen = async () => {
+    setBusy(true); setErr(''); setMsg('');
+    try {
+      const r = await DORM_api.roomsGen({
+        p_floor: tomeg.floor.id,
+        p_count: Math.max(Number(tomeg.count) || 0, 1),
+        p_first_door: Math.max(Number(tomeg.first) || 1, 1),
+        p_room_type: tomeg.type,
+        p_capacity: tomeg.capacity === '' ? null : Number(tomeg.capacity),
+        p_purpose: 'RESIDENTIAL',
+        p_with_beds: true,
+        p_prefix: (tomeg.prefix || '').trim() || null,
+      });
+      setTomeg(null); await load(); onChanged && onChanged();
+      setMsg(`${r.letrehozott_szoba} szoba és ${r.letrehozott_ferohely} férőhely létrejött`
+        + (r.kihagyott_letezo ? `, ${r.kihagyott_letezo} ajtószám már foglalt volt (kihagyva).` : '.'));
+    } catch (e) { setErr(DORM_msg(e)); }
+    finally { setBusy(false); }
+  };
+
+  if (!building) return null;
+
+  return (
+    <UModal open={!!building} onClose={busy ? () => {} : onClose} max="max-w-4xl"
+      icon={<DORM_Ic n="Building2" size={20} />} title={building.name}
+      subtitle={`${building.code} · ${building.address || 'nincs cím rögzítve'}`}>
+
+      <DORM_Err msg={err} onClose={() => setErr('')} />
+      {msg && (
+        <div className="mb-4 bg-emerald-50 border border-emerald-100 rounded-2xl px-4 py-3 text-sm font-bold text-emerald-700 flex gap-2">
+          <DORM_Ic n="CheckCircle2" size={16} className="flex-none mt-0.5" /> {msg}
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+        {[['Szint', (floors || []).length], ['Szoba', rooms.length],
+          ['Férőhely', beds.length],
+          ['Lakószoba', rooms.filter(r => r.purpose === 'RESIDENTIAL').length]].map(([c, v]) => (
+          <div key={c} className="border border-slate-100 rounded-2xl px-3 py-2.5">
+            <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{c}</div>
+            <div className="text-lg font-black text-slate-800">{DORM_num(v)}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Szintek és szobák</div>
+        {irhat && (
+          <button onClick={() => setUjSzint({ level_no: ((floors || []).length
+                    ? Math.max(...floors.map(x => x.level_no)) + 1 : 0), label: '', wing: '' })}
+            className={U_btnGhost + ' py-2 px-3 text-xs'}>
+            <DORM_Ic n="Plus" size={14} /> Új szint
+          </button>
+        )}
+      </div>
+
+      {ujSzint && (
+        <div className="border border-primary/30 bg-orange-50/40 rounded-2xl p-4 mb-4">
+          <div className="grid sm:grid-cols-3 gap-3 mb-3">
+            <UField label="Szint száma" hint="0 = földszint.">
+              <input type="number" className={U_input} value={ujSzint.level_no}
+                onChange={e => setUjSzint({ ...ujSzint, level_no: e.target.value })} />
+            </UField>
+            <UField label="Megnevezés" hint="Nem kötelező, pl. „Földszint”.">
+              <input className={U_input} value={ujSzint.label}
+                onChange={e => setUjSzint({ ...ujSzint, label: e.target.value })} />
+            </UField>
+            <UField label="Szárny" hint="Nem kötelező, pl. „A”.">
+              <input className={U_input} value={ujSzint.wing}
+                onChange={e => setUjSzint({ ...ujSzint, wing: e.target.value })} />
+            </UField>
+          </div>
+          <label className="flex items-center gap-2 text-xs font-bold text-slate-600 mb-3">
+            <input type="checkbox" checked={!!ujSzint.is_accessible}
+              onChange={e => setUjSzint({ ...ujSzint, is_accessible: e.target.checked })} />
+            Akadálymentesen megközelíthető szint
+          </label>
+          <div className="flex gap-2">
+            <button onClick={() => setUjSzint(null)} className={U_btnGhost + ' py-2 px-4 text-sm'}>Mégse</button>
+            <button onClick={szintFelvesz} disabled={busy || ujSzint.level_no === ''}
+              className={U_btnPrimary + ' py-2 px-4 text-sm disabled:opacity-40'}>Szint felvétele</button>
+          </div>
+        </div>
+      )}
+
+      {floors === null ? <SkeletonRows n={4} /> : !floors.length ? (
+        <DORM_Empty icon="Layers" title="Ehhez az épülethez még nincs szint"
+          subtitle="Előbb szintet kell felvenni — a szoba mindig egy szinthez tartozik." />
+      ) : (
+        <div className="space-y-3">
+          {floors.map(fl => {
+            const sz = rooms.filter(r => r.floor_id === fl.id);
+            return (
+              <div key={fl.id} className="border border-slate-100 rounded-2xl overflow-hidden">
+                <div className="flex items-center gap-3 px-4 py-2.5 bg-slate-50/70">
+                  <DORM_Ic n="Layers" size={15} className="text-slate-400" />
+                  <div className="min-w-0 flex-1">
+                    <span className="text-xs font-black text-slate-800">
+                      {fl.level_no}. szint{fl.label ? ' · ' + fl.label : ''}{fl.wing ? ' · ' + fl.wing + ' szárny' : ''}
+                    </span>
+                    <span className="text-[11px] font-bold text-slate-400 ml-2">
+                      {DORM_num(sz.length)} szoba
+                      {fl.is_accessible ? ' · akadálymentes' : ''}
+                    </span>
+                  </div>
+                  {irhat && (
+                    <div className="flex gap-1.5 flex-none">
+                      <button onClick={() => setSzerk({ room: null, floor: fl })}
+                        className={U_btnGhost + ' py-1.5 px-2.5 text-[11px]'}>
+                        <DORM_Ic n="Plus" size={12} /> Szoba
+                      </button>
+                      <button onClick={() => setTomeg({ floor: fl, count: 10, first: 1,
+                                type: 'DOUBLE', capacity: '', prefix: String(fl.level_no) })}
+                        className={U_btnGhost + ' py-1.5 px-2.5 text-[11px]'}>
+                        <DORM_Ic n="Layers" size={12} /> Tömegesen
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {!sz.length ? (
+                  <p className="px-4 py-3 text-[11px] font-bold text-slate-300 italic">
+                    Ezen a szinten még nincs szoba.
+                  </p>
+                ) : (
+                  <div className="divide-y divide-slate-50">
+                    {sz.map(r => (
+                      <button key={r.id} onClick={() => irhat && setSzerk({ room: r, floor: fl })}
+                        disabled={!irhat}
+                        className={'w-full text-left px-4 py-2.5 flex items-center gap-3 transition '
+                          + (irhat ? 'hover:bg-orange-50/50 cursor-pointer' : 'cursor-default')}>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs font-bold text-slate-700 truncate">
+                            {r.full_code || r.door_number}
+                            <span className="text-slate-400 font-medium ml-2">
+                              {(roomTypes || []).find(t => t.code === r.room_type)?.label_hu || r.room_type}
+                            </span>
+                          </div>
+                          <div className="text-[10px] font-bold text-slate-400 truncate">
+                            {agySzam(r.id)} férőhely
+                            {r.area_sqm ? ' · ' + r.area_sqm + ' m²' : ''}
+                            {r.purpose !== 'RESIDENTIAL' ? ' · ' + r.purpose : ''}
+                            {r.is_accessible ? ' · akadálymentes' : ''}
+                          </div>
+                        </div>
+                        <DORM_Chip cls="bg-slate-50 text-slate-600 border-slate-200">{r.status}</DORM_Chip>
+                        {irhat && <DORM_Ic n="Pencil" size={13} className="text-slate-300 flex-none" />}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {tomeg && (
+        <UModal open={!!tomeg} onClose={() => setTomeg(null)} max="max-w-xl"
+          icon={<DORM_Ic n="Layers" size={20} />} title="Szobák tömeges felvitele"
+          subtitle={`${building.name} · ${tomeg.floor.level_no}. szint`}>
+          <div className="grid sm:grid-cols-2 gap-4">
+            <UField label="Hány szoba" hint="Egyszerre legfeljebb 200.">
+              <input type="number" min="1" max="200" className={U_input} value={tomeg.count}
+                onChange={e => setTomeg({ ...tomeg, count: e.target.value })} />
+            </UField>
+            <UField label="Típus">
+              <select className={U_input} value={tomeg.type}
+                onChange={e => setTomeg({ ...tomeg, type: e.target.value })}>
+                {(roomTypes || []).map(t => <option key={t.code} value={t.code}>{t.label_hu || t.code}</option>)}
+              </select>
+            </UField>
+            <UField label="Ajtószám-előtag" hint="Pl. 2 → 201, 202… Üresen: 1, 2, 3…">
+              <input className={U_input} value={tomeg.prefix}
+                onChange={e => setTomeg({ ...tomeg, prefix: e.target.value })} />
+            </UField>
+            <UField label="Kezdő sorszám">
+              <input type="number" min="1" className={U_input} value={tomeg.first}
+                onChange={e => setTomeg({ ...tomeg, first: e.target.value })} />
+            </UField>
+            <UField label="Férőhely szobánként" hint="Üresen: a típusból következik.">
+              <input type="number" min="0" max="8" className={U_input} value={tomeg.capacity}
+                onChange={e => setTomeg({ ...tomeg, capacity: e.target.value })} />
+            </UField>
+          </div>
+          <p className="text-[11px] text-slate-400 leading-relaxed mt-3">
+            A már létező ajtószámokat a rendszer <b>átugorja</b> — kétszer lefuttatva sem
+            keletkezik kettőzés. A férőhelyek automatikusan létrejönnek (A, B, C…).
+          </p>
+          <div className="flex items-center justify-end gap-2 mt-6 pt-5 border-t border-slate-100">
+            <button onClick={() => setTomeg(null)} disabled={busy} className={U_btnGhost + ' py-2.5 px-5'}>Mégse</button>
+            <button onClick={tomegesen} disabled={busy}
+              className={U_btnPrimary + ' py-2.5 px-5 disabled:opacity-40'}>
+              {busy ? 'Felvitel…' : 'Szobák létrehozása'}
+            </button>
+          </div>
+        </UModal>
+      )}
+
+      <DORM_RoomEdit open={!!szerk} room={szerk && szerk.room} floor={szerk && szerk.floor}
+        building={building} roomTypes={roomTypes}
+        onClose={() => setSzerk(null)}
+        onDone={() => { load(); onChanged && onChanged(); }} />
+    </UModal>
+  );
+}
+
+
+/* ---------- 4.1b Szobaszerkesztő ----------------------------------------
+   A dorm.room 33 oszlopából a felület eddig EGYET sem tudott írni — a szoba
+   csak olvasható lista volt. Az RLS viszont a GONDNOK / KOLI_ADMIN /
+   KOLI_SYSADMIN körnek engedi az írást, tehát csak a képernyő hiányzott.
+
+   A teljes kódot (full_code) NEM itt rakjuk össze: azt az 52-es migráció
+   triggere képzi az épületkódból, a szintből és az ajtószámból. Így a
+   névképzés szabálya egy helyen van, és nem tud elcsúszni attól, amit a
+   meglévő adat használ. */
+const DORM_ROOM_ENUM = {
+  purpose:  [['RESIDENTIAL','Lakószoba'], ['COMMON','Közös helyiség'],
+             ['SERVICE','Szolgálati'], ['TECHNICAL','Gépészeti']],
+  bathroom: [['PRIVATE','Saját fürdő'], ['SHARED_UNIT','Lakóegységen belül közös'],
+             ['SHARED_FLOOR','Emeleti közös'], ['NONE','Nincs']],
+  kitchen:  [['PRIVATE','Saját konyha'], ['KITCHENETTE','Teakonyha'],
+             ['SHARED_UNIT','Lakóegységen belül közös'], ['SHARED_FLOOR','Emeleti közös'],
+             ['NONE','Nincs']],
+  internet: [['WIRED','Vezetékes'], ['WIFI','Wi-Fi'], ['BOTH','Mindkettő'], ['NONE','Nincs']],
+  gender:   [['ANY','Nincs megkötés'], ['MALE','Férfi'], ['FEMALE','Nő']],
+};
+
+function DORM_RoomEdit({ open, room, floor, building, roomTypes, onClose, onDone }) {
+  const uj = !room;
+  const [f, setF]     = useState({});
+  const [agy, setAgy] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [uzenet, setUzenet] = useState('');
+
+  useEffect(() => {
+    if (!open) return;
+    setErr(''); setUzenet(''); setBusy(false);
+    const r = room || {};
+    setF({
+      door_number: r.door_number || '', unit_code: r.unit_code || '',
+      room_type: r.room_type || 'DOUBLE', purpose: r.purpose || 'RESIDENTIAL',
+      capacity: r.capacity == null ? 2 : r.capacity,
+      area_sqm: r.area_sqm == null ? '' : r.area_sqm,
+      ceiling_height_m: r.ceiling_height_m == null ? '' : r.ceiling_height_m,
+      window_count: r.window_count == null ? '' : r.window_count,
+      orientation: r.orientation || '', bathroom: r.bathroom || 'SHARED_FLOOR',
+      kitchen: r.kitchen || 'SHARED_FLOOR', internet: r.internet || 'WIFI',
+      furnishing: r.furnishing || '',
+      gender_restriction: r.gender_restriction || 'ANY',
+      has_fridge: !!r.has_fridge, has_balcony: !!r.has_balcony, has_aircon: !!r.has_aircon,
+      is_accessible: !!r.is_accessible, step_free_shower: !!r.step_free_shower,
+      has_grab_rails: !!r.has_grab_rails, accessible_alarm: !!r.accessible_alarm,
+      smoking_allowed: !!r.smoking_allowed, quiet_room: !!r.quiet_room,
+      pets_allowed: !!r.pets_allowed,
+      note: r.note || '',
+    });
+    setAgy(r.id ? -1 : (r.capacity == null ? 2 : r.capacity));
+    if (r.id) {
+      DORM_sel('bed', q => q.eq('room_id', r.id))
+        .then(x => setAgy((x.rows || []).length));
+    }
+  }, [open, room && room.id]);
+
+  const set = (k) => (v) => setF(p => ({ ...p, [k]: v }));
+  const szam = (v) => (v === '' || v == null ? null : Number(v));
+  const ok = String(f.door_number || '').trim() && !busy;
+
+  const ment = async () => {
+    setBusy(true); setErr(''); setUzenet('');
+    try {
+      const row = {
+        building_id: building.id, floor_id: floor.id,
+        door_number: String(f.door_number).trim(),
+        unit_code: String(f.unit_code || '').trim() || null,
+        room_type: f.room_type, purpose: f.purpose,
+        capacity: Math.max(Number(f.capacity) || 0, 0),
+        area_sqm: szam(f.area_sqm), ceiling_height_m: szam(f.ceiling_height_m),
+        window_count: szam(f.window_count),
+        orientation: String(f.orientation || '').trim() || null,
+        bathroom: f.bathroom, kitchen: f.kitchen, internet: f.internet,
+        furnishing: String(f.furnishing || '').trim() || null,
+        gender_restriction: f.gender_restriction,
+        has_fridge: !!f.has_fridge, has_balcony: !!f.has_balcony, has_aircon: !!f.has_aircon,
+        is_accessible: !!f.is_accessible, step_free_shower: !!f.step_free_shower,
+        has_grab_rails: !!f.has_grab_rails, accessible_alarm: !!f.accessible_alarm,
+        smoking_allowed: !!f.smoking_allowed, quiet_room: !!f.quiet_room,
+        pets_allowed: !!f.pets_allowed,
+        note: String(f.note || '').trim() || null,
+      };
+      // A full_code SZANDEKOSAN nincs a sorban: az 52-es migracio triggere
+      // kepzi. Ha itt is beallitanank, ket helyen elne ugyanaz a szabaly.
+      const mentett = room ? await DORM_upd('room', room.id, row) : await DORM_ins('room', row);
+      const rid = (mentett && mentett.id) || (room && room.id);
+
+      // A ferohelyeket kulon RPC allitja: az soha nem torol hasznalt agyat,
+      // es visszamondja, ha nem tudta teljesiteni a kert szamot.
+      if (rid && Number(f.capacity) >= 0) {
+        const r = await DORM_api.roomBeds({ p_room: rid, p_count: Math.min(Number(f.capacity) || 0, 8) });
+        if (r && r.uzenet) setUzenet(r.uzenet);
+      }
+      onDone && onDone();
+      onClose && onClose();
+    } catch (e) { setErr(DORM_msg(e)); }
+    finally { setBusy(false); }
+  };
+
+  const Kapcs = ({ k, cimke }) => (
+    <label className="flex items-center gap-2 text-xs font-bold text-slate-600">
+      <input type="checkbox" checked={!!f[k]} onChange={e => set(k)(e.target.checked)} />
+      {cimke}
+    </label>
+  );
+  const Val = ({ k, cimke, opts, hint }) => (
+    <UField label={cimke} hint={hint}>
+      <select className={U_input} value={f[k] || ''} onChange={e => set(k)(e.target.value)}>
+        {opts.map(([v, c]) => <option key={v} value={v}>{c}</option>)}
+      </select>
+    </UField>
+  );
+
+  if (!open || !building || !floor) return null;
+
+  return (
+    <UModal open={open} onClose={busy ? () => {} : onClose} max="max-w-3xl"
+      icon={<DORM_Ic n="DoorOpen" size={20} />}
+      title={uj ? 'Új szoba' : (room.full_code || room.door_number)}
+      subtitle={`${building.name} · ${floor.level_no}. szint`}>
+      <DORM_Err msg={err} onClose={() => setErr('')} />
+      {uzenet && (
+        <div className="mb-4 bg-amber-50 border border-amber-100 rounded-2xl px-4 py-3 text-[11px] font-medium text-amber-700 flex gap-2">
+          <DORM_Ic n="AlertTriangle" size={15} className="flex-none mt-0.5" /> {uzenet}
+        </div>
+      )}
+
+      <div className="grid gap-4 sm:grid-cols-3">
+        <UField label="Ajtószám" hint="Ebből és az épület kódjából képződik a teljes kód.">
+          <input className={U_input} value={f.door_number || ''} maxLength={20}
+            onChange={e => set('door_number')(e.target.value)} />
+        </UField>
+        <UField label="Lakóegység" hint="Több szobás apartmannál a közös egység jele. Nem kötelező.">
+          <input className={U_input} value={f.unit_code || ''} maxLength={30}
+            onChange={e => set('unit_code')(e.target.value)} />
+        </UField>
+        <UField label="Típus">
+          <select className={U_input} value={f.room_type || ''} onChange={e => set('room_type')(e.target.value)}>
+            {(roomTypes || []).map(t => (
+              <option key={t.code} value={t.code}>{t.label_hu || t.code}</option>
+            ))}
+          </select>
+        </UField>
+
+        <Val k="purpose" cimke="Rendeltetés" opts={DORM_ROOM_ENUM.purpose}
+          hint="Csak a lakószobába lehet kollégistát elhelyezni." />
+        <UField label="Férőhely" hint="Ennyi ágy lesz a szobában. Használt ágyat a rendszer nem töröl.">
+          <input type="number" min="0" max="8" className={U_input} value={f.capacity}
+            onChange={e => set('capacity')(e.target.value)} />
+        </UField>
+        <UField label="Jelenlegi ágyak" hint="A mentés ehhez igazítja a férőhelyszámot.">
+          <input className={U_input + ' bg-slate-50'} readOnly
+            value={agy < 0 ? '…' : agy + ' ágy'} />
+        </UField>
+
+        <UField label="Alapterület (m²)">
+          <input type="number" step="0.1" min="0" className={U_input} value={f.area_sqm}
+            onChange={e => set('area_sqm')(e.target.value)} />
+        </UField>
+        <UField label="Belmagasság (m)">
+          <input type="number" step="0.01" min="0" className={U_input} value={f.ceiling_height_m}
+            onChange={e => set('ceiling_height_m')(e.target.value)} />
+        </UField>
+        <UField label="Ablakok száma">
+          <input type="number" min="0" className={U_input} value={f.window_count}
+            onChange={e => set('window_count')(e.target.value)} />
+        </UField>
+
+        <Val k="bathroom" cimke="Fürdő" opts={DORM_ROOM_ENUM.bathroom} />
+        <Val k="kitchen" cimke="Konyha" opts={DORM_ROOM_ENUM.kitchen} />
+        <Val k="internet" cimke="Internet" opts={DORM_ROOM_ENUM.internet} />
+
+        <Val k="gender_restriction" cimke="Nemi megkötés" opts={DORM_ROOM_ENUM.gender}
+          hint="A kiosztás ezt figyelembe veszi a szabad helyek keresésekor." />
+        <UField label="Tájolás" hint="Szabad szöveg, pl. dél-nyugat.">
+          <input className={U_input} value={f.orientation || ''} maxLength={40}
+            onChange={e => set('orientation')(e.target.value)} />
+        </UField>
+        <UField label="Bútorzat" hint="Szabad szöveg.">
+          <input className={U_input} value={f.furnishing || ''} maxLength={120}
+            onChange={e => set('furnishing')(e.target.value)} />
+        </UField>
+      </div>
+
+      <div className="grid sm:grid-cols-2 gap-x-6 gap-y-2 mt-5 border-t border-slate-100 pt-4">
+        <div className="space-y-2">
+          <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Felszereltség</div>
+          <Kapcs k="has_fridge" cimke="Hűtőszekrény" />
+          <Kapcs k="has_balcony" cimke="Erkély" />
+          <Kapcs k="has_aircon" cimke="Légkondicionáló" />
+          <Kapcs k="quiet_room" cimke="Csendes szoba" />
+          <Kapcs k="smoking_allowed" cimke="Dohányzás engedélyezett" />
+          <Kapcs k="pets_allowed" cimke="Kisállat engedélyezett" />
+        </div>
+        <div className="space-y-2">
+          <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Akadálymentesség</div>
+          <Kapcs k="is_accessible" cimke="Akadálymentes szoba" />
+          <Kapcs k="step_free_shower" cimke="Küszöb nélküli zuhany" />
+          <Kapcs k="has_grab_rails" cimke="Kapaszkodók" />
+          <Kapcs k="accessible_alarm" cimke="Akadálymentes vészjelző" />
+        </div>
+      </div>
+
+      <div className="mt-4">
+        <UField label="Megjegyzés">
+          <textarea rows={2} className={U_input} value={f.note || ''}
+            onChange={e => set('note')(e.target.value)} />
+        </UField>
+      </div>
+
+      <div className="flex items-center justify-end gap-2 mt-6 pt-5 border-t border-slate-100">
+        <button onClick={onClose} disabled={busy} className={U_btnGhost + ' py-2.5 px-5'}>Mégse</button>
+        <button onClick={ment} disabled={!ok}
+          className={U_btnPrimary + ' py-2.5 px-5 disabled:opacity-40 disabled:cursor-not-allowed'}>
+          {busy ? 'Mentés…' : (uj ? 'Szoba felvétele' : 'Mentés')}
+        </button>
+      </div>
+    </UModal>
+  );
+}
+
 
 /* ---------- 4.2b Szoba részletei és elhelyezés --------------------------
    MIÉRT ÚJ KÉPERNYŐ: a "Szobák" fül eddig tisztán olvasó lista volt — nem
@@ -2568,7 +3064,7 @@ function DORM_OpsView({ user }) {
               {active === 'buildings' && (
                 <DORM_BuildingsPanel buildings={buildings} sites={sites} landlords={landlords}
                   summary={summary} canEdit={canEditBld}
-                  onReload={async () => { await loadBase(); await loadMetrics(); }} />
+                  onReload={async () => { await loadBase(); await loadMetrics(); }} roles={R} roomTypes={roomTypes} />
               )}
               {active === 'rooms' && (
                 <DORM_RoomsPanel buildings={buildings} building={building}
