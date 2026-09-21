@@ -138,8 +138,8 @@ Lépésenként ugyanez:
 > **`05_features.sql` nélkül** a Hírfolyam / Programok / AI asszisztens modulok
 > egy seed-elt `localStorage` tárolóra esnek vissza: működnek, de eszközönként
 > külön adatot látnak. A migráció után minden élőben megosztott — a táblák
-> üresen indulnak, és az első bejelentkezett betöltés tölti fel őket
-> (17 program, 6 hírfolyam-poszt, 9 tudásbázis-dokumentum).
+> üresen indulnak; az élő táblákba a frontend nem tölt automatikus demó adatot.
+> A mintaadatok csak a helyi, `localStorage`-alapú előnézetben jelennek meg.
 
 > A `programs` táblának **nincs `kind` oszlopa**, és nem is kell: a
 > program/képzés kategória a `level`-ből származik (`PROG_kind()`). Ha új mezőt
@@ -278,6 +278,24 @@ git commit -am "CI build a Pages deployhoz" && git push
 Utána: **Settings → Pages → Source: GitHub Actions**.
 
 ---
+
+## Műveleti jogosultságok (RBAC)
+
+A szerepkör–modul mátrix öt műveletet kezel: VIEW, USE, CREATE, EDIT, DELETE.
+A SUPERADMIN hozzáférése nem vonható el. A felület a mátrix alapján tiltja a
+műveleteket; a szerver a meglévő sor- és szerepkörszabályokon felül ellenőriz.
+Saját szerepkörnek adott moduljog ezért önmagában nem bővíti a régi RLS/RPC kapukat.
+Az ECHO és a kollégium saját hatókörös jogosultságai megmaradnak.
+
+Telepítési sorrend: **72 → 74 → 73**, a migrációs manifest szerint. A 73-as
+49 restriktív policy-t ad 20 táblára; az önkiszolgáló utak változatlanok.
+A `programs` tábla képzési sorain a `trainings`, a többi során a `programs`
+műveleti joga érvényesül. A data-layer hiányzó tábla esetén használ helyi
+előnézetet; jogosultsági és hálózati hibából nem csinál sikeres mentést.
+
+A telepítést és a háromlépcsős visszaállítást a [DEPLOY.md](DEPLOY.md#muveleti-rbac)
+írja le. A [helyi mérési jelentés](supabase/diagnostics/72_meresi_jelentes.md)
+tartalmazza a tesztparancsokat, eredményeket és a még szükséges élő ellenőrzéseket.
 
 ## Adatvédelem
 

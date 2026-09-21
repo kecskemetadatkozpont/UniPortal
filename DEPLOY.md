@@ -22,6 +22,7 @@ A csomag helyett a nyilvános tárolóból is dolgozhatsz: `git clone https://gi
 |---|---|
 | `web` | A UniPortal felülete (nginx), és **ugyanazon a címen** a Supabase API továbbítása (`/auth/v1`, `/rest/v1`, `/realtime/v1`, `/storage/v1`, `/functions/v1`). Ez az egyetlen kifelé nyitott port. |
 | `migrate` | Indításkor egyszer lefut. Felviszi az adatbázis-migrációkat (`supabase/NN_*.sql`, a sorrend a `deploy/migrate/manifest.txt`-ben), a már lefutottakat kihagyja, és lezárja a nyilvános jelszavú demó fiókokat. A `web` csak utána indul. |
+| `saml-sp` | NJE SAML bejelentkezés (`/saml/*`) automatikus regisztrációval. Kifelé nem nyit portot, a `web` továbbít rá. Részletek: [docs/nje-saml.md](docs/nje-saml.md) |
 | `db` | PostgreSQL 17 (Supabase-kép) |
 | `auth` | Bejelentkezés, regisztráció, jelszó-visszaállítás |
 | `rest` | Adatbázis-API (PostgREST) |
@@ -97,6 +98,47 @@ ssh -L 8000:127.0.0.1:8000 <szerver>     # majd a böngészőben: http://localho
 ```
 
 A felhasználónév `supabase`, a jelszó a `.env` `DASHBOARD_PASSWORD` sora.
+
+### Sebességkorlát és a valós ügyfél-IP
+
+A web-konténer nginxe korlátozza a kérések számát (`/auth/v1/`, `/rest/v1/`,
+`/functions/v1/`, `/storage/v1/`). Ehhez tudnia kell, **ki a kérés valódi
+küldője** — TLS-proxy mögött ugyanis minden kérés a proxy címéről érkezik, és
+akkor a korlát egyetlen közös vödör lenne: az első terhelés az egész
+intézményt kizárná.
+
+Ezért a `.env`-ben **kötelező** megadni, honnan fogadjuk el az
+`X-Forwarded-For` fejlécet:
+
+```sh
+UNIPORTAL_TRUSTED_PROXY=127.0.0.1      # a proxy ugyanezen a gépen fut
+```
+
+Több proxy esetén szóközzel elválasztva sorolhatók fel. Ha **nincs** proxy a
+web előtt, hagyd üresen.
+
+**A proxynak továbbítania kell az `X-Forwarded-For` fejlécet** — a lenti
+Caddy- és nginx-minta ezt megteszi. Ha az egyetemi proxy nem küldi, a korlát
+mindenkit egy vödörbe tesz.
+
+A mértékek a `.env`-ből hangolhatók (`UNIPORTAL_RL_*`, `UNIPORTAL_CONN_LIMIT`);
+üresen hagyva a beépített alapérték él. Az alapértékek a felület mért
+terheléséhez igazodnak, és **közös kimenő IP (kampusz NAT) mellett is
+használhatók**: a bejelentkezett forgalmat munkamenetenként, nem IP-nként
+számoljuk. A bejelentkezési korlát viszont IP szerinti, tehát közös NAT mögött
+az egész intézményre vonatkozik — ezért az alapértéke szándékosan bőkezű
+(`60r/m`). Ha a felhasználók nem közös IP mögül jönnek, nyugodtan húzd le:
+
+```sh
+UNIPORTAL_RL_AUTH=20r/m
+```
+
+Ellenőrzés indulás után:
+
+```sh
+docker compose logs web | grep uniportal     # a valós IP forrása
+docker compose logs web | grep limiting      # üres, ha semmi nem akadt el
+```
 
 **HTTPS.** A `web` sima HTTP-t szolgál ki a 8080-as porton, ezért élesben tegyél elé TLS-proxyt (Caddy, nginx, Traefik vagy az egyetemi proxy). A kamera- és mikrofonfunkciók (videós interjú) a böngészőben **csak HTTPS-en** működnek. Ha a proxy ugyanazon a gépen fut, állítsd be a `.env`-ben: `UNIPORTAL_HTTP_PORT=127.0.0.1:8080`. Így a 8080 kívülről nem is látszik.
 
@@ -175,6 +217,48 @@ A csomagban nincs `.env`, adatbázis, feltöltött fájl és mentés, ezért a k
 
 A `migrate` csak az új migrációkat futtatja; a nyilvántartás az `uniportal_meta.migrations` táblában van. Egy már lefutott, de utólag módosított migrációt nem futtat újra, csak figyelmeztet.
 
+<a id="muveleti-rbac"></a>
+
+### Műveleti RBAC telepítése és visszaállítása
+
+A manifest sorrendje **72_rbac_actions.sql → 74_rbac_enforce_rpc.sql →
+73_rbac_enforce_rls.sql**. A 72-es a mátrixot és kompatibilis RPC-ket hozza létre,
+a 74-es 26 RPC-t őriz, a 73-as 49 restriktív policy-t ad 20 táblához.
+A 73-as megszakítja a telepítést hiányzó backfill, kikapcsolt RLS vagy nem
+igazolt ügyintézői permisszív kapu esetén. Ilyenkor a megnevezett eltérést kell
+ellenőrizni; az előfeltételt ne kerüld meg. A data reset az RBAC-mátrixot,
+beállításokat, auditnaplót és mindkét leképezési táblát megőrzi.
+
+Az alkalmazásos ellenőrzés SUPERADMIN munkamenetben `rbac_enforce_state()`;
+a deploy linter a kapukat és policy-ket is ellenőrzi. Az élő környezetben
+külön szükséges a hat alap- és egy saját szerepkörös bejelentkezési/mentési
+próba, valamint a `reset-data.sh` előnézet. A helyi tesztparancsok és az eddigi
+bizonyítékok a [mérési jelentésben](supabase/diagnostics/72_meresi_jelentes.md) vannak.
+
+Visszaállítási sorrend:
+
+1. **Vészkapcsoló, SUPERADMIN alkalmazásos munkamenetből:**
+   `rbac_enforce_set(false)`. A régi RLS és RPC szerepkörkapuk továbbra is élnek.
+   Visszakapcsolás: `rbac_enforce_set(true)`. A SQL Editor adatbázis-tulajdonosa
+   nem automatikusan alkalmazásos SUPERADMIN; a függvény profilazonosítót kér.
+2. **A kikényszerítési rétegek bontása:** adatbázis-tulajdonosként futtasd a
+   teljes `supabase/75_rbac_actions_rollback.sql` fájlt. Ez egy tranzakcióban
+   eldobja az `rbacx_` policy-ket és kiveszi a 74-es pontosan azonosított
+   RPC-őrblokkjait. A mátrix és napló megmarad. Ismeretlenül módosított őrnél
+   az egész bontás visszagördül. A fájl kétszer is futtatható, és **nem része
+   a manifestnek**.
+3. **Az alapréteg teljes eltávolítása, csak ha szükséges:** SUPERADMIN
+   munkamenetből `rbac_actions_rollback()`. Ez megtagadja a futást élő policy
+   vagy RPC-őr mellett; máskülönben visszaállítja a korábbi menü-RPC-ket és
+   elbontja a 72-es mátrixot. A jogosultsági auditnaplót megőrzi.
+
+A 75-ös kézi futtatása nem változtatja meg a migrációs nyilvántartást.
+Visszatelepítéshez ezért a 74-es és a 73-as fájlt kell kézzel újrafuttatni,
+nem elegendő a konténerek újraindítása. Ha a 72-est is elbontottad, előbb az
+is szükséges. A 72-es első backfilljét jelölő beállítás megakadályozza, hogy
+egy újrafuttatás visszaadja az azóta szándékosan elvett jogokat. Újratelepítés
+után ellenőrizd a vészkapcsoló állását és futtasd a deploy verifikációt.
+
 A Supabase-verziót nem a szerveren kell frissíteni: a fejlesztő emeli a `deploy/vendor-supabase.sh`-val, kipróbálja, és a tárolóban adja tovább.
 
 ## 8. Mentés és visszaállítás
@@ -200,6 +284,50 @@ sudo ./deploy/restore.sh backups/uniportal-20260911-023000.tar.gz
 A jelenlegi állapotot nem törli, hanem a `backups/elozo-<időbélyeg>/` könyvtárba teszi. A `.env` is visszaáll, mert az adatbázis az archívumban lévő jelszóval jött létre. A mentéssel azonos vagy újabb UniPortal-verzión futtasd.
 
 > Az archívum személyes adatokat és a rendszer titkait tartalmazza. A szerveren kívülre csak **titkosítva** vidd (pl. `gpg -c`, restic, borg). Negyedévente próbáld ki a visszaállítást egy tesztszerveren. Ha a szerverről VM-pillanatkép is készül, az jó kiegészítés.
+
+### Reset application data while keeping users and RBAC
+
+Deploy this version first (`docker compose up -d --build`), and close old browser
+tabs: older frontend versions automatically insert demo programs into empty tables.
+Run the following from the repository directory on the Docker server:
+
+```sh
+# Preview only: exercises the database reset and rolls it back, lists upload counts.
+sh deploy/reset-data.sh --dry-run
+
+# Optional full backup before deletion.
+sudo sh deploy/backup.sh
+
+# Permanently delete application data and uploads.
+sh deploy/reset-data.sh --yes
+```
+
+The command clears business data in `public`, `echo`, and `dorm`, including courses,
+enrollments, programs, applications, survey responses, financial records, logs,
+templates, settings and reference catalogs. It preserves:
+
+- Supabase Auth accounts, passwords and identities; `public.users` and `profiles`.
+- User attributes, RBAC role definitions, permissions, grants, groups and membership.
+- Only the organization scopes (and their ancestors), buildings and related
+  site/landlord/tenure rows required by existing scoped grants. These are retained
+  to preserve the grants' meaning; scoped permissions never become global permissions.
+- User avatars; all other Storage objects are deleted through the Storage API.
+- Database schema, functions, policies, bucket definitions and migration history.
+
+Profile links to deleted students/agencies are cleared. The application requires
+fresh configuration/catalog data before those modules can be used again. Existing
+migrations are not rerun and demo data is not automatically reinserted by the new
+frontend. Browser-local demo data, server logs and backup archives are outside this reset.
+
+The destructive command pauses running entry points and background writers, validates
+the SQL in a rolled-back transaction, removes uploads, then commits the database reset.
+It restarts only the services it paused. File deletion cannot be rolled back together
+with SQL: a failure may leave some files deleted. The command reports errors and can
+be retried after the cause is fixed. Do not run other maintenance jobs or direct
+database writers concurrently. Without `--yes`, no deletion is committed.
+
+This is a manual command, **not a migration**. Never add `deploy/reset-data.sql` to
+`deploy/migrate/manifest.txt`.
 
 ## 9. Meglévő adatok áthozása a felhős Supabase-ből (haladó)
 
@@ -243,13 +371,19 @@ Az áthozott mentés személyes adatokat tartalmaz: kezeld a GDPR szerint.
 - [ ] Van rendszergazda, és a `superadmin_email()` címe rendben van.
 - [ ] Az ütemezett mentés fut, és a visszaállítást kipróbáltátok.
 - [ ] Az adatkezelési tájékoztató és a felhasználási feltételek (`privacy.html`, `terms.html`) `[kitöltendő]` helyei ki vannak töltve.
+- [ ] `UNIPORTAL_TRUSTED_PROXY` be van állítva, és a `docker compose logs web` a valós ügyfél-címeket mutatja, nem a proxyét. Enélkül a sebességkorlát mindenkit egy vödörbe tesz.
+- [ ] A `migrate` naplójában nincs „FIGYELEM: a UniPortal compose-réteg NEM töltődött be”.
+- [ ] A `migrate` naplójának biztonsági önellenőrzése (`--- UniPortal biztonsagi onellenorzes ---`) nem ír FIGYELEM sort.
+- [ ] `WHATSAPP_APP_SECRET` és `WHATSAPP_VERIFY_TOKEN` ki van töltve — különben a webhook szándékosan nem üzemel (503).
+- [ ] Néhány perc valódi használat után a `docker compose logs web | grep limiting` üres (a korlát nem akadályozza a normál munkát).
 - [ ] A szerver és a Docker frissítései ütemezve vannak.
 
 ## 12. Ismert korlátok
 
 - **CDN-függés:** a felhasználók böngészője néhány könyvtárat nyilvános CDN-ről tölt: cdn.jsdelivr.net (supabase-js, PDF-előnézet), cdn.tailwindcss.com, unpkg.com (ikonok), fonts.googleapis.com (betűtípus). Zárt hálózaton ezeket helyben kellene kiszolgálni.
 - **Demó adatok:** a 01-es migráció bemutató adatokat is betölt (ügynökségek, hallgatók, számlák, kampányok stb.). Ezek a mostani éles rendszerben is látszanak. A demó *fiókokat* a `migrate` lezárja, de az adatok eltávolítása külön feladat.
-- **WhatsApp:** a `whatsapp-send` és `whatsapp-webhook` függvények a `.env` `WHATSAPP_*` soraival működnek; ha üresek, a WhatsApp-küldés nem működik. A Meta webhook címe: `https://<domain>/functions/v1/whatsapp-webhook`. A `WHATSAPP_APP_SECRET`-et mindenképp állítsd be: nélküle a webhook az aláírás nélküli kéréseket is fogadja (hitelesítetlenként jelölve). A beállítás után futtasd: `docker compose up -d`.
+- **WhatsApp:** a `whatsapp-send` és `whatsapp-webhook` függvények a `.env` `WHATSAPP_*` soraival működnek; ha üresek, a WhatsApp-küldés nem működik. A Meta webhook címe: `https://<domain>/functions/v1/whatsapp-webhook`. A `WHATSAPP_APP_SECRET` és a `WHATSAPP_VERIFY_TOKEN` **kötelező**: e kettő nélkül a webhook szándékosan nem üzemel (503-at ad). Korábban ilyenkor átengedte az aláírás nélküli kéréseket is (hitelesítetlenként jelölve) — vagyis bárki írhatott az ügyintézői beérkezett mappába. A beállítás után futtasd: `docker compose up -d`.
+- **A `dorm` séma a REST API-n is kint van:** a `.env` `PGRST_DB_SCHEMAS` sora `public,graphql_public,dorm` (a hivatalos alapértelmezés csak `public,graphql_public`), és a 26-os migráció `grant select on all tables in schema dorm to authenticated`-et ad. Így van rendjén — a felület közvetlenül a `dorm` sémából olvas (`features/dorm.jsx`, `features/dorm-views.jsx`) —, és minden `dorm` táblán be van kapcsolva az RLS, tehát ez nem nyitott ajtó. A `dorm` policy-k viszont abban a feltevésben készültek, hogy a sémát csak a saját RPC-ken át érik el; **érdemes egyszer átnézni őket abból a szemszögből, hogy bármelyik tábla közvetlenül is lekérdezhető.**
 - **Levélsablonok:** csak a jelszó-visszaállító levél magyarított, a többi a Supabase alap angol sablonja.
 
 ## 13. Csak a felület, a felhős Supabase-szel

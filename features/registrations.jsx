@@ -10,12 +10,49 @@
    más fiókból ugyanez a hívás elbukik.
    ============================================================ */
 
-const REG_ASSIGNABLE_ROLES = ['STUDENT', 'AGENT', 'ADMISSIONS', 'FINANCE', 'ADMIN'];
+/* A KIOSZTHATÓ SZEREPKÖRÖK — a role_definition táblából, nem kódba égetve.
+   MI VOLT A BAJ: a lista kódba égetett volt:
+       const REG_ASSIGNABLE_ROLES = ['STUDENT','AGENT','ADMISSIONS','FINANCE','ADMIN'];
+   A 39-es migráció óta a szuperadmin LÉTREHOZHAT saját szerepkört, a 72-es óta
+   jogot is adhat neki — de kiosztani senkinek nem tudta, mert ez a választó nem
+   ismerte. Egy szerepkör, amit senki nem viselhet, nem szerepkör.
 
-const REG_ROLE_LABEL = {
+   A SUPERADMIN szándékosan kimarad: azt nem ebből a felületről kell adni
+   (deploy/make-superadmin.sh), és a profiles_protect_privileges trigger is
+   csak szuperadminnak engedi a role írását.
+
+   Tartalék: ha a role_definition nem érhető el (a 39-es nem futott le), a
+   listánk BETŰRE a régi, kódba égetett lista — a képernyő attól még működik. */
+const REG_ROLES_TARTALEK = ['STUDENT', 'AGENT', 'ADMISSIONS', 'FINANCE', 'ADMIN'];
+const REG_LABEL_TARTALEK = {
   STUDENT: 'Hallgató', AGENT: 'Ügynök', ADMISSIONS: 'Felvételi',
   FINANCE: 'Pénzügy', ADMIN: 'Admin', SUPERADMIN: 'Superadmin',
 };
+
+async function REG_loadRoles() {
+  if (!window.sb) return null;
+  try {
+    const { data, error } = await window.sb
+      .from('role_definition').select('kod, nev, aktiv, szin').order('sorrend');
+    if (error || !Array.isArray(data) || !data.length) return null;
+    return data;
+  } catch (e) { return null; }
+}
+
+/* A REG_ROLE_LABEL és a REG_ASSIGNABLE_ROLES a betöltött listából képződik.
+   Modul-szintű `let`, mert a RegistrationsView töltéskor beállítja, és a
+   render-függvények (nem komponensek) is hivatkoznak rá. */
+let REG_ROLE_DEFS = null;
+const REG_ROLE_LABEL = new Proxy({}, {
+  get: (_t, kod) => {
+    if (typeof kod !== 'string') return undefined;
+    const d = REG_ROLE_DEFS && REG_ROLE_DEFS.find(x => x.kod === kod);
+    return (d && d.nev) || REG_LABEL_TARTALEK[kod] || kod;
+  },
+});
+const REG_assignableRoles = () => REG_ROLE_DEFS
+  ? REG_ROLE_DEFS.filter(d => d.aktiv && d.kod !== 'SUPERADMIN').map(d => d.kod)
+  : REG_ROLES_TARTALEK;
 
 const REG_STATUS_STYLE = {
   pending:  { label: 'Jóváhagyásra vár', cls: 'bg-amber-50 text-amber-700 border-amber-100' },
@@ -216,6 +253,10 @@ function RegistrationsView({ user, onCountChange }) {
   const load = async () => {
     setErr('');
     try {
+      // A szerepkör-definíciók a kiosztható lista és a feliratok forrása.
+      // Nem blokkoló: ha nem jön, a kódba égetett tartalék dönt.
+      const defs = await REG_loadRoles();
+      if (defs) REG_ROLE_DEFS = defs;
       const data = await REG_loadProfiles();
       setRows(data);
       onCountChange && onCountChange(data.filter(r => r.approval_status === 'pending').length);
@@ -387,7 +428,14 @@ function RegistrationsView({ user, onCountChange }) {
                   </tr>
                 );
                 const st = REG_STATUS_STYLE[r.approval_status] || REG_STATUS_STYLE.pending;
-                const chosen = roleDraft[r.id] || r.requested_role || r.role || 'STUDENT';
+                // A legördülő ALAPÉRTÉKE szándékosan NEM a kért szerepkör.
+                // A requested_role a regisztráció beküldője által megadott,
+                // ellenőrizetlen érték (auth.signUp options.data) — a 68-as
+                // migráció óta a profiles.role-ba már nem kerülhet be, de a
+                // kérés maga itt látszik. Ha ez lenne az alapérték, a sort
+                // végigkattintó superadmin észrevétlenül osztana ki magasabb
+                // jogot. A kért szerepkör külön, jelölve jelenik meg.
+                const chosen = roleDraft[r.id] || r.role || 'STUDENT';
                 const busy = busyId === r.id;
                 const isSelf = !!(user && (user.id === r.id || user.email === r.email));
                 return (
@@ -397,8 +445,12 @@ function RegistrationsView({ user, onCountChange }) {
                       <div className="text-[13px] text-slate-400">{r.email}</div>
                     </td>
                     <td className="px-5 py-4">
+                      {/* A besorolás (tagozat, szint, szak, kar) szerkesztése a
+                          `registrations` modul EDIT joga. A szerveroldali pár a
+                          student_attributes_save (40_attributes_edit.sql). */}
                       <REG_Besorolas r={r} opciok={attrOpciok}
-                        szerkesztheto={!!(user && ['SUPERADMIN','ADMIN'].includes(user.role) && attrOpciok)}
+                        szerkesztheto={!!attrOpciok && PERM_can(user, 'registrations', 'EDIT',
+                          !!(user && ['SUPERADMIN','ADMIN'].includes(user.role)))}
                         onSaved={load} />
                     </td>
                     <td className="px-5 py-4 text-sm font-semibold text-slate-600">
@@ -420,13 +472,22 @@ function RegistrationsView({ user, onCountChange }) {
                             onChange={e => changeRole(r, e.target.value)}
                             className="text-[13px] font-semibold bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50"
                           >
-                            {REG_ASSIGNABLE_ROLES.map(role => (
+                            {REG_assignableRoles().map(role => (
                               <option key={role} value={role}>{REG_ROLE_LABEL[role]}</option>
                             ))}
                           </select>
                         )
                       ) : (
-                        REG_ROLE_LABEL[r.requested_role || r.role] || r.requested_role || r.role || '—'
+                        <>
+                          {REG_ROLE_LABEL[r.role] || r.role || '—'}
+                          {/* A KÉRT szerepkör külön, jelölve: ez a beküldő
+                              ellenőrizetlen kívánsága, nem a tényleges jog. */}
+                          {r.requested_role && r.requested_role !== r.role && (
+                            <span className="ml-2 text-[11px] font-bold text-amber-600" title="A regisztráló ezt kérte — nem a tényleges szerepkör.">
+                              kért: {REG_ROLE_LABEL[r.requested_role] || r.requested_role}
+                            </span>
+                          )}
+                        </>
                       )}
                     </td>
                     <td className="px-5 py-4 text-[13px] text-slate-500">{REG_fmtDate(r.created_at)}</td>
@@ -448,7 +509,7 @@ function RegistrationsView({ user, onCountChange }) {
                             className="text-[13px] font-semibold bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary/20"
                             title="Szerepkör a jóváhagyáskor"
                           >
-                            {REG_ASSIGNABLE_ROLES.map(role => (
+                            {REG_assignableRoles().map(role => (
                               <option key={role} value={role}>{REG_ROLE_LABEL[role]}</option>
                             ))}
                           </select>
@@ -464,7 +525,7 @@ function RegistrationsView({ user, onCountChange }) {
                       ) : (
                         <div className="flex items-center gap-2 justify-end">
                           {r.approval_status === 'rejected' && (
-                            <button disabled={busy} onClick={() => decide(r, 'approved', r.requested_role || r.role || 'STUDENT')}
+                            <button disabled={busy} onClick={() => decide(r, 'approved', r.role || 'STUDENT')}
                               className="px-3 py-2 rounded-xl text-[13px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 disabled:opacity-50 transition-colors">
                               Mégis jóváhagyom
                             </button>

@@ -129,6 +129,176 @@ const MENU_GROUPS = [
   { key: 'rendszer',  label: 'Rendszer',                  ids: [AppView.SYSTEM_ADMIN, AppView.REGISTRATIONS, AppView.ACCESS, AppView.CONSENTS] },
 ];
 
+/* ============================================================================
+   canSeeView — EGY helyen dől el, ki melyik nézetet láthatja
+   ----------------------------------------------------------------------------
+   MI VOLT EDDIG: ugyanez a feltétel-sor KÉTSZER szerepelt — a menüszűrőben és
+   a renderContent() switchében —, kommentben kikötve, hogy betűre egyezniük
+   kell. Ez volt a modul legnagyobb karbantartási csapdája: egy új szabályt két
+   helyen kellett átírni, és ha valaki az egyiket elfelejtette, a menüpont
+   látszott, de a Hírfolyam jött fel helyette (vagy fordítva).
+
+   A SORREND A LÉNYEG, és szándékosan ez:
+     1. Kódba égetett BIZTONSÁGI ágak (Regisztrációk, Hozzájárulási napló,
+        ECHO- és kollégiumi grantok). Ezek NEM szerepkör-beállítás kérdései,
+        hanem saját biztonsági szabályok — a mátrix nem írja felül őket.
+     2. SUPERADMIN: mindent. Ezt SEMMILYEN tábla nem veheti el.
+     3. A modul-mátrix VIEW joga (72_rbac_actions.sql).
+     4. A 39-es előtti, kódba égetett szerepkör-listák — tartalékként.
+     5. Csoport-jogosultság: csak ADHAT, elvenni nem tud.
+     6. return false — fail-closed.
+   ============================================================================ */
+function canSeeView(currentUser, viewId) {
+  if (!currentUser) return false;
+    // A kódba égetett, de SZEREPKÖR-alapú ágak (Kurzusok, Oktatók, ECHO,
+    // Szállásom) ezen keresztül kérdezik a 72-es modul-mátrixot. Ha él, az
+    // RBAC-felületen elvett VIEW jog itt is érvényesül; ha nem (null), az ág
+    // a mai, kódba égetett szabályra esik vissza.
+    const matrixView = () => PERM_elo(currentUser)
+      ? PERM_can(currentUser, viewId, 'VIEW', true)
+        || (currentUser.groupPerms || []).includes(viewId)
+        || (currentUser.userPerms || []).includes(viewId)
+      : null;
+    // Approving registrations is the superadmin's alone — not even ADMIN.
+    if (viewId === AppView.REGISTRATIONS) return currentUser.role === 'SUPERADMIN';
+    // A hozzájárulási napló személyes adatot tartalmaz: csak rendszergazda (az RLS is így szűr).
+    if (viewId === AppView.CONSENTS) return currentUser.role === 'SUPERADMIN' || currentUser.role === 'ADMIN';
+    // A jogosultságkezelés: olvasni admin is tud, EGYÉNI jogot csak szuperadmin
+    // adhat (ezt a 73-as migráció kényszeríti ki, nem a menü).
+    if (viewId === AppView.ACCESS) return currentUser.role === 'SUPERADMIN' || currentUser.role === 'ADMIN';
+    // Az ECHO kampánykezelés a REGISTRATIONS mintájára a fail-open ág ELŐTT dönt,
+    // különben a lenti 'SUPERADMIN || ADMIN → true' után minden ügyintéző látná.
+    if (viewId === AppView.ECHO_ADMIN) return currentUser.role === 'SUPERADMIN' || currentUser.role === 'ADMIN';
+    // A kitöltő a belső szerepköröknek és a hallgatóknak jár. A külsős AGENT
+    // (partnerügynökség) nem hallgató, ezért nem véleményez oktatót — a
+    // 15_echo_core.sql 11.7 seedje sem veszi fel a kurzusokra.
+    if (viewId === AppView.ECHO_STUDENT) {
+      if (currentUser.role === 'AGENT') return false;
+      return matrixView() ?? true;
+    }
+    // A kurzusnyilvantartas ugyintezoi ES oktatoi kepernyo. A feltetel a
+    // szerver oldali parja: az echo_course_list() is_staff()-ot VAGY elo
+    // echo.teacher sort kovetel. Az 'OKTATO' ECHO-grantot is beengedjuk, mert
+    // az a kotes epp azt jelenti, hogy az illeto oktatokent van nyilvantartva.
+    // Ha valakinek megsincs echo.teacher sora, a kepernyo ezt KIMONDJA —
+    // nem uresen hallgat, es nem piros hibaval fogad.
+    // Az oktatoi nyilvantartas UGYINTEZOI torzsadat: felvitel, javitas,
+    // inaktivalas. A COURSES-szal szemben a hallgato es az oktato NEM latja
+    // — nekik nincs mit kezdeniuk vele.
+    if (viewId === AppView.TEACHERS) {
+      return matrixView() ?? ['SUPERADMIN', 'ADMIN', 'ADMISSIONS', 'FINANCE'].includes(currentUser.role);
+    }
+    // A hallgatoi nyilvantartas szemelyes adatot mutat: ugyintezoi kepernyo.
+    // A szerver oldali parja a 71-es migracio is_staff() feltetele.
+    //
+    // MIERT NEM matrixView(): a 'students' MODULKENT nincs benne a 72-es
+    // rbac_actions seedjeben (a 'teachers' igen, lasd 72:290). A PERM_can a
+    // sor nelkuli modulra FALSE-t ad (perm.jsx:67), nem null-t, tehat a '??'
+    // tartalek AGA SEM futna le: a Hallgatok menupont elo matrix mellett
+    // eltunne az ADMIN / ADMISSIONS / FINANCE szerepkor alol.
+    // HA a modul bekerul a matrixba egy kesobbi migracioval, ez az ag
+    // atirhato matrixView() ?? [...] alakra, a TEACHERS mintajara.
+    if (viewId === AppView.STUDENTS) {
+      return ['SUPERADMIN', 'ADMIN', 'ADMISSIONS', 'FINANCE'].includes(currentUser.role);
+    }
+    if (viewId === AppView.COURSES) {
+      // Az 'OKTATO' ECHO-grant saját szabály, nem szerepkör-beállítás: a mátrix nem veszi el.
+      if ((currentUser.echoRoles || []).indexOf('OKTATO') >= 0) return true;
+      const m = matrixView();
+      if (m !== null) return m;
+      if (['SUPERADMIN', 'ADMIN', 'ADMISSIONS', 'FINANCE'].includes(currentUser.role)) return true;
+      if (currentUser.role === 'TEACHER') return true;
+      // A HALLGATO is latja, de mast: a sajat kurzusait (CRS_StudentView).
+      // Nem a nyilvantartas kevesebb gombbal — mas kerdesre valaszol.
+      if (currentUser.role === 'STUDENT') return true;
+      return (currentUser.echoRoles || []).indexOf('OKTATO') >= 0;
+    }
+    // Az oktatoi eredmenynezet KET fele nyilik, es a ketto FUGGETLEN egymastol.
+    //   (a) UniPortal-oldal, valtozatlanul: a negy belso szerepkor. MERVE: az
+    //       echo_campaigns() es az echo_rate() torzse is_admin()-t kovetel, ezert
+    //       ADMISSIONS / FINANCE eseten a valaszto ures marad — a nezet ezt
+    //       kimondja, nem uresen hallgat.
+    //   (b) ECHO-oldal (19_echo_roles.sql): elo 'OKTATO' grant. Ez az, ami eddig
+    //       hianyzott — az echo.teacher.profile_id MIND a 4 soron NULL volt, tehat
+    //       echo.my_teacher_id() NULL-t adott, es oktatokent minden eredmeny-RPC
+    //       ECHO_FORBIDDEN-t dobott. A kotest az ECHO kampanyok -> Szerepkorok
+    //       fulon lehet letrehozni (public.echo_teacher_link).
+    // A (b) ag DEFENZIV: a 19-es migracio elott az echoRoles ures tomb, tehat a
+    // menupont lathatosaga BETURE ugyanaz marad, mint eddig.
+    if (viewId === AppView.ECHO_TEACHER) {
+      if ((currentUser.echoRoles || []).indexOf('OKTATO') >= 0) return true;
+      const m = matrixView();
+      if (m !== null) return m;
+      if (['SUPERADMIN', 'ADMIN', 'ADMISSIONS', 'FINANCE'].includes(currentUser.role)) return true;
+      return (currentUser.echoRoles || []).indexOf('OKTATO') >= 0;
+    }
+    // --- Kollégiumi modul (26_dorm.sql) ---
+    // A REGISTRATIONS / ECHO_ADMIN mintájára a fail-open ág ELŐTT döntünk.
+    // A „Kollégium” az üzemeltetésé: SUPERADMIN/ADMIN, vagy élő grant.
+    if (viewId === AppView.DORM_OPS) {
+      if (['SUPERADMIN', 'ADMIN'].includes(currentUser.role)) return true;
+      return (currentUser.dormRoles || [])
+        .some(r => ['GONDNOK', 'KOLI_ADMIN', 'INGATLAN', 'KOLI_SYSADMIN'].includes(r));
+    }
+    // A „Karbantartás” a hibákat kezelőké. A KARBANTARTO a szobát és a hibát
+    // látja, a lakó nevét NEM — ezt az adatbázis kényszeríti ki, nem a menü.
+    if (viewId === AppView.DORM_MAINTENANCE) {
+      if (['SUPERADMIN', 'ADMIN'].includes(currentUser.role)) return true;
+      return (currentUser.dormRoles || [])
+        .some(r => ['KARBANTARTO', 'GONDNOK', 'KOLI_ADMIN', 'KOLI_SYSADMIN'].includes(r));
+    }
+    // A „Szállásom” mindenkinek jár az AGENT kivételével: a külsős partner-
+    // ügynökség nem lakhat kollégiumban. Aki nem lakó, annak a nézet maga
+    // mondja meg, hogy nincs elhelyezése — nem a menüből tűnik el.
+    if (viewId === AppView.DORM_STUDENT) {
+      if (currentUser.role === 'AGENT') return false;
+      return matrixView() ?? true;
+    }
+    // A SZUPERADMIN mindent lát, és ezt SEMMILYEN tábla nem írhatja felül.
+    // Ha elvehető lenne, ki lehetne zárni magát abból a képernyőből is,
+    // amivel visszaállítaná — és nem maradna út vissza.
+    if (currentUser.role === 'SUPERADMIN') return true;
+
+    // A szerepkörhöz rendelt lista FELVÁLTJA a lentebbi, kódba égetett
+    // ágakat, ha van adat. Így a szuperadmin tényleg át tudja szabni, mit
+    // lát egy szerepkör — nem csak bővíteni. Ha a 39-es migráció nem futott
+    // le, a rolePerms null, és minden marad a régiben.
+    //
+    // Amit a FÖLÖTTE lévő ágak már eldöntöttek (Regisztrációk, ECHO- és
+    // kollégiumi grantok), azt ez nem írja felül: azok saját biztonsági
+    // szabályok, nem szerepkör-beállítás kérdése.
+    // A MODUL-MÁTRIX (72_rbac_actions.sql) VIEW joga FELVÁLTJA a lentebbi,
+    // kódba égetett ágakat, ha van adat. Így a szuperadmin tényleg át tudja
+    // szabni, mit lát egy szerepkör — nem csak bővíteni.
+    //
+    // A `regi` harmadik paraméter a 39-es rolePerms ága: ha a 72-es még nem
+    // futott le, a PERM_can pontosan arra esik vissza, tehát senki nem veszít
+    // hozzáférést egy nem lefutott migrációtól.
+    if (PERM_elo(currentUser) || Array.isArray(currentUser.rolePerms)) {
+      return PERM_can(currentUser, viewId, 'VIEW',
+                      Array.isArray(currentUser.rolePerms)
+                        ? currentUser.rolePerms.includes(viewId)
+                        : undefined)
+          || (currentUser.groupPerms || []).includes(viewId)
+          || (currentUser.userPerms || []).includes(viewId);
+    }
+
+    if (currentUser.role === 'ADMIN') return true;
+    if (currentUser.role === 'AGENT') return [AppView.FEED, AppView.PROGRAMS, AppView.ASSISTANT, AppView.AGENT_PORTAL, AppView.INTERVIEWS].includes(viewId);
+    if (currentUser.role === 'FINANCE') return [AppView.FEED, AppView.ASSISTANT, AppView.FINANCE, AppView.AGENT_PORTAL, AppView.INTERVIEWS, AppView.REPORTS].includes(viewId);
+    if (currentUser.role === 'ADMISSIONS') return [AppView.FEED, AppView.ASSISTANT, AppView.ADMISSIONS_CORE, AppView.EVALUATION, AppView.ENGAGEMENT_CRM, AppView.IMMIGRATION, AppView.INTERVIEWS, AppView.MARKETING_LEADS, AppView.REPORTS, AppView.INTELLIGENCE].includes(viewId);
+    if (currentUser.role === 'STUDENT') return [AppView.FEED, AppView.PROGRAMS, AppView.ASSISTANT, AppView.STUDENT_PORTAL].includes(viewId);
+    // CSOPORT-JOGOSULTSÁG — közvetlenül a fail-closed ág ELŐTT.
+    // Ez a sorrend a lényeg: a szerepkör-ágak már lefutottak, tehát a csoport
+    // csak olyan menüpontot nyithat meg, amit a szerepkör nem adott meg.
+    // ELVENNI nem tud semmit — a lenti `return false` marad a végszó.
+    if ((currentUser.groupPerms || []).includes(viewId)) return true;
+    // EGYENI JOG (73_user_access.sql) — a csoporttal azonos elv: csak ADHAT
+    // menupontot, elvenni nem tud. A fail-closed `return false` a vegszo.
+    if ((currentUser.userPerms || []).includes(viewId)) return true;
+    return false;
+}
+
 
 /* ============================================================================
    STÁTUSZMODELL — EGYETLEN FORRÁS (C1 + C2)
@@ -757,6 +927,106 @@ function DOC_fmtSize(bytes) {
     : Math.max(1, Math.round(bytes / 1024)) + ' KB';
 }
 
+
+// ---------------------------------------------------------------------------
+// Háttérben futó frissítések ütemezése.
+//
+// A felület több nézete időzítővel frissül (üzenetek 20-30 mp, naptárak
+// 45-60 mp, munkaasztal 60 mp). Két baj volt ezzel:
+//   • a REJTETT fül ugyanúgy kérdezett, mint a látható — egy egész napra
+//     nyitva hagyott böngésző így is terhelte a szervert;
+//   • a szerver sebességkorlátjára (429) semmi nem reagált: a hívás csendben
+//     elbukott, a nézet a régi adatot mutatta, a következő ütem pedig
+//     ugyanúgy nekifutott.
+//
+// A POLL_idozit ugyanaz, mint a setInterval, két különbséggel: rejtett fülön
+// kihagyja az ütemet, 429 után pedig vár. A visszatérési értéke a setInterval
+// azonosítója, tehát a meglévő clearInterval(...) takarítás változatlan marad.
+// ---------------------------------------------------------------------------
+let POLL_szunetEddig = 0;
+
+// A szünet SZÁNDÉKOSAN globális: a korlát is az, tehát ha az egyik nézet
+// belefutott, a többinek sincs értelme tovább próbálkoznia.
+function POLL_jelezKorlat(retryAfterSec) {
+  const mp = Number(retryAfterSec) > 0 ? Number(retryAfterSec) : 30;
+  POLL_szunetEddig = Math.max(POLL_szunetEddig, Date.now() + mp * 1000);
+}
+
+// Igaz, ha épp sebességkorlát miatt várunk.
+function POLL_szunetel() { return Date.now() < POLL_szunetEddig; }
+
+// A Supabase-válaszból kiolvassa a 429-et. A web nginxe Retry-After fejlécet
+// is küld, de azt a fetch-válaszból a supabase-js nem adja tovább, ezért a
+// törzsbe is beleírja (retry_after).
+function POLL_nezdKorlat(valasz) {
+  if (!valasz) return false;
+  if (valasz.status !== 429) return false;
+  let mp = 0;
+  try {
+    const t = valasz.error && (valasz.error.retry_after || valasz.error.message);
+    const m = String(t || '').match(/(\d+)/);
+    if (m) mp = Number(m[1]);
+  } catch (e) {}
+  POLL_jelezKorlat(mp);
+  return true;
+}
+
+function POLL_idozit(fn, ms) {
+  return setInterval(() => {
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+    if (POLL_szunetel()) return;
+    try { fn(); } catch (e) { /* egy hibás ütem ne állítsa le az időzítőt */ }
+  }, ms);
+}
+
+// ---------------------------------------------------------------------------
+// Feltöltés: a fájl típusát a BÖNGÉSZŐ mondja meg, és szabadon hamisítható.
+// A /storage/v1/ a felülettel AZONOS címről szolgál ki (deploy/web nginx),
+// ezért egy text/html vagy image/svg+xml típusú feltöltés azonos originről
+// futó JavaScript lenne, és kiolvashatná a munkamenetet a localStorage-ból —
+// aki megnyitja a linket, annak a fiókja elveszett.
+//
+// Amit nem ismerünk fel, azt application/octet-stream-ként adjuk fel: azt a
+// böngésző LETÖLTI, sosem jeleníti meg, tehát scriptet nem futtathat. Képnél
+// ez nem járható út (a kép megjelenítendő), ezért ott elutasítunk.
+//
+// Ugyanez a szűrés a tároló oldalán is megvan (69-es migráció) — ez itt azért
+// kell, hogy a felhasználó azonnali, érthető hibaüzenetet kapjon.
+const FELT_KEPTIPUSOK = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+const FELT_DOKTIPUSOK = [
+  'application/pdf',
+  'image/png', 'image/jpeg', 'image/webp', 'image/heic', 'image/tiff',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'text/plain',
+];
+
+function FELT_tipus(file) {
+  return String((file && file.type) || '').toLowerCase().split(';')[0].trim();
+}
+
+// Dokumentum/csatolmány: ismeretlen típus → letöltendő bájthalmaz.
+function FELT_dokumentumTipus(file) {
+  const t = FELT_tipus(file);
+  return FELT_DOKTIPUSOK.indexOf(t) >= 0 ? t : 'application/octet-stream';
+}
+
+// Kép (avatar, kollégiumi fotó): ismeretlen típus → nincs feltöltés.
+// Visszatérés: a típus, vagy null.
+function FELT_kepTipus(file) {
+  const t = FELT_tipus(file);
+  return FELT_KEPTIPUSOK.indexOf(t) >= 0 ? t : null;
+}
+
+// A tárolókulcs kiterjesztése SOHA ne a felhasználó fájlnevéből jöjjön.
+function FELT_kiterjesztes(mime) {
+  const m = {
+    'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif',
+  };
+  return m[mime] || 'bin';
+}
 // Keep object keys ASCII-safe: Storage rejects some characters in keys.
 function DOC_safeName(name) {
   return String(name || 'file')
@@ -770,7 +1040,7 @@ async function DOC_upload(file, ownerId, processId, docId) {
   const path = [ownerId, processId || 'draft', docId + '-' + Date.now().toString(36) + '-' + DOC_safeName(file.name)].join('/');
   const { error } = await sb.storage.from(DOC_BUCKET).upload(path, file, {
     upsert: true,
-    contentType: file.type || 'application/octet-stream',
+    contentType: FELT_dokumentumTipus(file),
   });
   if (error) throw error;
   return path;
@@ -1760,7 +2030,12 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
   // C1/C2: a fő státusz és a három sáv írása. Az ügynök csak néz — a szerver
   // (11 students_protect_identity + 25 students_protect_tracks) nem is
   // engedné neki, itt a felület is elrejti a vezérlőket.
-  const canEditStatus = ['SUPERADMIN', 'ADMIN', 'ADMISSIONS'].indexOf(user.role) >= 0;
+  /* A jelentkezői státusz szerkesztése. A 72-es óta az `admissions_core` modul
+     EDIT joga dönti el, nem kódba égetett szerepkör-lista.
+     A `regi` paraméter a MAI érték: ha a 72-es migráció nem futott le, az dönt
+     — így a bevezetés nem vesz el semmit (lásd features/perm.jsx). */
+  const canEditStatus = PERM_can(user, 'admissions_core', 'EDIT',
+    ['SUPERADMIN', 'ADMIN', 'ADMISSIONS'].indexOf(user.role) >= 0);
   const applyStudentPatch = async (id: string, patch) => {
     setTrackBusy(true); setTrackError('');
     try {
@@ -2361,8 +2636,11 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
           Dokumentumok
         </button>
         {/* 1./7. tetel — a fuggoben levo (koztuk az onregisztralt) ugynoksegek.
-            A dontes joga SUPERADMIN/ADMIN; a szamlalo elore jelzi a teendot. */}
-        {['SUPERADMIN', 'ADMIN'].indexOf(user.role) >= 0 && (
+            A dontes az `agent_portal` modul USE joga (72_rbac_actions.sql); a
+            `regi` parameter a mai SUPERADMIN/ADMIN lista. A szamlalo elore
+            jelzi a teendot. */}
+        {PERM_can(user, 'agent_portal', 'USE',
+                  ['SUPERADMIN', 'ADMIN'].indexOf(user.role) >= 0) && (
           <button 
             onClick={() => setActiveTab('registrations')}
             className={`px-6 py-3 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'registrations' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
@@ -3227,7 +3505,7 @@ const AdmissionsCore = ({ user }) => {
     // Realtime (migration 04) already pushes every change, so this is only a
       // safety net for a dropped websocket — 12 s meant a needless round-trip
       // five times a minute for every open tab.
-      const poll = setInterval(refetch, 60000);
+      const poll = POLL_idozit(refetch, 60000);
     let channel = null;
     try {
       if (window.sb && sb.channel) {
@@ -3275,7 +3553,11 @@ const AdmissionsCore = ({ user }) => {
   const [statusFilter, setStatusFilter] = useState<string>('All');
   const [statusError, setStatusError] = useState('');
   const [statusBusy, setStatusBusy] = useState(false);
-  const canEditStatus = !user || ['SUPERADMIN', 'ADMIN', 'ADMISSIONS'].indexOf(user.role) >= 0;
+  /* Ua., mint az AgentPortalban. A `!user ||` ág SZÁNDÉKOSAN marad: ez a nézet
+     user nélkül is renderelhető (beágyazott használat), és olyankor eddig sem
+     tiltott. A PERM_can user nélkül hamisat ad, ezért a `||` elé kerül. */
+  const canEditStatus = !user || PERM_can(user, 'admissions_core', 'EDIT',
+    ['SUPERADMIN', 'ADMIN', 'ADMISSIONS'].indexOf(user.role) >= 0);
 
   // C1/C2: egy lépés a fő láncon vagy egy sávon. A megengedettséget a
   // 25_status_model.sql állapotgépe is ellenőrzi; ha mégis elbukik, a szerver
@@ -5486,8 +5768,16 @@ return EngagementCRM;
 const Finance = (() => {
 type FinanceSubView = 'payments' | 'deposits' | 'currencies' | 'scholarships' | 'integrations' | 'payment_portal';
 
-const Finance: React.FC = () => {
+const Finance: React.FC<{ user?: any }> = ({ user }) => {
   const [activeSubView, setActiveSubView] = useState<FinanceSubView>('payments');
+  /* PÉNZÜGYI ÍRÁS-JOGOK (72_rbac_actions.sql).
+     MI VOLT EDDIG: ez a nézet a `user` propot SEM kapta meg, tehát semmilyen
+     jogosultság-ellenőrzés nem volt benne — aki a menüben látta a Pénzügyeket,
+     az rögzíthetett befizetést és hitelesíthetett fizetést.
+     A `regi` paraméter ezért itt `true`: pontosan ez a mai viselkedés. A 72-es
+     lefutása után a mátrix `finance` CREATE/EDIT joga dönt. */
+  const penzCreate = PERM_can(user, 'finance', 'CREATE', true);
+  const penzEdit   = PERM_can(user, 'finance', 'EDIT', true);
   const { data: payments, isLoading: paymentsLoading, refresh: refreshPayments } = useApi(api.getPayments);
   const { data: invoices, isLoading: invoicesLoading, refresh: refreshInvoices } = useApi(api.getInvoices);
   const { data: students, isLoading: studentsLoading, refresh: refreshStudents } = useApi(api.getStudents);
@@ -5674,7 +5964,9 @@ const Finance: React.FC = () => {
                       {payment.status === 'Pending' && payment.method === 'Bank Transfer' && (
                         <button 
                           onClick={() => handleVerifyPayment(payment.id)}
-                          className="bg-emerald-600 text-white px-3 py-1 rounded-lg text-[10px] font-bold hover:bg-emerald-700 transition-colors"
+                          disabled={!penzEdit}
+                          title={penzEdit ? '' : PERM_cim('EDIT')}
+                          className="bg-emerald-600 text-white px-3 py-1 rounded-lg text-[10px] font-bold hover:bg-emerald-700 transition-colors disabled:opacity-40 disabled:pointer-events-none"
                         >
                           Jóváhagyás
                         </button>
@@ -6019,7 +6311,8 @@ const Finance: React.FC = () => {
                       <div className="flex flex-col items-center gap-4">
                         <button 
                           onClick={() => handleSimulatePayment(student.id, student.tuitionFee)}
-                          disabled={isProcessing === student.id}
+                          disabled={isProcessing === student.id || !penzCreate}
+                          title={penzCreate ? '' : PERM_cim('CREATE')}
                           className="w-full md:w-auto bg-indigo-600 text-white px-12 py-4 rounded-2xl font-bold shadow-xl shadow-indigo-100 hover:bg-indigo-700 transition-all flex items-center justify-center gap-2"
                         >
                           {isProcessing === student.id ? (
@@ -6090,7 +6383,9 @@ const Finance: React.FC = () => {
         <div className="flex items-center gap-3">
           <button 
             onClick={() => setShowRecordModal(true)}
-            className="flex items-center gap-2 bg-slate-900 text-white px-6 py-2.5 rounded-xl text-sm font-bold shadow-lg shadow-slate-200 hover:bg-black transition-all"
+            disabled={!penzCreate}
+            title={penzCreate ? '' : PERM_cim('CREATE')}
+            className="flex items-center gap-2 bg-slate-900 text-white px-6 py-2.5 rounded-xl text-sm font-bold shadow-lg shadow-slate-200 hover:bg-black transition-all disabled:opacity-40 disabled:pointer-events-none"
           >
             <ICONS.Receipt size={18} /> Új kifizetés rögzítése
           </button>
@@ -6278,7 +6573,10 @@ const mockRiskFactors: RiskFactor[] = [
   { label: 'Pénzügyi háttér', impact: 'Low', description: 'A szponzori igazolás megfelelő, stabil jövedelem látható.' },
 ];
 
-const ImmigrationCompliance: React.FC = () => {
+const ImmigrationCompliance: React.FC<{ user?: any }> = ({ user }) => {
+  /* A vízum-checklist írása az `immigration` modul EDIT joga. A `regi` érték
+     `true`: ez a nézet eddig nem kapott user propot, tehát nem is tiltott. */
+  const vizumEdit = PERM_can(user, 'immigration', 'EDIT', true);
   const [activeSubView, setActiveSubView] = useState<ImmigrationSubView>('checklist');
   const { data: students, isLoading: studentsLoading, refresh: refreshStudents } = useApi(api.getStudents);
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
@@ -6293,6 +6591,7 @@ const ImmigrationCompliance: React.FC = () => {
   }, [students, selectedStudentId]);
 
   const handleUpdateItemStatus = async (itemId: string, newStatus: VisaItem['status']) => {
+    if (!vizumEdit) return;   // nincs immigration:EDIT jog
     if (!selectedStudent || !selectedStudent.visaChecklist) return;
 
     setIsUpdating(true);
@@ -6310,6 +6609,7 @@ const ImmigrationCompliance: React.FC = () => {
   };
 
   const handleUpdateVisaStatus = async (newStatus: Student['visaApplication']['status']) => {
+    if (!vizumEdit) return;   // nincs immigration:EDIT jog
     if (!selectedStudent || !selectedStudent.visaApplication) return;
 
     setIsUpdating(true);
@@ -6392,7 +6692,8 @@ const ImmigrationCompliance: React.FC = () => {
                   className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
                   value={selectedStudent.visaApplication.status}
                   onChange={(e) => handleUpdateVisaStatus(e.target.value as any)}
-                  disabled={isUpdating}
+                  disabled={isUpdating || !vizumEdit}
+                  title={vizumEdit ? '' : PERM_cim('EDIT')}
                 >
                   <option value="Not Started">Nincs elkezdve</option>
                   <option value="In Progress">Folyamatban</option>
@@ -6472,6 +6773,8 @@ const ImmigrationCompliance: React.FC = () => {
                       <div className="flex items-center gap-2">
                         <button 
                           onClick={() => handleUpdateItemStatus(item.id, 'Verified')}
+                          disabled={!vizumEdit}
+                          title={vizumEdit ? '' : PERM_cim('EDIT')}
                           disabled={isUpdating}
                           className="bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-[10px] font-bold hover:bg-emerald-700 transition-colors"
                         >
@@ -6479,6 +6782,8 @@ const ImmigrationCompliance: React.FC = () => {
                         </button>
                         <button 
                           onClick={() => handleUpdateItemStatus(item.id, 'Rejected')}
+                          disabled={!vizumEdit}
+                          title={vizumEdit ? '' : PERM_cim('EDIT')}
                           disabled={isUpdating}
                           className="bg-red-600 text-white px-3 py-1.5 rounded-lg text-[10px] font-bold hover:bg-red-700 transition-colors"
                         >
@@ -6655,7 +6960,10 @@ const mockVideos: VideoInterview[] = [
    Korábban a minta-pontszámokkal nyílt, így úgy tűnt, mintha már ki lenne töltve. */
 const URES_PONTOZOLAP: Criterion[] = mockCriteria.map(c => ({ ...c, currentScore: 0 }));
 
-const Evaluation: React.FC = () => {
+const Evaluation: React.FC<{ user?: any }> = ({ user }) => {
+  /* A bírálat írása az `evaluation` modul EDIT joga. A `regi` érték `true`:
+     ez a nézet eddig nem kapott user propot, tehát nem is tiltott. */
+  const biralatEdit = PERM_can(user, 'evaluation', 'EDIT', true);
   const [activeSubView, setActiveSubView] = useState<EvaluationSubView>('scorecard');
   const [scores, setScores] = useState<Criterion[]>(URES_PONTOZOLAP);
   const [selectedVideo, setSelectedVideo] = useState<VideoInterview>(mockVideos[0]);
@@ -6691,6 +6999,7 @@ const Evaluation: React.FC = () => {
 
   const handleSaveEvaluation = async () => {
     if (!selectedStudentId) return;
+    if (!biralatEdit) return;   // nincs evaluation:EDIT jog
     setSaving(true);
     try {
       await api.updateStudent(selectedStudentId, {
@@ -6775,8 +7084,9 @@ const Evaluation: React.FC = () => {
           </div>
           <button 
             onClick={handleSaveEvaluation}
-            disabled={saving}
-            className="w-full mt-8 bg-emerald-500 text-white py-4 rounded-2xl font-bold shadow-lg shadow-emerald-900/20 hover:bg-emerald-600 transition-all flex items-center justify-center gap-2"
+            disabled={saving || !biralatEdit}
+            title={biralatEdit ? '' : PERM_cim('EDIT')}
+            className="w-full mt-8 bg-emerald-500 text-white py-4 rounded-2xl font-bold shadow-lg shadow-emerald-900/20 hover:bg-emerald-600 transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:pointer-events-none"
           >
             {saving ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> : 'Bírálat Mentése'}
           </button>
@@ -7079,7 +7389,7 @@ return Evaluation;
 const SystemAdmin = (() => {
 type AdminSubView = 'audit' | 'rbac' | 'api';
 
-const SystemAdmin: React.FC = () => {
+const SystemAdmin: React.FC<{ user?: any }> = ({ user }) => {
   const [activeSubView, setActiveSubView] = useState<AdminSubView>('audit');
   const { data: auditLogs, isLoading: auditLoading } = useApi(api.getAuditLogs);
   const { data: webhooks, isLoading: webhooksLoading } = useApi(api.getWebhooks);
@@ -7139,54 +7449,23 @@ const SystemAdmin: React.FC = () => {
     </div>
   );
 
+  /* A JOGOSULTSÁGI MÁTRIX.
+     MI VOLT EDDIG: ez a panel MAKETT volt — kódba égetett szerepkörlista
+     ('Rendszergazda', 'Pénzügyes', 'Felvételi Bíráló', 'Tanszékvezető'), három
+     kitalált jogosultság-kategória, <div>-ként kirajzolt kapcsoló onClick
+     nélkül, és egy „Változtatások Mentése" gomb handler nélkül. Semmit nem
+     mentett, és a szerepkörök sem léteztek.
+
+     MI LESZ: ugyanaz a ROLE_Tab, ami a Regisztrációk → Szerepkörök fülön fut.
+     Egy felület, egy igazságforrás — nem két, egymástól elcsúszó mátrix.
+     A szerkesztés szuperadminhoz kötött (a szerver is így dönt), tehát más
+     szerepkör itt olvasni tudja, állítani nem. */
   const renderRBAC = () => (
-    <div className="grid grid-cols-1 lg:grid-cols-4 gap-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="lg:col-span-1 space-y-4">
-        <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Szerepkörök</h4>
-        {['Rendszergazda', 'Pénzügyes', 'Felvételi Bíráló', 'Tanszékvezető'].map((role, i) => (
-          <div key={i} className={`p-4 rounded-2xl border cursor-pointer transition-all ${i === 0 ? 'bg-indigo-600 border-indigo-600 text-white shadow-xl shadow-indigo-100' : 'bg-white border-slate-100 text-slate-800 hover:border-indigo-200'}`}>
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-bold">{role}</span>
-              <ICONS.ChevronRight size={14} className={i === 0 ? 'text-white' : 'text-slate-300'} />
-            </div>
-          </div>
-        ))}
-        <button className="w-full mt-4 py-3 border-2 border-dashed border-slate-200 text-slate-400 rounded-2xl text-xs font-bold hover:bg-slate-50 transition-colors">
-          + Új szerepkör
-        </button>
-      </div>
-
-      <div className="lg:col-span-3 bg-white p-5 sm:p-8 rounded-3xl border border-slate-100 shadow-sm">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 sm:mb-8">
-          <div>
-            <h3 className="text-xl font-bold text-slate-800">Jogosultság Mátrix</h3>
-            <p className="text-sm text-slate-400 mt-1">Szerkeszthető jogosultságok a kiválasztott szerepkörhöz.</p>
-          </div>
-          <button className="bg-slate-900 text-white px-6 py-2 rounded-xl text-xs font-bold">Változtatások Mentése</button>
-        </div>
-
-        <div className="space-y-6">
-          {[
-            { cat: 'Pénzügyek', perms: ['Számlák megtekintése', 'Befizetések rögzítése', 'Pénzügyi riportok exportálása'] },
-            { cat: 'Diák Adatok', perms: ['Személyes adatok (PII) megtekintése', 'Diák státusz módosítása', 'Dokumentumok bírálata'] },
-            { cat: 'Rendszer', perms: ['Audit logok megtekintése', 'API kulcsok kezelése', 'Szerepkörök szerkesztése'] }
-          ].map((category, i) => (
-            <div key={i} className="space-y-3">
-              <h5 className="text-[10px] font-black text-indigo-600 uppercase tracking-widest">{category.cat}</h5>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {category.perms.map((perm, pi) => (
-                  <div key={pi} className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-100 group hover:bg-white hover:border-indigo-200 transition-all">
-                    <span className="text-xs font-medium text-slate-700">{perm}</span>
-                    <div className="w-10 h-5 bg-emerald-500 rounded-full relative cursor-pointer">
-                      <div className="absolute top-0.5 right-0.5 w-4 h-4 bg-white rounded-full shadow-sm" />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
+    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+      {/* rows nélkül: itt nincs betöltött profil-lista, ezért a
+          szerepkörönkénti fiókszám sem jelenik meg — jobb, mint
+          minden szerepkörre hamis nullát írni. */}
+      <ROLE_Tab user={user} />
     </div>
   );
 
@@ -8889,7 +9168,7 @@ const AdmissionsHub = (() => {
       // Realtime (migration 04) already pushes every change, so this is only a
       // safety net for a dropped websocket — 12 s meant a needless round-trip
       // five times a minute for every open tab.
-      const poll = setInterval(refetch, 60000);
+      const poll = POLL_idozit(refetch, 60000);
       let channel = null;
       try {
         if (window.sb && sb.channel) {
@@ -10204,7 +10483,10 @@ return StudentPortal;
 const MarketingLeads = (() => {
 const COLORS = ['#0F172A', '#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6'];
 
-const MarketingLeads: React.FC = () => {
+const MarketingLeads: React.FC<{ user?: any }> = ({ user }) => {
+  /* Ez a nézet ma CSAK OLVAS (api.getLeads, api.getMarketingCampaigns) — nincs
+     mit tiltani. A user prop azért kerül át, hogy amikor írás is lesz benne, a
+     jogosultság-ellenőrzés ne külön szerelvényt igényeljen. */
   const [leads, setLeads] = useState<Lead[]>([]);
   const [campaigns, setCampaigns] = useState<MarketingCampaign[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -11963,11 +12245,18 @@ const AccountPage = ({ user, onUpdate, onClose }) => {
     const f = e.target.files && e.target.files[0];
     if (!f) return;
     setUploading(true);
+    // A kiterjesztés a FELISMERT típusból jön, nem a felhasználó fájlnevéből:
+    // egy "kep.html" nevű, image/png tartalmú fájl így sem lesz html.
+    const kepTipus = FELT_kepTipus(f);
+    if (!kepTipus) {
+      setUploading(false);
+      alert('Csak PNG, JPEG, WebP vagy GIF kép tölthető fel profilképnek.');
+      return;
+    }
     try {
       if (window.sb && user.id) {
-        const ext = (f.name.split('.').pop() || 'png').toLowerCase();
-        const path = user.id + '/avatar_' + Date.now() + '.' + ext;
-        const { error: upErr } = await sb.storage.from('avatars').upload(path, f, { upsert: true, contentType: f.type });
+        const path = user.id + '/avatar_' + Date.now() + '.' + FELT_kiterjesztes(kepTipus);
+        const { error: upErr } = await sb.storage.from('avatars').upload(path, f, { upsert: true, contentType: kepTipus });
         if (!upErr) {
           const { data: pub } = sb.storage.from('avatars').getPublicUrl(path);
           const url = pub.publicUrl;
@@ -12135,6 +12424,8 @@ const App: React.FC = () => {
   // minden token-frissítéskor lefut; ez a ref választja el a "más lépett be"
   // esetet a "ugyanaz a fiók frissült" esettől, hogy a nézet ne ugorjon vissza.
   const landedForRef = useRef(null);
+  // Mikor töltöttük be utoljára a profilt (ms). A TOKEN_REFRESHED fésülésére.
+  const profilBetoltveRef = useRef(0);
   const [loginEmail, setLoginEmail] = useState('');
   /* Elfelejtett jelszó: a Supabase egyszer használható linket küld, ami a
      reset-password.html-re visz. A válasz szándékosan ugyanaz, akár létezik a
@@ -12164,6 +12455,7 @@ const App: React.FC = () => {
 
   // Build the app user from the Supabase session + profiles row.
   const loadProfile = async (authUser) => {
+    profilBetoltveRef.current = Date.now();
     let profile = null;
     try {
       const { data } = await sb.from('profiles').select('*').eq('id', authUser.id).maybeSingle();
@@ -12214,6 +12506,21 @@ const App: React.FC = () => {
       const { data: rp, error: rpErr } = await sb.rpc('my_role_permissions');
       if (!rpErr && Array.isArray(rp)) rolePerms = rp;
     } catch (e) { /* a 39-es migráció még nem futott le */ }
+
+    // --- AKCIÓ-SZINTŰ JOGOSULTSÁGOK (72_rbac_actions.sql) ---
+    // Modulonként öt művelet (VIEW, USE, CREATE, EDIT, DELETE) egyetlen
+    // hívásból. Alak: { "feed": ["VIEW","USE","CREATE"], … }; szuperadminnál
+    // { "*": [...] } — neki a mátrixot meg sem nézzük.
+    //
+    // UGYANAZ A DEFENZÍV MINTA, mint a másik négy jogosultság-RPC-nél, és
+    // ugyanabból az okból: ha a 72-es még nem futott le, a perms NULL marad, és
+    // a PERM_can a hívóhely által átadott, MA érvényes értékre esik vissza.
+    // Egy nem lefutott migráció így nem vesz el semmit.
+    let perms = null;
+    try {
+      const { data: pm, error: pmErr } = await sb.rpc('my_module_permissions');
+      if (!pmErr && pm && typeof pm === 'object') perms = pm;
+    } catch (e) { /* a 72-es migráció még nem futott le */ }
 
     // --- CSOPORT-JOGOSULTSÁGOK (38_student_groups.sql) ---
     // A csoport csak ADHAT menüpontot, elvenni nem tud semmit: a szűrő alább
@@ -12278,6 +12585,9 @@ const App: React.FC = () => {
       // A szerepkörhöz rendelt menüpontok (39_role_admin.sql). null = nincs
       // adat, ilyenkor a kódba égetett lista dönt.
       rolePerms,
+      // Modul × művelet jogosultságok (72_rbac_actions.sql). null = nincs adat,
+      // ilyenkor a PERM_can a hívóhely mai értékére esik vissza.
+      perms,
       dormResident,
       // A korábban elmentett pravatar-címet sem használjuk: az is az e-mail-címet vitte ki.
       avatar: (() => { const av = (profile && profile.avatar_url) || ov.avatar || ''; return (av && !/pravatar\.cc/i.test(av)) ? av : initialsAvatar((profile && profile.name) || (authUser.user_metadata && authUser.user_metadata.name) || authUser.email); })(),
@@ -12310,6 +12620,20 @@ const App: React.FC = () => {
   useEffect(() => {
     let sub = null;
     (async () => {
+      // NJE SAML: a saml-sp egyszer használható tokennel küld ide
+      // (#sso_token_hash). Még a munkamenet-ellenőrzés ELŐTT váltjuk be, és a
+      // címsorból azonnal kitöröljük, hogy se az előzményekbe, se egy
+      // megosztott linkbe ne kerüljön.
+      const ssoMatch = /(^|[#&])sso_token_hash=([^&]+)/.exec(window.location.hash);
+      if (ssoMatch) {
+        window.history.replaceState(null, '', window.location.pathname + window.location.search);
+        try {
+          const { error } = await sb.auth.verifyOtp({ token_hash: decodeURIComponent(ssoMatch[2]), type: 'magiclink' });
+          if (error) setLoginError('Az NJE bejelentkezés lejárt vagy már felhasználták. Kérjük, próbálja újra.');
+        } catch (e) {
+          setLoginError('Az NJE bejelentkezés nem fejezhető be. Kérjük, próbálja újra.');
+        }
+      }
       try {
         const { data: { session } } = await sb.auth.getSession();
         if (session && session.user) await loadProfile(session.user);
@@ -12318,9 +12642,21 @@ const App: React.FC = () => {
       } finally {
         setIsLoading(false);
       }
-      const { data } = sb.auth.onAuthStateChange((_event, session) => {
-        if (session && session.user) loadProfile(session.user);
-        else { landedForRef.current = null; setCurrentUser(null); }
+      // A supabase-js a TOKEN_REFRESHED eseményt a token megújításakor ÉS a
+      // fülre visszatéréskor is kiadja, a loadProfile pedig 5 RPC-t indít
+      // (profil, echo-szerepek, jog-listák, kollégiumi szerepek) — gyors
+      // fülváltogatással ez könnyen a sebességkorlátba futott.
+      //
+      // NEM tiltjuk le a frissítést, csak FÉSÜLJÜK: a fülre visszatéréskori
+      // újratöltés az, ami egy frissen jóváhagyott fiók új szerepkörét
+      // átveszi, tehát ezt megtartjuk — percenként legfeljebb egyszer.
+      const { data } = sb.auth.onAuthStateChange((event, session) => {
+        if (session && session.user) {
+          if (event === 'TOKEN_REFRESHED'
+              && landedForRef.current === session.user.id
+              && Date.now() - profilBetoltveRef.current < 60000) return;
+          loadProfile(session.user);
+        } else { landedForRef.current = null; profilBetoltveRef.current = 0; setCurrentUser(null); }
       });
       sub = data && data.subscription;
     })();
@@ -12339,6 +12675,16 @@ const App: React.FC = () => {
       setLoginError('Kapcsolódási hiba. Kérjük, próbálja újra.');
       setAuthBusy(false);
     }
+  };
+
+  // A saját SAML SP-nk (deploy/saml-sp) visz az NJE IdP-re, és a sikeres
+  // belépés után ide jön vissza (#sso_token_hash — lásd a fenti useEffect-et).
+  // Az első belépő fiókja automatikusan létrejön. Relatív cím, így bármely
+  // telepítésen jó.
+  const handleNjeSsoLogin = () => {
+    setLoginError('');
+    setAuthBusy(true);
+    window.location.assign(new URL('saml/login?next=app.html', window.location.href).href);
   };
 
   const kuldResetLink = async (e) => {
@@ -12361,9 +12707,16 @@ const App: React.FC = () => {
   };
 
   const handleLogout = async () => {
+    // NJE-s (SAML) fióknál az IdP-munkamenetet is lezárjuk — különben a
+    // következő „NJE bejelentkezés” kattintás jelszó nélkül visszaléptetne.
+    let njeSso = false;
+    try {
+      const { data: { session } } = await sb.auth.getSession();
+      njeSso = session?.user?.app_metadata?.sso === 'nje';
+    } catch (e) { /* ignore */ }
     try { await sb.auth.signOut(); } catch (e) { /* ignore */ }
     setCurrentUser(null);
-    window.location.href = 'index.html';
+    window.location.href = njeSso ? 'saml/logout' : 'index.html';
   };
 
   if (isLoading) {
@@ -12445,6 +12798,10 @@ const App: React.FC = () => {
             <button disabled={authBusy} className="w-full bg-primary text-white py-4 rounded-2xl font-bold shadow-xl shadow-primary/10 hover:bg-primary/90 transition-all active:scale-95 disabled:opacity-60">
               {authBusy ? 'Bejelentkezés…' : 'Belépés a rendszerbe'}
             </button>
+            <button type="button" onClick={handleNjeSsoLogin} disabled={authBusy} className="w-full border border-primary/30 text-primary py-4 rounded-2xl font-bold hover:bg-primary/5 transition-all disabled:opacity-60 inline-flex items-center justify-center gap-2">
+              <Lucide.Building2 size={18} aria-hidden="true" />
+              Belépés NJE azonosítóval
+            </button>
           </form>
           )}
           {/* A teszt-fiókok gyorsgombjai innen KIKERÜLTEK. Ez a képernyő
@@ -12470,114 +12827,8 @@ const App: React.FC = () => {
   }
 
   // Filter menu items based on user role
-  const filteredMenuItems = MENU_ITEMS.filter(item => {
-    // Approving registrations is the superadmin's alone — not even ADMIN.
-    if (item.id === AppView.REGISTRATIONS) return currentUser.role === 'SUPERADMIN';
-    // A hozzájárulási napló személyes adatot tartalmaz: csak rendszergazda (az RLS is így szűr).
-    if (item.id === AppView.CONSENTS) return currentUser.role === 'SUPERADMIN' || currentUser.role === 'ADMIN';
-    // A jogosultságkezelés: olvasni admin is tud, EGYÉNI jogot csak szuperadmin
-    // adhat (ezt a 73-as migráció kényszeríti ki, nem a menü).
-    if (item.id === AppView.ACCESS) return currentUser.role === 'SUPERADMIN' || currentUser.role === 'ADMIN';
-    // Az ECHO kampánykezelés a REGISTRATIONS mintájára a fail-open ág ELŐTT dönt,
-    // különben a lenti 'SUPERADMIN || ADMIN → true' után minden ügyintéző látná.
-    if (item.id === AppView.ECHO_ADMIN) return currentUser.role === 'SUPERADMIN' || currentUser.role === 'ADMIN';
-    // A kitöltő a belső szerepköröknek és a hallgatóknak jár. A külsős AGENT
-    // (partnerügynökség) nem hallgató, ezért nem véleményez oktatót — a
-    // 15_echo_core.sql 11.7 seedje sem veszi fel a kurzusokra.
-    if (item.id === AppView.ECHO_STUDENT) return currentUser.role !== 'AGENT';
-    // A kurzusnyilvantartas ugyintezoi ES oktatoi kepernyo. A feltetel a
-    // szerver oldali parja: az echo_course_list() is_staff()-ot VAGY elo
-    // echo.teacher sort kovetel. Az 'OKTATO' ECHO-grantot is beengedjuk, mert
-    // az a kotes epp azt jelenti, hogy az illeto oktatokent van nyilvantartva.
-    // Ha valakinek megsincs echo.teacher sora, a kepernyo ezt KIMONDJA —
-    // nem uresen hallgat, es nem piros hibaval fogad.
-    // Az oktatoi nyilvantartas UGYINTEZOI torzsadat: felvitel, javitas,
-    // inaktivalas. A COURSES-szal szemben a hallgato es az oktato NEM latja
-    // — nekik nincs mit kezdeniuk vele.
-    if (item.id === AppView.TEACHERS) {
-      return ['SUPERADMIN', 'ADMIN', 'ADMISSIONS', 'FINANCE'].includes(currentUser.role);
-    }
-    // A hallgatoi nyilvantartas szemelyes adatot mutat: ugyintezoi kepernyo.
-    // A szerver oldali parja a 71-es migracio is_staff() feltetele.
-    if (item.id === AppView.STUDENTS) {
-      return ['SUPERADMIN', 'ADMIN', 'ADMISSIONS', 'FINANCE'].includes(currentUser.role);
-    }
-    if (item.id === AppView.COURSES) {
-      if (['SUPERADMIN', 'ADMIN', 'ADMISSIONS', 'FINANCE'].includes(currentUser.role)) return true;
-      if (currentUser.role === 'TEACHER') return true;
-      // A HALLGATO is latja, de mast: a sajat kurzusait (CRS_StudentView).
-      // Nem a nyilvantartas kevesebb gombbal — mas kerdesre valaszol.
-      if (currentUser.role === 'STUDENT') return true;
-      return (currentUser.echoRoles || []).indexOf('OKTATO') >= 0;
-    }
-    // Az oktatoi eredmenynezet KET fele nyilik, es a ketto FUGGETLEN egymastol.
-    //   (a) UniPortal-oldal, valtozatlanul: a negy belso szerepkor. MERVE: az
-    //       echo_campaigns() es az echo_rate() torzse is_admin()-t kovetel, ezert
-    //       ADMISSIONS / FINANCE eseten a valaszto ures marad — a nezet ezt
-    //       kimondja, nem uresen hallgat.
-    //   (b) ECHO-oldal (19_echo_roles.sql): elo 'OKTATO' grant. Ez az, ami eddig
-    //       hianyzott — az echo.teacher.profile_id MIND a 4 soron NULL volt, tehat
-    //       echo.my_teacher_id() NULL-t adott, es oktatokent minden eredmeny-RPC
-    //       ECHO_FORBIDDEN-t dobott. A kotest az ECHO kampanyok -> Szerepkorok
-    //       fulon lehet letrehozni (public.echo_teacher_link).
-    // A (b) ag DEFENZIV: a 19-es migracio elott az echoRoles ures tomb, tehat a
-    // menupont lathatosaga BETURE ugyanaz marad, mint eddig.
-    if (item.id === AppView.ECHO_TEACHER) {
-      if (['SUPERADMIN', 'ADMIN', 'ADMISSIONS', 'FINANCE'].includes(currentUser.role)) return true;
-      return (currentUser.echoRoles || []).indexOf('OKTATO') >= 0;
-    }
-    // --- Kollégiumi modul (26_dorm.sql) ---
-    // A REGISTRATIONS / ECHO_ADMIN mintájára a fail-open ág ELŐTT döntünk.
-    // A „Kollégium” az üzemeltetésé: SUPERADMIN/ADMIN, vagy élő grant.
-    if (item.id === AppView.DORM_OPS) {
-      if (['SUPERADMIN', 'ADMIN'].includes(currentUser.role)) return true;
-      return (currentUser.dormRoles || [])
-        .some(r => ['GONDNOK', 'KOLI_ADMIN', 'INGATLAN', 'KOLI_SYSADMIN'].includes(r));
-    }
-    // A „Karbantartás” a hibákat kezelőké. A KARBANTARTO a szobát és a hibát
-    // látja, a lakó nevét NEM — ezt az adatbázis kényszeríti ki, nem a menü.
-    if (item.id === AppView.DORM_MAINTENANCE) {
-      if (['SUPERADMIN', 'ADMIN'].includes(currentUser.role)) return true;
-      return (currentUser.dormRoles || [])
-        .some(r => ['KARBANTARTO', 'GONDNOK', 'KOLI_ADMIN', 'KOLI_SYSADMIN'].includes(r));
-    }
-    // A „Szállásom” mindenkinek jár az AGENT kivételével: a külsős partner-
-    // ügynökség nem lakhat kollégiumban. Aki nem lakó, annak a nézet maga
-    // mondja meg, hogy nincs elhelyezése — nem a menüből tűnik el.
-    if (item.id === AppView.DORM_STUDENT) return currentUser.role !== 'AGENT';
-    // A SZUPERADMIN mindent lát, és ezt SEMMILYEN tábla nem írhatja felül.
-    // Ha elvehető lenne, ki lehetne zárni magát abból a képernyőből is,
-    // amivel visszaállítaná — és nem maradna út vissza.
-    if (currentUser.role === 'SUPERADMIN') return true;
-
-    // A szerepkörhöz rendelt lista FELVÁLTJA a lentebbi, kódba égetett
-    // ágakat, ha van adat. Így a szuperadmin tényleg át tudja szabni, mit
-    // lát egy szerepkör — nem csak bővíteni. Ha a 39-es migráció nem futott
-    // le, a rolePerms null, és minden marad a régiben.
-    //
-    // Amit a FÖLÖTTE lévő ágak már eldöntöttek (Regisztrációk, ECHO- és
-    // kollégiumi grantok), azt ez nem írja felül: azok saját biztonsági
-    // szabályok, nem szerepkör-beállítás kérdése.
-    if (Array.isArray(currentUser.rolePerms)) {
-      return currentUser.rolePerms.includes(item.id)
-          || (currentUser.groupPerms || []).includes(item.id)
-          || (currentUser.userPerms || []).includes(item.id);
-    }
-
-    if (currentUser.role === 'ADMIN') return true;
-    if (currentUser.role === 'AGENT') return [AppView.FEED, AppView.PROGRAMS, AppView.ASSISTANT, AppView.AGENT_PORTAL, AppView.INTERVIEWS].includes(item.id);
-    if (currentUser.role === 'FINANCE') return [AppView.FEED, AppView.ASSISTANT, AppView.FINANCE, AppView.AGENT_PORTAL, AppView.INTERVIEWS, AppView.REPORTS].includes(item.id);
-    if (currentUser.role === 'ADMISSIONS') return [AppView.FEED, AppView.ASSISTANT, AppView.ADMISSIONS_CORE, AppView.EVALUATION, AppView.ENGAGEMENT_CRM, AppView.IMMIGRATION, AppView.INTERVIEWS, AppView.MARKETING_LEADS, AppView.REPORTS, AppView.INTELLIGENCE].includes(item.id);
-    if (currentUser.role === 'STUDENT') return [AppView.FEED, AppView.PROGRAMS, AppView.ASSISTANT, AppView.STUDENT_PORTAL].includes(item.id);
-    // CSOPORT-JOGOSULTSÁG — közvetlenül a fail-closed ág ELŐTT.
-    // Ez a sorrend a lényeg: a szerepkör-ágak már lefutottak, tehát a csoport
-    // csak olyan menüpontot nyithat meg, amit a szerepkör nem adott meg.
-    // ELVENNI nem tud semmit — a lenti `return false` marad a végszó.
-    if ((currentUser.groupPerms || []).includes(item.id)) return true;
-    // EGYÉNI JOG — szintén csak a fail-closed ág előtt, szintén csak adhat.
-    if ((currentUser.userPerms || []).includes(item.id)) return true;
-    return false;
-  });
+  // A szűrő és a renderContent() UGYANAZT a függvényt hívja — lásd canSeeView.
+  const filteredMenuItems = MENU_ITEMS.filter(item => canSeeView(currentUser, item.id));
   /* A hallgatónak a Student Portal a KÉPZÉSEK menüpontja: itt látja a féléves
      képzéseket, amelyekre jelentkezhet (a kisebb programok a Programok alatt).
      Az azonosító marad student_portal, így a szerepkör-jogosultságokon
@@ -12594,83 +12845,48 @@ const App: React.FC = () => {
   }
 
   const renderContent = () => {
+    // EGYETLEN jogosultság-kapu, a canSeeView-val — ugyanazzal a függvénnyel,
+    // amivel a menü szűr. Eddig minden érzékeny ág MEGISMÉTELTE a feltételt,
+    // és kommentben volt kikötve, hogy betűre egyeznie kell a menüszűrővel.
+    //
+    // ÉS AMI VÁLTOZIK: jogosultság nélkül nem a Hírfolyam jön fel, hanem egy
+    // panel, ami KIMONDJA, mi történt. A csendes átdobás félrevezető volt: a
+    // felhasználó azt hitte, elkattintott, és újra megpróbálta.
+    if (!canSeeView(currentUser, activeView)) {
+      const mi = MENU_ITEMS.find(m => m.id === activeView);
+      return <PERM_Denied modul={activeView} action="VIEW" modulNev={mi && mi.label} />;
+    }
     switch (activeView) {
       case AppView.AGENT_PORTAL: return <AgentPortal user={currentUser} />;
       case AppView.ADMISSIONS_CORE: return <AdmissionsCore user={currentUser} />;
       case AppView.ENGAGEMENT_CRM: return <EngagementCRM user={currentUser} />;
-      case AppView.FINANCE: return <Finance />;
-      case AppView.IMMIGRATION: return <ImmigrationCompliance />;
-      case AppView.EVALUATION: return <Evaluation />;
-      case AppView.SYSTEM_ADMIN: return <SystemAdmin />;
+      case AppView.FINANCE: return <Finance user={currentUser} />;
+      case AppView.IMMIGRATION: return <ImmigrationCompliance user={currentUser} />;
+      case AppView.EVALUATION: return <Evaluation user={currentUser} />;
+      case AppView.SYSTEM_ADMIN: return <SystemAdmin user={currentUser} />;
       case AppView.INTERVIEWS: return <InterviewScheduler user={currentUser} />;
       case AppView.STUDENT_PORTAL: return <StudentPortal user={currentUser} />;
-      case AppView.MARKETING_LEADS: return <MarketingLeads />;
+      case AppView.MARKETING_LEADS: return <MarketingLeads user={currentUser} />;
       case AppView.REPORTS: return <Reports />;
       case AppView.INTELLIGENCE: return <Intelligence />;
       case AppView.FEED: return <FeedView user={currentUser} onNavigate={setActiveView} />;
       case AppView.PROGRAMS: return <ProgramsView user={currentUser} scope="programs" />;
       case AppView.TRAININGS: return <ProgramsView user={currentUser} scope="degrees" />;
       case AppView.ASSISTANT: return <AssistantView user={currentUser} />;
-      case AppView.REGISTRATIONS:
-        return currentUser.role === 'SUPERADMIN'
-          ? <RegistrationsView user={currentUser} />
-          : <FeedView user={currentUser} onNavigate={setActiveView} />;
+      case AppView.REGISTRATIONS: return <RegistrationsView user={currentUser} />;
       case AppView.ECHO_STUDENT: return <ECHO_StudentView user={currentUser} />;
-      case AppView.CONSENTS:
-        return ['SUPERADMIN', 'ADMIN'].includes(currentUser.role)
-          ? <LEG_AdminLog user={currentUser} />
-          : <FeedView user={currentUser} onNavigate={setActiveView} />;
-      case AppView.TEACHERS:
-        // Ugyanaz a feltetel, mint a menuszuresben — kulonben a menupont
-        // latszana, de a Hirfolyam jonne fel helyette.
-        return ['SUPERADMIN', 'ADMIN', 'ADMISSIONS', 'FINANCE'].includes(currentUser.role)
-          ? <TCH_View user={currentUser} />
-          : <FeedView user={currentUser} onNavigate={setActiveView} />;
-      case AppView.ACCESS:
-        return (currentUser.role === 'SUPERADMIN' || currentUser.role === 'ADMIN')
-          ? <ACC_View user={currentUser} />
-          : <FeedView user={currentUser} onNavigate={setActiveView} />;
-      case AppView.STUDENTS:
-        return ['SUPERADMIN', 'ADMIN', 'ADMISSIONS', 'FINANCE'].includes(currentUser.role)
-          ? <STU_View user={currentUser} />
-          : <FeedView user={currentUser} onNavigate={setActiveView} />;
-      case AppView.COURSES:
-        // Ugyanaz a ket feltetel, mint a menuszuresben — kulonben egy oktato
-        // latna a menupontot, es a Hirfolyam jonne fel helyette.
-        return (['SUPERADMIN', 'ADMIN', 'ADMISSIONS', 'FINANCE'].includes(currentUser.role)
-                || currentUser.role === 'TEACHER'
-                || currentUser.role === 'STUDENT'
-                || (currentUser.echoRoles || []).indexOf('OKTATO') >= 0)
-          ? <CRS_View user={currentUser} />
-          : <FeedView user={currentUser} onNavigate={setActiveView} />;
-      case AppView.ECHO_ADMIN:
-        return (currentUser.role === 'SUPERADMIN' || currentUser.role === 'ADMIN')
-          ? <ECHO_AdminView user={currentUser} />
-          : <FeedView user={currentUser} onNavigate={setActiveView} />;
-      case AppView.ECHO_TEACHER:
-        // Ugyanaz a ket feltetel, mint a menuszuresben — kulonben egy OKTATO
-        // latna a menupontot, es a Campus Feed jonne fel helyette.
-        return (['SUPERADMIN', 'ADMIN', 'ADMISSIONS', 'FINANCE'].includes(currentUser.role)
-                || (currentUser.echoRoles || []).indexOf('OKTATO') >= 0)
-          ? <ECHO_TeacherView user={currentUser} />
-          : <FeedView user={currentUser} onNavigate={setActiveView} />;
+      case AppView.CONSENTS: return <LEG_AdminLog user={currentUser} />;
+      case AppView.TEACHERS: return <TCH_View user={currentUser} />;
+      case AppView.ACCESS: return <ACC_View user={currentUser} />;
+      case AppView.STUDENTS: return <STU_View user={currentUser} />;
+      case AppView.COURSES: return <CRS_View user={currentUser} />;
+      case AppView.ECHO_ADMIN: return <ECHO_AdminView user={currentUser} />;
+      case AppView.ECHO_TEACHER: return <ECHO_TeacherView user={currentUser} />;
       // --- Kollégiumi modul (26_dorm.sql) ---
-      // A feltételek BETŰRE ugyanazok, mint a menüszűrésben; különben egy
-      // gondnok látná a menüpontot, és a Hírfolyam jönne fel helyette.
-      case AppView.DORM_OPS:
-        return (['SUPERADMIN', 'ADMIN'].includes(currentUser.role)
-                || (currentUser.dormRoles || []).some(r => ['GONDNOK', 'KOLI_ADMIN', 'INGATLAN', 'KOLI_SYSADMIN'].includes(r)))
-          ? <DORM_OpsView user={currentUser} />
-          : <FeedView user={currentUser} onNavigate={setActiveView} />;
-      case AppView.DORM_MAINTENANCE:
-        return (['SUPERADMIN', 'ADMIN'].includes(currentUser.role)
-                || (currentUser.dormRoles || []).some(r => ['KARBANTARTO', 'GONDNOK', 'KOLI_ADMIN', 'KOLI_SYSADMIN'].includes(r)))
-          ? <DORM_MaintenanceView user={currentUser} />
-          : <FeedView user={currentUser} onNavigate={setActiveView} />;
-      case AppView.DORM_STUDENT:
-        return currentUser.role !== 'AGENT'
-          ? <DORM_StudentView user={currentUser} />
-          : <FeedView user={currentUser} onNavigate={setActiveView} />;
+      // A grant-alapú feltételek a canSeeView-ban vannak, egy helyen.
+      case AppView.DORM_OPS: return <DORM_OpsView user={currentUser} />;
+      case AppView.DORM_MAINTENANCE: return <DORM_MaintenanceView user={currentUser} />;
+      case AppView.DORM_STUDENT: return <DORM_StudentView user={currentUser} />;
       default: return <FeedView user={currentUser} onNavigate={setActiveView} />;
     }
   };
@@ -12820,6 +13036,13 @@ const HU_EN = {
 /* A státuszmodell (C1/C2) saját szótárrésze — a nagy táblától külön él, hogy
    a két hely egymástól függetlenül legyen szerkeszthető. Lásd STATUS_I18N. */
 Object.assign(HU_EN, STATUS_I18N);
+Object.assign(HU_EN, {
+  'A betöltés nem sikerült.': 'Loading failed.',
+  'A létrehozás nem igazolható.': 'Creation could not be confirmed.',
+  'A módosítás nem igazolható.': 'The change could not be confirmed.',
+  'A törlés nem igazolható.': 'Deletion could not be confirmed.',
+});
+
 const HU_EN_PHRASES = [
   [/Aktív jelentkezések/g,'Active applications'],[/Akív jelentkezések/g,'Active applications'],[/Új jelentkező/g,'New applicant'],[/\bMód\b/g,'Mode'],[/Felvételi folyamat ·/g,'Admission process ·'],[/(\d+)\s*\/\s*(\d+)\s*lépés/g,'$1/$2 steps'],[/(\d+)\s*lépés/g,'$1 steps'],[/(\d+)\s*folyamat\b/g,'$1 process(es)'],[/(\d+)%\s*biztos/g,'$1% confidence'],[/(\d+)\s*lehetséges egyezés/g,'$1 possible match(es)'],[/TESZT — helyes válasz:/g,'TEST — correct answer:'],[/Helyes:/g,'Correct:'],[/(\d+)\s*\/\s*(\d+)\s*helyes/g,'$1 / $2 correct'],[/(\d+)\s*\/\s*(\d+)\s*kötelező hitelesítve/g,'$1 / $2 required verified'],[/(\d+)\s*hiányzik/g,'$1 missing'],[/(\d+)\s*új\b/g,'$1 new'],[/EUR \/ szemeszter/g,'EUR / semester'],[/szemeszter/g,'semester'],[/szem\./g,'sem.'],[/Egyszerűsítsd, majd értékeld ki, ha/g,'Simplify, then evaluate if'],[/Mennyi/g,'What is'],[/Értékeld ki a következő kifejezést!/g,'Evaluate the following expression!'],[/Érték =/g,'Value ='],[/(\d+)\s*folyamat\b/g,'$1 process(es)'],[/(\d+)\s*\/\s*(\d+)\s*kötelező/g,'$1 / $2 required'],
 ];
@@ -14441,6 +14664,50 @@ Object.assign(HU_EN, {
   'Végleges törlés':'Delete permanently',
   'Észrevétel':'Comment',
   'Új oktató':'New teacher',
+});
+
+/* ----------------------------------------------------------------------------
+   72_rbac_actions.sql — az akció-szintű jogosultság ÚJ magyar feliratai.
+   A setupI18n DOM-fordítója ebből dolgozik. A DB-ből jövő modul- és
+   szerepkörnevek data-no-i18n="1" jelölést kapnak, tehát azokat nem bántja;
+   az öt MŰVELET nevét viszont fordítjuk, mert az stabil, zárt szókészlet.
+   ---------------------------------------------------------------------------- */
+Object.assign(HU_EN, {
+  // a mátrix fejléce (a rbac_action.nev értékei)
+  'Megtekintés':'View', 'Használat':'Use', 'Létrehozás':'Create',
+  'Szerkesztés':'Edit', 'Törlés':'Delete',
+  'Modul':'Module', 'Mind':'All', 'mind':'all', 'semmi':'none',
+  'menüben nem látszik':'hidden from the menu',
+  'Minden modul, minden művelet':'Every module, every action',
+  'Beállítás':'Configure', 'Bezár':'Close',
+  'nem szerkeszthető':'not editable', 'kikapcsolva':'disabled',
+  'Kikapcsolás':'Disable', 'Bekapcsolás':'Enable',
+  'Új szerepkör':'New role',
+  'KÓD (pl. KOORDINATOR)':'CODE (e.g. COORDINATOR)',
+  'Beépített szerepkör — törölni nem, kikapcsolni lehet.':
+    'Built-in role — cannot be deleted, can be disabled.',
+  'Saját szerepkör.':'Custom role.',
+  'Szerepkör létrehozva.':'Role created.', 'Szerepkör törölve.':'Role deleted.',
+  'Megnevezés mentve.':'Name saved.', 'Leírás mentve.':'Description saved.',
+  'Kikapcsolva.':'Disabled.', 'Bekapcsolva.':'Enabled.',
+  // tiltó panel (PERM_Denied)
+  'Ehhez nincs jogosultsága':'You do not have permission for this',
+  // vészkapcsoló és a migráció előtti állapot
+  'A jogosultsági kikényszerítés KI VAN KAPCSOLVA.':
+    'PERMISSION ENFORCEMENT IS TURNED OFF.',
+  'A művelet-szintű jogosultság még nincs bekapcsolva.':
+    'Action-level permissions are not enabled yet.',
+  'A menü és a műveletek két külön tengely.':
+    'The menu and the actions are two separate axes.',
+  'Ez nem hiba.':'This is not a bug.',
+  'Az új szerepkör kezdetben egyetlen jogot sem kap — a Beállítás alatt add hozzá, amit szeretnél. A Felhasználók fülön utána hozzárendelhető egy fiókhoz.':
+    'A new role starts with no permissions at all — add them under Configure. You can then assign it to an account on the Users tab.',
+  'Néhány képernyőnek saját szabálya is van (Regisztrációk, ECHO- és kollégiumi jogosultságok) — azt ez a mátrix nem írja felül.':
+    'Some screens have their own rules as well (Registrations, ECHO and dormitory permissions) — this matrix does not override those.',
+  'Ezen a modulon ennek a műveletnek nincs értelme':
+    'This action does not apply to this module',
+  'Van joga a modulon, de a menüben nem látja. Ez lehet szándékos — lásd a magyarázatot a mátrix alatt.':
+    'Has permissions on this module but cannot see it in the menu. This may be deliberate — see the explanation below the matrix.',
 });
 
 
