@@ -86,3 +86,4 @@
 73_user_access.sql
 74_webshop.sql
 75_webshop_editor.sql
+76_echo_exclusion_config.sql
