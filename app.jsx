@@ -76,6 +76,11 @@ const AppView = {
   DORM_OPS: 'dorm_ops',
   DORM_MAINTENANCE: 'dorm_maintenance',
   DORM_STUDENT: 'dorm_student',
+  // Pályázati modul (77_grants_core.sql). A kulcs EGYBEN jogosultsági kulcs is:
+  // a menüszűrő az item.id-t keresi a szerepkör/csoport/egyéni jogok között.
+  // A kutatói nézet ('grants') és a vezetői riport ('grants_reports') kulcsa a
+  // 77-esben már létezik, de nézetet még nem kapott.
+  GRANTS_OFFICE: 'grants_office',
   // Jogi: hozzájárulási napló (59_legal_consents.sql) — csak SUPERADMIN/ADMIN.
   CONSENTS: 'consents',
 };
@@ -99,6 +104,7 @@ const MENU_ITEMS = [
   { id: AppView.STUDENTS, label: 'Hallgatók', icon: <Lucide.Users size={20} /> },
   { id: AppView.SHOP, label: 'Webshop', icon: <Lucide.ShoppingBag size={20} /> },
   { id: AppView.SHOP_ADMIN, label: 'Webshop kezelése', icon: <Lucide.Store size={20} /> },
+  { id: AppView.GRANTS_OFFICE, label: 'Pályázatfigyelő', icon: <Lucide.Target size={20} /> },
   { id: AppView.REPORTS, label: 'Riportok', icon: <Lucide.BarChart2 size={20} /> },
   { id: AppView.INTELLIGENCE, label: 'Intelligence', icon: <Lucide.Zap size={20} /> },
   { id: AppView.SYSTEM_ADMIN, label: 'Rendszerkezelés', icon: <Lucide.Settings size={20} /> },
@@ -125,6 +131,9 @@ const MENU_ITEMS = [
 const MENU_GROUPS = [
   { key: 'altalanos', label: 'Általános',                 ids: [AppView.FEED, AppView.ASSISTANT, AppView.SHOP] },
   { key: 'kepzes',    label: 'Képzés és oktatás',         ids: [AppView.PROGRAMS, AppView.TRAININGS, AppView.COURSES, AppView.TEACHERS, AppView.STUDENTS] },
+  // Kutatás és pályázatok: külön csoport, mert más a közönség (kutatók és a
+  // pályázati iroda), más a jogosultság és más az életciklus, mint a képzésnél.
+  { key: 'kutatas',   label: 'Kutatás és pályázatok',   ids: [AppView.GRANTS_OFFICE] },
   { key: 'felveteli', label: 'Felvételi',                 ids: [AppView.ADMISSIONS_CORE, AppView.EVALUATION, AppView.INTERVIEWS, AppView.IMMIGRATION, AppView.STUDENT_PORTAL] },
   { key: 'partner',   label: 'Partnerek és kommunikáció', ids: [AppView.AGENT_PORTAL, AppView.ENGAGEMENT_CRM, AppView.MARKETING_LEADS] },
   { key: 'penzugy',   label: 'Pénzügy és elemzés',        ids: [AppView.FINANCE, AppView.SHOP_ADMIN, AppView.REPORTS, AppView.INTELLIGENCE] },
@@ -12647,6 +12656,11 @@ const App: React.FC = () => {
         return (currentUser.role === 'SUPERADMIN' || currentUser.role === 'ADMIN')
           ? <ACC_View user={currentUser} />
           : <FeedView user={currentUser} onNavigate={setActiveView} />;
+      // A jogosultságot itt NEM a szerepkör dönti el: a grants_office kulcs
+      // egyénileg és csoportra is kiosztható, és a nézet maga írja ki, ha nincs
+      // meg (a szerver minden RPC-ben újra ellenőrzi).
+      case AppView.GRANTS_OFFICE:
+        return <GRT_OfficeView user={currentUser} />;
       case AppView.STUDENTS:
         return ['SUPERADMIN', 'ADMIN', 'ADMISSIONS', 'FINANCE'].includes(currentUser.role)
           ? <STU_View user={currentUser} />
@@ -12881,6 +12895,13 @@ Object.assign(HU_EN, {
 });
 // A gyakorlás-napló sora számot tartalmaz, ezért kifejezés-mintával fordítjuk.
 HU_EN_PHRASES.push(
+  // 77 — pályázatfigyelő dinamikus részletei
+  [/(\d+)\s*nap$/gm, '$1 days'],
+  [/(\d+) \/ (\d+) felhívás/g, '$1 / $2 calls'],
+  [/(\d+) felhívás · utolsó sikeres betöltés:/g, '$1 calls · last successful load:'],
+  [/(\d+) forrás elavult:/g, '$1 sources are stale:'],
+  [/(\d+) további találat — szűkíts a szűrőkkel\./g, '$1 more results — narrow the filters.'],
+  [/még nem futott/g, 'has not run yet'],
   // 76 — kizárási lista dinamikus részletei
   [/(\d+)\s*fő · küszöb: (\d+)/g, '$1 students · threshold: $2'],
   [/([\d.,]+)% óraarány · küszöb: (\d+)%/g, '$1% share · threshold: $2%'],
@@ -13650,6 +13671,66 @@ Object.entries({
   'Nem lett kitöltve — legalább egy célt adj meg (e nélkül a félév végén nincs mit értékelni).': 'Not filled in — add at least one goal (otherwise there is nothing to evaluate at the end of the term).',
   'A hiányzó válaszokat pirossal jelöltük a kérdéseknél.': 'Missing answers are marked in red at the questions.',
   'Célmeghatározás/Értékelés': 'Goal setting/Evaluation',
+  /* 77 — pályázatfigyelő */
+  'Kutatás és pályázatok': 'Research and grants',
+  'Pályázatfigyelő': 'Grant radar',
+  'Hazai és nemzetközi felhívások egy helyen · a teljes szöveg mindig a kiíró oldalán':
+    'Hungarian and international calls in one place · the full text always on the funder\u2019s site',
+  'Felhívás rögzítése': 'Add a call',
+  'Felhívás rögzítése kézzel': 'Add a call manually',
+  'Amit hírlevélben, NCP-levélben vagy partneri megkeresésben kapunk':
+    'What arrives by newsletter, NCP e-mail or a partner request',
+  'Felhívások': 'Calls',
+  'Adatforrások': 'Data sources',
+  'Betöltés most': 'Load now',
+  'Betöltési napló': 'Load log',
+  'Nyitott': 'Open',
+  'Hamarosan': 'Upcoming',
+  'Zárt': 'Closed',
+  'Hamarosan nyílik': 'Opening soon',
+  'Minden állapot': 'Any status',
+  'Minden program': 'Any programme',
+  '30 napon belül lejár': 'Closes within 30 days',
+  'nincs határidő': 'no deadline',
+  'ma jár le': 'closes today',
+  'mindegy': 'any',
+  '7 napon belül': 'within 7 days',
+  '30 napon belül': 'within 30 days',
+  '90 napon belül': 'within 90 days',
+  'Keresés címre, azonosítóra, címkére…': 'Search by title, identifier or tag…',
+  'Nincs találat': 'No result',
+  'Próbáld szűkebb szűrőkkel.': 'Try narrower filters.',
+  'A katalógus még üres. Indíts betöltést az Adatforrások fülön, vagy rögzíts felhívást kézzel.':
+    'The catalogue is still empty. Start a load on the Data sources tab, or add a call manually.',
+  'partnerkeresés': 'partner search',
+  'partnerkeresés engedett': 'partner search allowed',
+  'módosult': 'changed',
+  'gépi gyűjtés': 'automated collection',
+  'gépi gyűjtés engedélyezve': 'automated collection allowed',
+  'csak kézi': 'manual only',
+  'elavult': 'stale',
+  'kikapcsolva': 'switched off',
+  'gépi végpont': 'machine endpoint',
+  'HTML-értelmező': 'HTML parser',
+  'kézi rögzítés': 'manual entry',
+  'hírcsatorna': 'news feed',
+  'Beállítás': 'Settings',
+  'Modellszolgáltató': 'Model provider',
+  'Szolgáltató': 'Provider',
+  'Claude (Anthropic)': 'Claude (Anthropic)',
+  'Nincs — csak számított pontszám': 'None — computed score only',
+  'Napi költségplafon (USD)': 'Daily cost cap (USD)',
+  'Határidő-figyelmeztetés': 'Deadline warning',
+  'Határidők': 'Deadlines',
+  'Változásnapló': 'Change log',
+  'Kivonat': 'Summary',
+  'Archiválás': 'Archive',
+  'A felhívás teljes szövege a kiíró oldalán': 'The full call text on the funder\u2019s site',
+  'Ehhez pályázati irodai jogosultság kell': 'This needs grant-office permission',
+  'Nincs megadott határidő.': 'No deadline given.',
+  'Még nem futott betöltés.': 'No load has run yet.',
+  'Kézi felvitel — szerkeszthető.': 'Manual entry — editable.',
+  'Gépi forrásból: a betöltés frissíti.': 'From an automated source: the load keeps it current.',
   /* 76 — kizárási szabályok kampányonként */
   'Kizárási szabályok': 'Exclusion rules',
   'Kizárt kurzusok és oktatók': 'Excluded courses and teachers',

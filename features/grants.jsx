@@ -1,0 +1,749 @@
+/* ============================================================================
+   UniPortal — Pályázatfigyelő (77_grants_core.sql)
+
+   MIT AD: a pályázati iroda képernyője. Három fül:
+     • Felhívások     — a katalógus szűrőkkel, határidő-visszaszámlálóval,
+                        részletekkel és változásnaplóval; kézi felvitel
+     • Adatforrások   — melyik csatorna mikor adott adatot, betöltés indítása
+     • Beállítások    — modellszolgáltató, napi plafon, határidő-figyelmeztetés
+
+   AMI SZÁNDÉKOSAN NINCS ITT: kutatói nézet. A 2026-09-23-i döntés szerint a
+   modult egyelőre csak az admin és a pályázati iroda kezeli; a kutatói radar
+   későbbi fázis, és akkor kap saját fájlt (features/grants-researcher.jsx).
+
+   A JOGOSULTSÁGOT NEM EZ A FÁJL DÖNTI EL: minden RPC a szerveren ellenőrzi a
+   'grants_office' kulcsot (szerepkör / csoport / egyéni szinten), a felület
+   csak megjeleníti, ha nincs meg.
+   ============================================================================ */
+
+async function GRT_rpc(fn, args) {
+  if (!window.sb) throw new Error('Nincs kapcsolat a háttérrendszerrel.');
+  const { data, error } = await window.sb.rpc(fn, args || {});
+  if (error) throw error;
+  return data;
+}
+
+const GRT_api = {
+  context:     ()            => GRT_rpc('grants_context'),
+  calls:       (p)           => GRT_rpc('grants_calls', {
+                                  p_q: p.q || null, p_allapot: p.allapot || null,
+                                  p_program: p.program || null, p_source: p.forras || null,
+                                  p_napon_belul: p.napon || null,
+                                  p_limit: p.limit || 100, p_offset: p.offset || 0 }),
+  callGet:     (id)          => GRT_rpc('grants_call_get', { p_call: id }),
+  callSave:    (adat)        => GRT_rpc('grants_call_save', { p_adat: adat }),
+  callArchive: (id, arch)    => GRT_rpc('grants_call_archive', { p_call: id, p_archivalt: arch !== false }),
+  options:     ()            => GRT_rpc('grants_call_options'),
+  etlRuns:     (n)           => GRT_rpc('grants_etl_runs', { p_limit: n || 30 }),
+  sourceSave:  (adat)        => GRT_rpc('grants_source_save', { p_adat: adat }),
+  settingSave: (key, value)  => GRT_rpc('grants_setting_save', { p_key: key, p_value: value }),
+  // A betöltés Edge Functionben fut: a service_role kulcs nem lehet a böngészőben.
+  fetchCalls:  (opts)        => {
+    if (!window.sb || !window.sb.functions) throw new Error('A betöltő szolgáltatás nem elérhető.');
+    return window.sb.functions.invoke('grants-fetch-calls', { body: opts || {} })
+      .then(({ data, error }) => {
+        if (error) throw error;
+        if (data && data.ok === false) throw new Error(data.hiba || 'A betöltés hibára futott.');
+        return data;
+      });
+  },
+};
+
+function GRT_msg(e) {
+  const raw = (e && (e.message || e.error_description || e.hint)) || '';
+  if (/GRANTS_FORBIDDEN/.test(raw)) return 'Ehhez pályázati irodai jogosultság kell (grants_office). A Jogosultságok képernyőn adható meg.';
+  if (/GRANTS_NOT_AUTHENTICATED/.test(raw)) return 'Nincs bejelentkezve.';
+  if (/GRANTS_NOT_EDITABLE/.test(raw)) return 'Ez a felhívás gépi forrásból származik, ezért kézzel nem szerkeszthető — a következő betöltés visszaírná.';
+  if (/GRANTS_BAD_INPUT/.test(raw)) return raw.replace(/.*GRANTS_BAD_INPUT:\s*/, '');
+  if (/GRANTS_BAD_SETTING/.test(raw)) return raw.replace(/.*GRANTS_BAD_SETTING:\s*/, '');
+  if (/GRANTS_CALL_NOT_FOUND/.test(raw)) return 'Ez a felhívás már nem létezik.';
+  if (/GRANTS_SOURCE_NOT_FOUND/.test(raw)) return 'Nincs ilyen adatforrás.';
+  if (/function .*grants_/i.test(raw) || /schema cache/i.test(raw)) {
+    return 'A pályázati modul adatbázis-része még nincs telepítve (supabase/77_grants_core.sql).';
+  }
+  return raw || 'Ismeretlen hiba.';
+}
+
+const GRT_ALLAPOT = {
+  nyitott:    { cimke: 'Nyitott',    tone: 'green' },
+  hamarosan:  { cimke: 'Hamarosan',  tone: 'blue' },
+  zart:       { cimke: 'Zárt',       tone: 'slate' },
+  ismeretlen: { cimke: 'Ismeretlen', tone: 'slate' },
+};
+
+function GRT_dt(s) {
+  if (!s) return '—';
+  try { return new Date(s).toLocaleDateString('hu-HU', { year: 'numeric', month: '2-digit', day: '2-digit' }); }
+  catch (e) { return String(s).slice(0, 10); }
+}
+
+/* A visszaszámláló színe a sürgősséget mondja meg, nem csak a számot: a
+   háromnapos és a harmincnapos határidő nem ugyanaz a feladat. */
+function GRT_Hatarido({ nap, datum }) {
+  if (nap === null || nap === undefined) {
+    return <span className="text-xs font-bold text-slate-400">nincs határidő</span>;
+  }
+  const tone = nap <= 3 ? 'red' : nap <= 14 ? 'amber' : nap <= 30 ? 'blue' : 'slate';
+  const szin = { red: 'text-red-600', amber: 'text-amber-600', blue: 'text-sky-600', slate: 'text-slate-500' }[tone];
+  return (
+    <div className="text-right flex-none">
+      <p className={'text-sm font-black ' + szin}>
+        {nap === 0 ? 'ma jár le' : nap + ' nap'}
+      </p>
+      <p className="text-[11px] text-slate-400 font-bold">{GRT_dt(datum)}</p>
+    </div>
+  );
+}
+
+function GRT_CallCard({ sor, onNyit }) {
+  const a = GRT_ALLAPOT[sor.allapot] || GRT_ALLAPOT.ismeretlen;
+  return (
+    <button type="button" onClick={() => onNyit(sor.id)}
+      className="w-full text-left bg-white border border-slate-100 rounded-2xl p-4 hover:border-primary/40
+                 hover:shadow-sm transition-all">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap mb-1.5">
+            <UBadge tone={a.tone}>{a.cimke}</UBadge>
+            {sor.program && <UBadge tone="primary">{sor.program}</UBadge>}
+            {sor.partnerkereses && <UBadge tone="violet">partnerkeresés</UBadge>}
+            {sor.valtozott && <UBadge tone="amber">módosult</UBadge>}
+          </div>
+          <p className="text-sm font-black text-slate-800 leading-snug">{sor.cim}</p>
+          <p className="text-[11px] text-slate-400 font-bold mt-1 truncate">
+            {sor.azonosito}{sor.alprogram ? ' · ' + sor.alprogram : ''}
+          </p>
+          {sor.kivonat && (
+            <p className="text-[11px] text-slate-400 font-medium mt-1 line-clamp-2">{sor.kivonat}</p>
+          )}
+        </div>
+        <GRT_Hatarido nap={sor.hatralevo_nap === null || sor.hatralevo_nap === undefined
+                            ? null : Number(sor.hatralevo_nap)} datum={sor.hatarido} />
+      </div>
+    </button>
+  );
+}
+
+/* --- felhívás részletei --------------------------------------------------- */
+function GRT_CallModal({ open, id, onClose, onValtozott }) {
+  const [d, setD] = useState(null);
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!open || !id) { setD(null); setErr(''); return; }
+    let el = true;
+    setD(null); setErr('');
+    GRT_api.callGet(id).then(x => { if (el) setD(x); }).catch(e => { if (el) setErr(GRT_msg(e)); });
+    return () => { el = false; };
+  }, [open, id]);
+
+  const archival = async () => {
+    if (!window.confirm('Archiváljuk ezt a felhívást? A katalógusból eltűnik, de a hivatkozások megmaradnak.')) return;
+    setBusy(true);
+    try { await GRT_api.callArchive(id, true); onValtozott && onValtozott(); onClose(); }
+    catch (e) { setErr(GRT_msg(e)); }
+    finally { setBusy(false); }
+  };
+
+  const a = d ? (GRT_ALLAPOT[d.allapot] || GRT_ALLAPOT.ismeretlen) : null;
+
+  return (
+    <UModal open={open} onClose={onClose} max="max-w-3xl"
+      icon={<Lucide.FileText size={20} />} title={d ? d.cim : 'Felhívás'}
+      subtitle={d ? (d.azonosito + (d.forras_nev ? ' · ' + d.forras_nev : '')) : ''}>
+      {err && (
+        <div className="bg-red-50 border border-red-100 rounded-2xl px-4 py-3 text-sm font-bold text-red-600 flex gap-2 mb-4">
+          <Lucide.AlertCircle size={16} className="flex-none mt-0.5" /> {err}
+        </div>
+      )}
+      {!err && !d && <div className="space-y-3"><SkeletonBar h={20} /><SkeletonBar /><SkeletonBar w="70%" /></div>}
+      {d && (
+        <div className="space-y-5">
+          <div className="flex items-center gap-2 flex-wrap">
+            <UBadge tone={a.tone}>{a.cimke}</UBadge>
+            {d.program && <UBadge tone="primary">{d.program}</UBadge>}
+            {d.tipus && <UBadge tone="slate">{d.tipus}</UBadge>}
+            {d.partnerkereses && <UBadge tone="violet">partnerkeresés engedett</UBadge>}
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="bg-slate-50 rounded-2xl p-4">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Határidők</p>
+              {(d.hataridok || []).length === 0 ? (
+                <p className="text-sm font-bold text-slate-400">Nincs megadott határidő.</p>
+              ) : (
+                <ul className="space-y-1">
+                  {d.hataridok.map(h => (
+                    <li key={h.sorszam} className="text-sm font-bold text-slate-700">
+                      {h.sorszam}. {GRT_dt(h.hatarido)}
+                      {h.megjegyzes && <span className="text-slate-400 font-medium"> — {h.megjegyzes}</span>}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {d.nyitas && <p className="text-[11px] text-slate-400 font-bold mt-2">Nyitás: {GRT_dt(d.nyitas)}</p>}
+            </div>
+
+            <div className="bg-slate-50 rounded-2xl p-4">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Adatok</p>
+              <dl className="space-y-1 text-sm">
+                {d.felhivas_azonosito && (
+                  <div><dt className="inline text-slate-400 font-medium">Felhívás: </dt>
+                    <dd className="inline font-bold text-slate-700">{d.felhivas_azonosito}</dd></div>
+                )}
+                {d.alprogram && (
+                  <div><dt className="inline text-slate-400 font-medium">Alprogram: </dt>
+                    <dd className="inline font-bold text-slate-700">{d.alprogram}</dd></div>
+                )}
+                {d.keret_eur && (
+                  <div><dt className="inline text-slate-400 font-medium">Keret: </dt>
+                    <dd className="inline font-bold text-slate-700">{Number(d.keret_eur).toLocaleString('hu-HU')} EUR</dd></div>
+                )}
+                {d.kedvezmenyezett && (
+                  <div><dt className="inline text-slate-400 font-medium">Kinek: </dt>
+                    <dd className="inline font-bold text-slate-700">{d.kedvezmenyezett}</dd></div>
+                )}
+                <div><dt className="inline text-slate-400 font-medium">Először láttuk: </dt>
+                  <dd className="inline font-bold text-slate-700">{GRT_dt(d.first_seen)}</dd></div>
+              </dl>
+            </div>
+          </div>
+
+          {d.kivonat && (
+            <div>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Kivonat</p>
+              <p className="text-sm text-slate-600 leading-relaxed">{d.kivonat}</p>
+            </div>
+          )}
+
+          {/* A teljes felhívásszöveget nem közöljük újra — mindig az eredetire
+              hivatkozunk, és ez jogi döntés, nem kényelmi. */}
+          {d.url && (
+            <a href={d.url} target="_blank" rel="noopener noreferrer"
+              className={U_btnPrimary + ' w-full justify-center'}>
+              <Lucide.ExternalLink size={16} /> A felhívás teljes szövege a kiíró oldalán
+            </a>
+          )}
+
+          {(d.valtozasok || []).length > 0 && (
+            <div>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
+                Változásnapló
+              </p>
+              <div className="space-y-1.5">
+                {d.valtozasok.map((v, i) => (
+                  <div key={i} className="bg-amber-50 border border-amber-100 rounded-xl px-3 py-2 text-[11px]">
+                    <span className="font-black text-amber-700">{v.mi}</span>
+                    <span className="text-amber-600/80 font-medium"> · {GRT_dt(v.mikor)}: </span>
+                    <span className="text-slate-500">{(v.regi || '—')} → </span>
+                    <span className="font-bold text-slate-700">{v.uj || '—'}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between gap-2 pt-4 border-t border-slate-100">
+            <p className="text-[11px] text-slate-400 font-medium">
+              {d.szerkesztheto ? 'Kézi felvitel — szerkeszthető.' : 'Gépi forrásból: a betöltés frissíti.'}
+            </p>
+            <button onClick={archival} disabled={busy} className={U_btnGhost + ' py-2 px-4 text-sm'}>
+              <Lucide.Archive size={15} /> Archiválás
+            </button>
+          </div>
+        </div>
+      )}
+    </UModal>
+  );
+}
+
+/* --- kézi felvitel -------------------------------------------------------- */
+function GRT_CallEditor({ open, onClose, onKesz }) {
+  const [f, setF] = useState({ cim: '', program: '', tipus: '', allapot: 'nyitott', url: '', kivonat: '',
+                               keret_eur: '', kedvezmenyezett: '', hatarido: '' });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  useEffect(() => {
+    if (open) {
+      setF({ cim: '', program: '', tipus: '', allapot: 'nyitott', url: '', kivonat: '',
+             keret_eur: '', kedvezmenyezett: '', hatarido: '' });
+      setErr('');
+    }
+  }, [open]);
+
+  const ment = async () => {
+    setBusy(true); setErr('');
+    try {
+      await GRT_api.callSave({
+        cim: f.cim.trim(), program: f.program.trim() || null, tipus: f.tipus.trim() || null,
+        allapot: f.allapot, url: f.url.trim() || null, kivonat: f.kivonat.trim() || null,
+        keret_eur: f.keret_eur || null, kedvezmenyezett: f.kedvezmenyezett.trim() || null,
+        hataridok: f.hatarido ? [{ hatarido: new Date(f.hatarido).toISOString() }] : [],
+      });
+      onKesz();
+    } catch (e) { setErr(GRT_msg(e)); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <UModal open={open} onClose={busy ? () => {} : onClose} max="max-w-2xl"
+      icon={<Lucide.FilePlus size={20} />} title="Felhívás rögzítése kézzel"
+      subtitle="Amit hírlevélben, NCP-levélben vagy partneri megkeresésben kapunk">
+      {err && (
+        <div className="bg-red-50 border border-red-100 rounded-2xl px-4 py-3 text-sm font-bold text-red-600 flex gap-2 mb-4">
+          <Lucide.AlertCircle size={16} className="flex-none mt-0.5" /> {err}
+        </div>
+      )}
+      <div className="space-y-4">
+        <UField label="A felhívás címe" hint="Ez látszik a katalógusban.">
+          <input className={U_input} value={f.cim} onChange={e => setF({ ...f, cim: e.target.value })} maxLength={400} />
+        </UField>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <UField label="Program" hint="Például NKFI, Erasmus+, Visegrad Fund.">
+            <input className={U_input} value={f.program} onChange={e => setF({ ...f, program: e.target.value })} />
+          </UField>
+          <UField label="Típus" hint="Kutatási pályázat, ösztöndíj, mobilitás…">
+            <input className={U_input} value={f.tipus} onChange={e => setF({ ...f, tipus: e.target.value })} />
+          </UField>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <UField label="Állapot">
+            <select className={U_input} value={f.allapot} onChange={e => setF({ ...f, allapot: e.target.value })}>
+              <option value="nyitott">Nyitott</option>
+              <option value="hamarosan">Hamarosan nyílik</option>
+              <option value="zart">Zárt</option>
+            </select>
+          </UField>
+          <UField label="Beadási határidő">
+            <input type="date" className={U_input} value={f.hatarido}
+              onChange={e => setF({ ...f, hatarido: e.target.value })} />
+          </UField>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <UField label="Keret (EUR)" hint="Nem kötelező.">
+            <input type="number" min="0" className={U_input} value={f.keret_eur}
+              onChange={e => setF({ ...f, keret_eur: e.target.value })} />
+          </UField>
+          <UField label="Kinek szól" hint="Egyetem, konzorcium, egyéni kutató…">
+            <input className={U_input} value={f.kedvezmenyezett}
+              onChange={e => setF({ ...f, kedvezmenyezett: e.target.value })} />
+          </UField>
+        </div>
+        <UField label="Hivatkozás a kiírásra" hint="A teljes szöveget nem tároljuk, csak ide hivatkozunk.">
+          <input className={U_input} value={f.url} onChange={e => setF({ ...f, url: e.target.value })}
+            placeholder="https://" />
+        </UField>
+        <UField label="Rövid kivonat" hint="Két-három mondat arról, mire szól.">
+          <textarea className={U_input + ' min-h-[90px]'} value={f.kivonat}
+            onChange={e => setF({ ...f, kivonat: e.target.value })} maxLength={1200} />
+        </UField>
+      </div>
+      <div className="flex items-center justify-end gap-2 mt-6 pt-5 border-t border-slate-100">
+        <button onClick={onClose} disabled={busy} className={U_btnGhost + ' py-2.5 px-5'}>Mégse</button>
+        <button onClick={ment} disabled={busy || !f.cim.trim()}
+          className={U_btnPrimary + ' py-2.5 px-5 disabled:opacity-40'}>
+          {busy ? 'Mentés…' : 'Rögzítés'}
+        </button>
+      </div>
+    </UModal>
+  );
+}
+
+/* --- adatforrás kártya ---------------------------------------------------- */
+function GRT_SourceCard({ f, onMent, onBetolt, betoltBusy }) {
+  const [nyit, setNyit] = useState(false);
+  const [utem, setUtem] = useState(String(f.utem_ora || 24));
+  const tipusCimke = { api: 'gépi végpont', html: 'HTML-értelmező', rss: 'hírcsatorna', kezi: 'kézi rögzítés' }[f.tipus] || f.tipus;
+
+  return (
+    <div className={'bg-white border rounded-2xl p-4 ' + (f.elavult ? 'border-amber-200' : 'border-slate-100')}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap mb-1">
+            <p className="text-sm font-black text-slate-800">{f.nev}</p>
+            <UBadge tone="slate">{tipusCimke}</UBadge>
+            {!f.aktiv && <UBadge tone="slate">kikapcsolva</UBadge>}
+            {f.gepi_gyujtes ? <UBadge tone="green">gépi gyűjtés</UBadge> : <UBadge tone="amber">csak kézi</UBadge>}
+            {f.elavult && <UBadge tone="amber">elavult</UBadge>}
+          </div>
+          <p className="text-[11px] text-slate-400 font-bold">
+            {f.felhivas_db} felhívás · utolsó sikeres betöltés: {f.utolso_siker ? GRT_dt(f.utolso_siker) : 'még nem futott'}
+          </p>
+          {f.utolso_hiba && (
+            <p className="text-[11px] text-red-500 font-bold mt-1">Hiba: {f.utolso_hiba}</p>
+          )}
+        </div>
+        <div className="flex flex-col gap-1.5 flex-none">
+          {f.kod === 'eu_portal' && f.gepi_gyujtes && (
+            <button onClick={() => onBetolt(f.kod)} disabled={betoltBusy}
+              className={U_btnGhost + ' py-2 px-3 text-xs'}>
+              {betoltBusy ? <Lucide.Loader2 size={14} className="animate-spin" /> : <Lucide.DownloadCloud size={14} />}
+              Betöltés most
+            </button>
+          )}
+          <button onClick={() => setNyit(!nyit)} className={U_btnGhost + ' py-2 px-3 text-xs'}>
+            <Lucide.Settings2 size={14} /> Beállítás
+          </button>
+        </div>
+      </div>
+
+      {nyit && (
+        <div className="mt-3 pt-3 border-t border-slate-100 space-y-3">
+          <p className="text-[11px] text-slate-500 font-medium leading-relaxed">{f.leiras || '—'}</p>
+          <div className="flex items-center gap-3 flex-wrap">
+            <label className="flex items-center gap-2 text-xs font-bold text-slate-600">
+              <input type="checkbox" checked={!!f.aktiv}
+                onChange={e => onMent({ kod: f.kod, aktiv: e.target.checked })} /> aktív
+            </label>
+            <label className="flex items-center gap-2 text-xs font-bold text-slate-600">
+              <input type="checkbox" checked={!!f.gepi_gyujtes}
+                onChange={e => onMent({ kod: f.kod, gepi_gyujtes: e.target.checked })} /> gépi gyűjtés engedélyezve
+            </label>
+            <span className="flex items-center gap-1.5 text-xs font-bold text-slate-600">
+              ütem:
+              <input type="number" min="1" max="720" value={utem} onChange={e => setUtem(e.target.value)}
+                onBlur={() => onMent({ kod: f.kod, utem_ora: Number(utem) || 24 })}
+                className="w-16 bg-slate-50 border border-slate-100 rounded-lg px-2 py-1 text-xs" /> óra
+            </span>
+          </div>
+          {/* A jogi állapot ADATKÉNT látszik: nem fejlesztői döntés, hanem
+              megnyitható, módosítható mező. */}
+          <p className="text-[11px] text-slate-400 font-medium leading-relaxed">
+            <b>Jogi megjegyzés:</b> {f.jogi_megjegyzes || 'nincs rögzítve'}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================================
+   A fő nézet
+   ============================================================================ */
+function GRT_OfficeView({ user }) {
+  const [ctx, setCtx] = useState(null);
+  const [err, setErr] = useState('');
+  const [ful, setFul] = useState('felhivasok');
+  const [toast, setToast] = useState('');
+
+  // szűrők
+  const [q, setQ] = useState('');
+  const [allapot, setAllapot] = useState('nyitott');
+  const [program, setProgram] = useState('');
+  const [napon, setNapon] = useState('');
+  const [lista, setLista] = useState(null);
+  const [opts, setOpts] = useState(null);
+  const [listaBusy, setListaBusy] = useState(false);
+
+  const [nyitottId, setNyitottId] = useState(null);
+  const [ujOpen, setUjOpen] = useState(false);
+  const [runs, setRuns] = useState(null);
+  const [betoltBusy, setBetoltBusy] = useState(false);
+
+  const ctxBetolt = () => GRT_api.context().then(setCtx).catch(e => setErr(GRT_msg(e)));
+
+  useEffect(() => { ctxBetolt(); GRT_api.options().then(setOpts).catch(() => {}); }, []);
+
+  // A listát késleltetve kérjük: gépelés közben ne menjen kérés minden leütésre.
+  useEffect(() => {
+    let el = true;
+    setListaBusy(true);
+    const t = setTimeout(() => {
+      GRT_api.calls({ q, allapot, program, napon: napon ? Number(napon) : null, limit: 60 })
+        .then(d => { if (el) { setLista(d); setListaBusy(false); } })
+        .catch(e => { if (el) { setErr(GRT_msg(e)); setListaBusy(false); } });
+    }, 300);
+    return () => { el = false; clearTimeout(t); };
+  }, [q, allapot, program, napon]);
+
+  useEffect(() => { if (ful === 'forrasok') GRT_api.etlRuns(20).then(setRuns).catch(() => {}); }, [ful]);
+
+  const forrasMent = async (adat) => {
+    try { await GRT_api.sourceSave(adat); await ctxBetolt(); setToast('Beállítás mentve.'); }
+    catch (e) { setErr(GRT_msg(e)); }
+  };
+
+  const betolt = async (kod) => {
+    setBetoltBusy(true); setErr('');
+    try {
+      const r = await GRT_api.fetchCalls({});
+      setToast(`Betöltés kész: ${r.uj || 0} új, ${r.modosult || 0} módosult, ${r.valtozatlan || 0} változatlan.`);
+      await ctxBetolt();
+      GRT_api.etlRuns(20).then(setRuns).catch(() => {});
+      GRT_api.calls({ q, allapot, program, napon: napon ? Number(napon) : null, limit: 60 }).then(setLista).catch(() => {});
+    } catch (e) { setErr(GRT_msg(e)); }
+    finally { setBetoltBusy(false); }
+  };
+
+  const beallitasMent = async (key, value) => {
+    try { await GRT_api.settingSave(key, value); await ctxBetolt(); setToast('Beállítás mentve.'); }
+    catch (e) { setErr(GRT_msg(e)); }
+  };
+
+  if (ctx === null && !err) {
+    return (
+      <div className="p-4 sm:p-8 max-w-6xl mx-auto">
+        <SkeletonBar w="260px" h={22} className="mb-2" />
+        <SkeletonBar w="420px" h={13} className="mb-7" />
+        <div className="grid gap-3 sm:grid-cols-4 mb-6">
+          {[0, 1, 2, 3].map(i => <SkeletonBar key={i} h={76} />)}
+        </div>
+        <div className="space-y-3">{[0, 1, 2, 3].map(i => <SkeletonBar key={i} h={92} />)}</div>
+      </div>
+    );
+  }
+
+  if (ctx && !ctx.kezelo) {
+    return (
+      <div className="p-4 sm:p-8 max-w-3xl mx-auto">
+        <UEmpty icon={<Lucide.Lock size={28} />} title="Ehhez pályázati irodai jogosultság kell"
+          subtitle="A hozzáférést a Jogosultságok képernyőn lehet megadni (grants_office) — szerepkörre, csoportra vagy egyénileg." />
+      </div>
+    );
+  }
+
+  const sz = (ctx && ctx.szamok) || {};
+  const forrasok = (ctx && ctx.forrasok) || [];
+  const elavultDb = forrasok.filter(f => f.elavult).length;
+
+  return (
+    <div className="p-4 sm:p-8 max-w-6xl mx-auto">
+      <div className="flex items-start justify-between gap-4 mb-1 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-black text-slate-900 tracking-tight">Pályázatfigyelő</h1>
+          <p className="text-sm text-slate-400 font-medium mt-0.5">
+            Hazai és nemzetközi felhívások egy helyen · a teljes szöveg mindig a kiíró oldalán
+          </p>
+        </div>
+        <button onClick={() => setUjOpen(true)} className={U_btnPrimary + ' py-2.5 px-4 text-sm'}>
+          <Lucide.FilePlus size={16} /> Felhívás rögzítése
+        </button>
+      </div>
+
+      {err && (
+        <div className="mt-4 bg-red-50 border border-red-100 rounded-2xl px-4 py-3 text-sm font-bold text-red-600 flex gap-2">
+          <Lucide.AlertCircle size={16} className="flex-none mt-0.5" /> {err}
+        </div>
+      )}
+
+      {/* Számok: a "közeli" a lényeg — az, amivel dolgozni kell. */}
+      <div className="grid gap-3 sm:grid-cols-4 mt-6 mb-6">
+        {[
+          { c: 'Nyitott', v: sz.nyitott, tone: 'text-emerald-600' },
+          { c: '30 napon belül lejár', v: sz.kozeli, tone: 'text-amber-600' },
+          { c: 'Hamarosan nyílik', v: sz.hamarosan, tone: 'text-sky-600' },
+          { c: 'Program', v: sz.program_db, tone: 'text-slate-700' },
+        ].map(k => (
+          <div key={k.c} className="bg-white border border-slate-100 rounded-2xl p-4">
+            <p className={'text-2xl font-black ' + k.tone}>{k.v ?? 0}</p>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider mt-0.5">{k.c}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="flex items-center gap-2 mb-5 flex-wrap">
+        {[
+          { id: 'felhivasok', cim: 'Felhívások', ikon: <Lucide.List size={14} /> },
+          { id: 'forrasok', cim: 'Adatforrások', ikon: <Lucide.Database size={14} />, jel: elavultDb },
+          { id: 'beallitas', cim: 'Beállítások', ikon: <Lucide.Settings size={14} /> },
+        ].map(t => (
+          <button key={t.id} onClick={() => setFul(t.id)}
+            className={'inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-black transition-all '
+                       + (ful === t.id ? 'bg-primary text-white' : 'bg-white border border-slate-100 text-slate-500 hover:border-slate-200')}>
+            {t.ikon} {t.cim}
+            {t.jel > 0 && (
+              <span className={'ml-1 px-1.5 rounded-full ' + (ful === t.id ? 'bg-white/20' : 'bg-amber-100 text-amber-700')}>
+                {t.jel}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {ful === 'felhivasok' && (
+        <>
+          <div className="bg-white border border-slate-100 rounded-2xl p-4 mb-4">
+            <div className="grid gap-3 sm:grid-cols-4">
+              <div className="relative sm:col-span-2">
+                <Lucide.Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-300" />
+                <input className={U_input + ' pl-10'} value={q} onChange={e => setQ(e.target.value)}
+                  placeholder="Keresés címre, azonosítóra, címkére…" />
+              </div>
+              <select className={U_input} value={allapot} onChange={e => setAllapot(e.target.value)}>
+                <option value="">Minden állapot</option>
+                <option value="nyitott">Nyitott</option>
+                <option value="hamarosan">Hamarosan nyílik</option>
+                <option value="zart">Zárt</option>
+              </select>
+              <select className={U_input} value={program} onChange={e => setProgram(e.target.value)}>
+                <option value="">Minden program</option>
+                {((opts && opts.program) || []).map(p => (
+                  <option key={p.ertek} value={p.ertek}>{p.ertek} ({p.db})</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center gap-2 mt-3 flex-wrap">
+              <span className="text-[11px] font-black text-slate-400 uppercase tracking-wider">Határidő:</span>
+              {[{ v: '', c: 'mindegy' }, { v: '7', c: '7 napon belül' }, { v: '30', c: '30 napon belül' },
+                { v: '90', c: '90 napon belül' }].map(h => (
+                <button key={h.v} onClick={() => setNapon(h.v)}
+                  className={'px-3 py-1.5 rounded-lg text-[11px] font-black transition-all '
+                             + (napon === h.v ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-500 hover:bg-slate-100')}>
+                  {h.c}
+                </button>
+              ))}
+              <div className="flex-1" />
+              {lista && (
+                <span className="text-[11px] font-bold text-slate-400 flex items-center gap-2">
+                  {lista.mutatva} / {lista.ossz} felhívás <RefreshingBadge on={listaBusy} />
+                </span>
+              )}
+            </div>
+          </div>
+
+          {lista === null ? (
+            <div className="space-y-3">{[0, 1, 2, 3, 4].map(i => <SkeletonBar key={i} h={92} />)}</div>
+          ) : (lista.sorok || []).length === 0 ? (
+            <UEmpty icon={<Lucide.SearchX size={28} />} title="Nincs találat"
+              subtitle={Number(lista.ossz) === 0 && !q
+                ? 'A katalógus még üres. Indíts betöltést az Adatforrások fülön, vagy rögzíts felhívást kézzel.'
+                : 'Próbáld szűkebb szűrőkkel.'} />
+          ) : (
+            <div className="space-y-3">
+              {lista.sorok.map(s => <GRT_CallCard key={s.id} sor={s} onNyit={setNyitottId} />)}
+              {Number(lista.ossz) > Number(lista.mutatva) && (
+                <p className="text-center text-[11px] font-bold text-slate-400 py-2">
+                  {lista.ossz - lista.mutatva} további találat — szűkíts a szűrőkkel.
+                </p>
+              )}
+            </div>
+          )}
+        </>
+      )}
+
+      {ful === 'forrasok' && (
+        <div className="space-y-4">
+          {elavultDb > 0 && (
+            <div className="bg-amber-50 border border-amber-100 rounded-2xl px-4 py-3 flex gap-2.5">
+              <Lucide.AlertTriangle size={15} className="text-amber-500 flex-none mt-0.5" />
+              <p className="text-[11px] text-amber-700 font-medium leading-relaxed">
+                <b>{elavultDb} forrás elavult:</b> az ütemnél régebben futott utolszor. Ez a képernyő
+                azért van, hogy egy elnémult csatorna ne maradjon észrevétlen — a felhívások csendben
+                tűnnének el, nem hibaüzenettel.
+              </p>
+            </div>
+          )}
+          <div className="space-y-3">
+            {forrasok.map(f => (
+              <GRT_SourceCard key={f.kod} f={f} onMent={forrasMent} onBetolt={betolt} betoltBusy={betoltBusy} />
+            ))}
+          </div>
+
+          <div className="bg-white border border-slate-100 rounded-2xl p-4">
+            <h3 className="text-sm font-black text-slate-800 mb-1">Betöltési napló</h3>
+            <p className="text-[11px] text-slate-400 font-medium mb-3">
+              Forrásonként, futásonként egy sor. Egy forrás hibája nem állítja meg a többit.
+            </p>
+            {runs === null ? <SkeletonBar h={60} /> : runs.length === 0 ? (
+              <p className="text-sm font-bold text-slate-400">Még nem futott betöltés.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-left text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                      <th className="py-2">Forrás</th><th className="py-2">Indult</th>
+                      <th className="py-2">Állapot</th><th className="py-2 text-right">Új</th>
+                      <th className="py-2 text-right">Módosult</th><th className="py-2 text-right">Változatlan</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {runs.map(r => (
+                      <tr key={r.id} className="border-t border-slate-50">
+                        <td className="py-2 font-bold text-slate-700">{r.forras_nev || r.forras}</td>
+                        <td className="py-2 text-slate-500">{GRT_dt(r.indult)}</td>
+                        <td className="py-2">
+                          <UBadge tone={r.allapot === 'ok' ? 'green' : r.allapot === 'hiba' ? 'red' : 'slate'}>
+                            {r.allapot}
+                          </UBadge>
+                          {r.hiba && <span className="text-red-500 font-bold ml-1">{String(r.hiba).slice(0, 60)}</span>}
+                        </td>
+                        <td className="py-2 text-right font-black text-slate-700">{r.uj_db}</td>
+                        <td className="py-2 text-right text-slate-500">{r.modosult_db}</td>
+                        <td className="py-2 text-right text-slate-400">{r.valtozatlan_db}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {ful === 'beallitas' && (
+        <div className="space-y-4 max-w-2xl">
+          <div className="bg-white border border-slate-100 rounded-2xl p-5 space-y-4">
+            <div>
+              <h3 className="text-sm font-black text-slate-800">Modellszolgáltató</h3>
+              <p className="text-[11px] text-slate-400 font-medium mt-0.5 leading-relaxed">
+                Az indoklásokat és a kutatói összefoglalókat ez a szolgáltató adja. A csere itt
+                egyetlen beállítás — a kulcs viszont <b>soha nem itt</b>, hanem Supabase secretben él
+                (GEMINI_API_KEY / ANTHROPIC_API_KEY).
+              </p>
+            </div>
+            <UField label="Szolgáltató">
+              <select className={U_input} value={(ctx.beallitas || {}).ai_provider || 'gemini'}
+                onChange={e => beallitasMent('ai_provider', e.target.value)}>
+                <option value="gemini">Gemini</option>
+                <option value="anthropic">Claude (Anthropic)</option>
+                <option value="nincs">Nincs — csak számított pontszám</option>
+              </select>
+            </UField>
+            <UField label="Modell" hint="Üresen a betöltő függvény alapértelmezését használja.">
+              <input className={U_input} defaultValue={(ctx.beallitas || {}).ai_model || ''}
+                onBlur={e => beallitasMent('ai_model', e.target.value)} placeholder="alapértelmezés" />
+            </UField>
+            <UField label="Napi költségplafon (USD)"
+              hint="Elérése után a modul nem hív modellt, de működik tovább a számított pontszámmal.">
+              <input type="number" min="0" step="0.5" className={U_input}
+                defaultValue={(ctx.beallitas || {}).ai_daily_cap_usd || '2'}
+                onBlur={e => beallitasMent('ai_daily_cap_usd', e.target.value)} />
+            </UField>
+          </div>
+
+          <div className="bg-white border border-slate-100 rounded-2xl p-5">
+            <h3 className="text-sm font-black text-slate-800 mb-1">Határidő-figyelmeztetés</h3>
+            <p className="text-[11px] text-slate-400 font-medium mb-3">
+              Hány nappal a határidő előtt jelezzen a rendszer. Vesszővel elválasztva.
+            </p>
+            <input className={U_input} defaultValue={(ctx.beallitas || {}).deadline_warn_days || '30,14,3'}
+              onBlur={e => beallitasMent('deadline_warn_days', e.target.value)} />
+          </div>
+
+          <div className="bg-slate-50 rounded-2xl px-4 py-3 flex gap-2.5">
+            <Lucide.Info size={15} className="text-slate-400 flex-none mt-0.5" />
+            <p className="text-[11px] text-slate-500 font-medium leading-relaxed">
+              A kutatói profil, az illesztés és az indoklás a következő fázisokban jön (78-as és
+              79-es migráció). Addig ez a képernyő a felhívás-katalógust és a betöltést kezeli.
+            </p>
+          </div>
+        </div>
+      )}
+
+      <GRT_CallModal open={!!nyitottId} id={nyitottId} onClose={() => setNyitottId(null)}
+        onValtozott={() => GRT_api.calls({ q, allapot, program, napon: napon ? Number(napon) : null, limit: 60 })
+                            .then(setLista).catch(() => {})} />
+      <GRT_CallEditor open={ujOpen} onClose={() => setUjOpen(false)}
+        onKesz={() => {
+          setUjOpen(false);
+          setToast('A felhívás rögzítve.');
+          GRT_api.calls({ q, allapot, program, napon: napon ? Number(napon) : null, limit: 60 })
+            .then(setLista).catch(() => {});
+          ctxBetolt();
+        }} />
+      <UToast msg={toast} onDone={() => setToast('')} />
+    </div>
+  );
+}

@@ -78,7 +78,9 @@ insert into grants.setting (key, value, description) values
    'üzemeltethetőség: a forrás oldaláról látszik, ki kérdez és hol lehet szólni.'),
   ('eu_reference_url', 'https://ec.europa.eu/info/funding-tenders/opportunities/data/referenceData/grantsTenders.json',
    'Az EU Funding & Tenders portál referencia-állománya. Kulcs nélkül, sima '
-   'GET. 2026-09-23-án mérve: 11 162 tétel, 431 nyitott, 63 program.'),
+   'GET. 2026-09-23-án tételszinten mérve: 11 162 rekord, ebből 10 163 pályázat '
+   '(type=1) és 999 közbeszerzés (type=0). A pályázatok közül 208 nyitott és '
+   '278 hamarosan nyíló; a modul ezeket és a 90 napon belül lezártakat tölti be.'),
   ('deadline_warn_days', '30,14,3',
    'Hány nappal a határidő előtt figyelmeztet a rendszer. Vesszővel elválasztva.')
 on conflict (key) do nothing;
@@ -122,7 +124,8 @@ insert into grants.source (kod, nev, tipus, url, leiras, gepi_gyujtes, jogi_megj
    'https://ec.europa.eu/info/funding-tenders/opportunities/data/referenceData/grantsTenders.json',
    'Az EU teljes felhívás-állománya egyetlen JSON-ban, kulcs nélkül: Horizon, '
    'Erasmus+, Digital Europe, LIFE, Creative Europe, EU4Health, CEF, CERV. '
-   '2026-09-23-án mérve: 11 162 tétel, 431 nyitott, 559 hamarosan nyíló.',
+   '2026-09-23-án tételszinten mérve: 10 163 pályázat, ebből 208 nyitott és 278 '
+   'hamarosan nyíló (a 999 közbeszerzést a betöltő kiszűri).',
    true, 'Az Európai Bizottság nyilvános adatállománya, újrahasznosítása engedélyezett.'),
   ('nkfih', 'NKFIH felhívások', 'html', 'https://nkfih.gov.hu/palyazoknak/palyazatok',
    'OTKA/kutatási témapályázatok, Excellence, TÉT, partnerségi konstrukciók. '

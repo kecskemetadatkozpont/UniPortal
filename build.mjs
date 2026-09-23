@@ -84,6 +84,9 @@ const FEATURE_FILES = [
   // Webshop (74_webshop.sql). A feed UTAN: onnan veszi a FEED_img-et es a
   // celkozonseg-valasztot (FEED_CelkozonsegValaszto, FEED_celNormal).
   'features/shop.jsx',
+  // Pályázatfigyelő (77_grants_core.sql). A data-layer UTÁN: onnan veszi a
+  // UModal / UBadge / UField / U_input atomokat. A kutatói nézet külön fájl lesz.
+  'features/grants.jsx',
 ];
 
 // `motion` is only referenced by the shim at the top of app.jsx, which renders
