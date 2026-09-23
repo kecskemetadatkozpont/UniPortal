@@ -35,6 +35,11 @@ const GRT_api = {
   callArchive: (id, arch)    => GRT_rpc('grants_call_archive', { p_call: id, p_archivalt: arch !== false }),
   options:     ()            => GRT_rpc('grants_call_options'),
   etlRuns:     (n)           => GRT_rpc('grants_etl_runs', { p_limit: n || 30 }),
+  deadlines:   (p)           => GRT_rpc('grants_deadlines', {
+                                  p_tol: p.tol, p_ig: p.ig,
+                                  p_allapot: p.allapot || null, p_program: p.program || null,
+                                  p_forras: p.forras || null, p_limit: p.limit || 2000 }),
+  deadlineMonths: ()         => GRT_rpc('grants_deadline_months', {}),
   sourceSave:  (adat)        => GRT_rpc('grants_source_save', { p_adat: adat }),
   settingSave: (key, value)  => GRT_rpc('grants_setting_save', { p_key: key, p_value: value }),
   // A betöltés Edge Functionben fut: a service_role kulcs nem lehet a böngészőben.
@@ -447,6 +452,259 @@ function GRT_SourceCard({ f, onMent, onBetolt, betoltBusy, betoltAllas }) {
   );
 }
 
+/* --- határidő-naptár ------------------------------------------------------ */
+/* A hónap- és napneveket NEM a szótár fordítja: azok összetett szövegek
+   („2026. szeptember"), és a napnevek egybetűs csomópontjai máshol is
+   előfordulhatnának. A meglévő CAL_angol() mintát követjük (app.jsx). */
+const GRT_HONAP_HU = ['január', 'február', 'március', 'április', 'május', 'június',
+                      'július', 'augusztus', 'szeptember', 'október', 'november', 'december'];
+const GRT_HONAP_EN = ['January', 'February', 'March', 'April', 'May', 'June',
+                      'July', 'August', 'September', 'October', 'November', 'December'];
+const GRT_NAP_HU = ['H', 'K', 'Sze', 'Cs', 'P', 'Szo', 'V'];
+const GRT_NAP_EN = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+const GRT_iso = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0')
+                     + '-' + String(d.getDate()).padStart(2, '0');
+
+/* A sürgősség színe egy helyen: a naptár és a kártyák ugyanazt mondják. */
+function GRT_surgosseg(hatra) {
+  if (hatra === null || hatra === undefined) return 'slate';
+  if (hatra < 0) return 'lejart';
+  if (hatra <= 3) return 'piros';
+  if (hatra <= 14) return 'sarga';
+  if (hatra <= 30) return 'kek';
+  return 'slate';
+}
+const GRT_SURGOSSEG_OSZTALY = {
+  lejart: 'bg-slate-100 text-slate-400 line-through',
+  piros:  'bg-red-50 text-red-700',
+  sarga:  'bg-amber-50 text-amber-700',
+  kek:    'bg-sky-50 text-sky-700',
+  slate:  'bg-slate-50 text-slate-600',
+};
+
+function GRT_Naptar({ onNyit }) {
+  const angol = (typeof CAL_angol === 'function' ? CAL_angol() : false);
+  const HONAP = angol ? GRT_HONAP_EN : GRT_HONAP_HU;
+  const NAPOK = angol ? GRT_NAP_EN : GRT_NAP_HU;
+  const ma = new Date();
+  const [ev, setEv] = useState(ma.getFullYear());
+  const [ho, setHo] = useState(ma.getMonth());        // 0-11
+  const [d, setD] = useState(null);
+  const [err, setErr] = useState('');
+  const [valasztott, setValasztott] = useState(null); // kiválasztott nap (ISO)
+  const [allapot, setAllapot] = useState('');
+  const [program, setProgram] = useState('');
+  const [opts, setOpts] = useState(null);
+  const [honapok, setHonapok] = useState(null);
+
+  useEffect(() => {
+    GRT_api.options().then(setOpts).catch(() => {});
+    GRT_api.deadlineMonths().then(setHonapok).catch(() => {});
+  }, []);
+
+  const tol = new Date(ev, ho, 1);
+  const ig = new Date(ev, ho + 1, 0);
+
+  useEffect(() => {
+    let el = true;
+    setD(null); setErr(''); setValasztott(null);
+    GRT_api.deadlines({ tol: GRT_iso(tol), ig: GRT_iso(ig), allapot, program })
+      .then(x => { if (el) setD(x); })
+      .catch(e => { if (el) setErr(GRT_msg(e)); });
+    return () => { el = false; };
+  }, [ev, ho, allapot, program]);
+
+  const leptet = (n) => {
+    const uj = new Date(ev, ho + n, 1);
+    setEv(uj.getFullYear()); setHo(uj.getMonth());
+  };
+
+  /* A rács hétfővel indul (magyar szokás), és a hónap előtti-utáni napokat
+     halványan megjeleníti, hogy a hetek ne csúszkáljanak. */
+  const racs = React.useMemo(() => {
+    const elso = new Date(ev, ho, 1);
+    const kezdoEltolas = (elso.getDay() + 6) % 7;      // hétfő = 0
+    const napok = [];
+    const start = new Date(ev, ho, 1 - kezdoEltolas);
+    for (let i = 0; i < 42; i++) {
+      const nap = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
+      napok.push(nap);
+      if (i >= 34 && nap.getMonth() !== ho && (nap.getDay() + 6) % 7 === 6) break;
+    }
+    return napok;
+  }, [ev, ho]);
+
+  const naponta = (d && d.naponta) || {};
+  const sorok = (d && d.sorok) || [];
+  const napSorok = React.useMemo(() => {
+    const m = {};
+    sorok.forEach(s => { (m[s.nap] = m[s.nap] || []).push(s); });
+    return m;
+  }, [sorok]);
+
+  const maIso = GRT_iso(ma);
+  const valasztottSorok = valasztott ? (napSorok[valasztott] || []) : [];
+
+  /* A legsűrűbb hónapok: tervezéshez ez mondja meg, hol lesz dömping. */
+  const surus = React.useMemo(() => (honapok || [])
+    .filter(h => h.honap >= GRT_iso(ma).slice(0, 7))
+    .sort((a, b) => b.db - a.db).slice(0, 3), [honapok]);
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-white border border-slate-100 rounded-2xl p-4">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2">
+            <button onClick={() => leptet(-1)} className={U_btnGhost + ' py-2 px-3'} aria-label="Előző hónap">
+              <Lucide.ChevronLeft size={16} />
+            </button>
+            <p className="text-sm font-black text-slate-800 min-w-[170px] text-center">
+              {angol ? HONAP[ho] + ' ' + ev : ev + '. ' + HONAP[ho]}
+            </p>
+            <button onClick={() => leptet(1)} className={U_btnGhost + ' py-2 px-3'} aria-label="Következő hónap">
+              <Lucide.ChevronRight size={16} />
+            </button>
+            <button onClick={() => { setEv(ma.getFullYear()); setHo(ma.getMonth()); }}
+              className={U_btnGhost + ' py-2 px-3 text-xs'}>Ma</button>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <select className={U_input + ' py-2 w-auto text-xs'} value={allapot}
+              onChange={e => setAllapot(e.target.value)}>
+              <option value="">Minden állapot</option>
+              <option value="nyitott">Nyitott</option>
+              <option value="hamarosan">Hamarosan nyílik</option>
+              <option value="zart">Zárt</option>
+            </select>
+            <select className={U_input + ' py-2 w-auto text-xs'} value={program}
+              onChange={e => setProgram(e.target.value)}>
+              <option value="">Minden program</option>
+              {((opts && opts.program) || []).map(p => (
+                <option key={p.ertek} value={p.ertek}>{p.ertek} ({p.db})</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div className="flex items-center gap-3 mt-3 flex-wrap">
+          <p className="text-[11px] font-bold text-slate-400">
+            {d === null ? 'betöltés…' : `${d.ossz} határidő ebben a hónapban`}
+            {d && Number(d.ossz) > Number(d.mutatva) ? ` (${d.mutatva} megjelenítve)` : ''}
+          </p>
+          {surus.length > 0 && (
+            <p className="text-[11px] font-medium text-slate-400">
+              Legsűrűbb hónapok:{' '}
+              {surus.map((h, i) => (
+                <button key={h.honap} onClick={() => { const [y, m] = h.honap.split('-');
+                                                       setEv(Number(y)); setHo(Number(m) - 1); }}
+                  className="font-black text-primary hover:underline">
+                  {h.honap} ({h.db}){i < surus.length - 1 ? ', ' : ''}
+                </button>
+              ))}
+            </p>
+          )}
+        </div>
+      </div>
+
+      {err && (
+        <div className="bg-red-50 border border-red-100 rounded-2xl px-4 py-3 text-sm font-bold text-red-600 flex gap-2">
+          <Lucide.AlertCircle size={16} className="flex-none mt-0.5" /> {err}
+        </div>
+      )}
+
+      <div className="bg-white border border-slate-100 rounded-2xl p-3 sm:p-4 overflow-x-auto">
+        <div className="grid grid-cols-7 gap-1 sm:gap-2 min-w-[640px]">
+          {NAPOK.map((n, i) => (
+            <div key={n} className={'text-[10px] font-black uppercase tracking-wider text-center pb-1 '
+                                    + (i >= 5 ? 'text-slate-300' : 'text-slate-400')}>{n}</div>
+          ))}
+          {racs.map(nap => {
+            const iso = GRT_iso(nap);
+            const ebbenAHoban = nap.getMonth() === ho;
+            const db = naponta[iso] || 0;
+            const tetelek = napSorok[iso] || [];
+            const hetvege = nap.getDay() === 0 || nap.getDay() === 6;
+            return (
+              <button key={iso} type="button" onClick={() => setValasztott(db ? iso : null)}
+                className={'text-left rounded-xl border p-1.5 min-h-[86px] align-top transition-all '
+                  + (valasztott === iso ? 'border-primary bg-primary/5 ' : 'border-slate-100 ')
+                  + (ebbenAHoban ? (hetvege ? 'bg-slate-50/60 ' : 'bg-white ') : 'bg-slate-50/40 opacity-50 ')
+                  + (db ? 'hover:border-primary/40 cursor-pointer' : 'cursor-default')}>
+                <div className="flex items-center justify-between">
+                  <span className={'text-[11px] font-black '
+                    + (iso === maIso ? 'bg-primary text-white rounded-full w-5 h-5 inline-flex items-center justify-center'
+                                     : ebbenAHoban ? 'text-slate-600' : 'text-slate-400')}>
+                    {nap.getDate()}
+                  </span>
+                  {db > 0 && <span className="text-[10px] font-black text-slate-400">{db}</span>}
+                </div>
+                <div className="mt-1 space-y-0.5">
+                  {tetelek.slice(0, 2).map((t, i) => (
+                    <div key={t.call_id + '-' + t.sorszam + '-' + i}
+                      className={'text-[9px] font-bold rounded px-1 py-0.5 truncate '
+                                 + GRT_SURGOSSEG_OSZTALY[GRT_surgosseg(Number(t.hatralevo_nap))]}>
+                      {t.program || t.forras}{Number(t.hatarido_db) > 1 ? ` · ${t.sorszam}/${t.hatarido_db}` : ''}
+                    </div>
+                  ))}
+                  {tetelek.length > 2 && (
+                    <div className="text-[9px] font-black text-slate-400 px-1">
+                      +{tetelek.length - 2} további
+                    </div>
+                  )}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {valasztott && (
+        <div className="bg-white border border-slate-100 rounded-2xl p-4">
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <h3 className="text-sm font-black text-slate-800">
+              {valasztott} · {valasztottSorok.length} határidő
+            </h3>
+            <button onClick={() => setValasztott(null)} className={U_btnGhost + ' py-1.5 px-3 text-xs'}>
+              <Lucide.X size={14} /> Bezárás
+            </button>
+          </div>
+          <div className="space-y-2">
+            {valasztottSorok.map((t, i) => {
+              const a = GRT_ALLAPOT[t.allapot] || GRT_ALLAPOT.ismeretlen;
+              return (
+                <button key={t.call_id + '-' + t.sorszam + '-' + i} type="button"
+                  onClick={() => onNyit(t.call_id)}
+                  className="w-full text-left border border-slate-100 rounded-xl px-3 py-2 hover:border-primary/40 transition-all">
+                  <div className="flex items-center gap-2 flex-wrap mb-1">
+                    <UBadge tone={a.tone}>{a.cimke}</UBadge>
+                    {t.program && <UBadge tone="primary">{t.program}</UBadge>}
+                    {Number(t.hatarido_db) > 1 && (
+                      <UBadge tone="violet">{t.sorszam}. forduló / {t.hatarido_db}</UBadge>
+                    )}
+                    {t.partnerkereses && <UBadge tone="slate">partnerkeresés</UBadge>}
+                  </div>
+                  <p className="text-sm font-black text-slate-800 leading-snug">{t.cim}</p>
+                  <p className="text-[11px] text-slate-400 font-bold">{t.azonosito}</p>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {!valasztott && d && Number(d.ossz) > 0 && (
+        <p className="text-[11px] text-slate-400 font-medium text-center">
+          Kattints egy napra a határidők listájához. A kétszakaszos felhívásoknál
+          a fordulók száma is látszik (például 2/3).
+        </p>
+      )}
+      {d && Number(d.ossz) === 0 && (
+        <UEmpty icon={<Lucide.CalendarOff size={28} />} title="Ebben a hónapban nincs határidő"
+          subtitle="Lépj másik hónapra, vagy engedd fel a szűrőket." />
+      )}
+    </div>
+  );
+}
+
 /* ============================================================================
    A fő nézet
    ============================================================================ */
@@ -609,6 +867,7 @@ function GRT_OfficeView({ user }) {
       <div className="flex items-center gap-2 mb-5 flex-wrap">
         {[
           { id: 'felhivasok', cim: 'Felhívások', ikon: <Lucide.List size={14} /> },
+          { id: 'naptar', cim: 'Határidőnaptár', ikon: <Lucide.CalendarDays size={14} /> },
           { id: 'forrasok', cim: 'Adatforrások', ikon: <Lucide.Database size={14} />, jel: elavultDb },
           { id: 'beallitas', cim: 'Beállítások', ikon: <Lucide.Settings size={14} /> },
         ].map(t => (
@@ -685,6 +944,8 @@ function GRT_OfficeView({ user }) {
           )}
         </>
       )}
+
+      {ful === 'naptar' && <GRT_Naptar onNyit={setNyitottId} />}
 
       {ful === 'forrasok' && (
         <div className="space-y-4">

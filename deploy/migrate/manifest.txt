@@ -88,3 +88,4 @@
 75_webshop_editor.sql
 76_echo_exclusion_config.sql
 77_grants_core.sql
+78_grants_calendar.sql

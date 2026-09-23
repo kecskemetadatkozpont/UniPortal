@@ -12895,6 +12895,13 @@ Object.assign(HU_EN, {
 });
 // A gyakorlás-napló sora számot tartalmaz, ezért kifejezés-mintával fordítjuk.
 HU_EN_PHRASES.push(
+  // 78 — határidőnaptár
+  [/(\d+) határidő ebben a hónapban/g, '$1 deadlines this month'],
+  [/(\d+) határidő$/gm, '$1 deadlines'],
+  [/Legsűrűbb hónapok:/g, 'Busiest months:'],
+  [/(\d+)\. forduló \/ (\d+)/g, 'round $1 of $2'],
+  [/\+(\d+) további/g, '+$1 more'],
+  [/\((\d+) megjelenítve\)/g, '($1 shown)'],
   // 77 — pályázatfigyelő dinamikus részletei
   [/(\d+)\s*nap$/gm, '$1 days'],
   [/(\d+) \/ (\d+) felhívás/g, '$1 / $2 calls'],
@@ -13671,6 +13678,17 @@ Object.entries({
   'Nem lett kitöltve — legalább egy célt adj meg (e nélkül a félév végén nincs mit értékelni).': 'Not filled in — add at least one goal (otherwise there is nothing to evaluate at the end of the term).',
   'A hiányzó válaszokat pirossal jelöltük a kérdéseknél.': 'Missing answers are marked in red at the questions.',
   'Célmeghatározás/Értékelés': 'Goal setting/Evaluation',
+  /* 78 — határidőnaptár */
+  'Határidőnaptár': 'Deadline calendar',
+  'Ma': 'Today',
+  'Bezárás': 'Close',
+  'Ebben a hónapban nincs határidő': 'No deadline this month',
+  'Lépj másik hónapra, vagy engedd fel a szűrőket.': 'Move to another month, or relax the filters.',
+  'Kattints egy napra a határidők listájához. A kétszakaszos felhívásoknál a fordulók száma is látszik (például 2/3).':
+    'Click a day for the list of deadlines. For two-stage calls the round number is shown too (for example 2/3).',
+  'betöltés…': 'loading…',
+  'Előző hónap': 'Previous month',
+  'Következő hónap': 'Next month',
   /* 77 — pályázatfigyelő */
   'Kutatás és pályázatok': 'Research and grants',
   'Pályázatfigyelő': 'Grant radar',
