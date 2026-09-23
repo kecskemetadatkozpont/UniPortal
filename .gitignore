@@ -23,3 +23,6 @@ node_modules/
 deploy/supabase/volumes/db/data/
 deploy/supabase/volumes/storage/
 backups/
+
+# A Supabase CLI helyi állapota (projekt-ref, pooler-URL) — nem tartozik a repóba.
+supabase/.temp/

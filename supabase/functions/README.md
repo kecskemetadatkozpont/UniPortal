@@ -97,3 +97,63 @@ Fejlesztéshez a Meta ad egy ingyenes tesztszámot, amivel legfeljebb 5 általad
 megadott címzettnek lehet küldeni (**API Setup → To → Manage phone number
 list**). Ehhez nincs szükség cégellenőrzésre, és a teljes folyamat — küldés,
 webhook, kézbesítési státusz — végigpróbálható.
+
+---
+
+# grants-fetch-calls — EU-felhívások betöltése
+
+Telepítve 2026-09-23-án (`supabase functions deploy grants-fetch-calls`).
+A `77_grants_core.sql` katalógusát tölti fel az EU Funding & Tenders portál
+nyilvános referencia-állományából.
+
+```
+felület („Betöltés most”) ─┐
+ütemező (service_role) ────┴→ grants-fetch-calls → ec.europa.eu (130 MB JSON)
+                                     │
+                                     └→ grants_call_upsert (200-as kötegek)
+                                        grants_etl_start / _finish (napló)
+```
+
+## Amit tudni kell róla
+
+* **Nem kell hozzá secret.** A `SUPABASE_URL`, az anon és a service_role kulcs a
+  futtatókörnyezetből jön. Felülírható környezeti változók: `GRANTS_EU_URL`,
+  `GRANTS_USER_AGENT`.
+* **JWT-ellenőrzés KELL** (tehát `--no-verify-jwt` nélkül kell telepíteni): a
+  felület a bejelentkezett felhasználó tokenjével hív, és a jogosultságot a
+  függvény a `grants_context()`-tel állapítja meg. Ütemezőből a service_role
+  kulcs az `Authorization` fejlécben ugyanezt a kaput nyitja.
+* **Két fájl**, és a nevük kötött: az `index.ts` a `./parser.js`-t importálja.
+  A parszer külön fájl, mert az a legkockázatosabb rész (130 MB folyamatos
+  olvasása darabhatárokon átnyúló tételekkel), és így Node-ból tesztelhető.
+* **Idempotens**: ugyanaz a köteg másodszorra „változatlan”. Félbeszakadt futás
+  után a már betöltött tételek bent maradnak, és a naplóban látszik, hol állt meg.
+
+## Próbamenet és korlátozott futás
+
+```bash
+# csak olvas, nem ír (a naplóba sem)
+curl -X POST "$URL/functions/v1/grants-fetch-calls" \
+  -H "apikey: $ANON" -H "Authorization: Bearer $SERVICE_ROLE" \
+  -H 'Content-Type: application/json' -d '{"dry":true}'
+
+# legfeljebb 50 tétel — gyors ellenőrzéshez
+... -d '{"max":50}'
+```
+
+## Ellenőrzés a telepítés után (mérve)
+
+| Hívás | Várt válasz |
+|---|---|
+| POST `Authorization` nélkül | 401 `{"hiba":"Hiányzó Authorization fejléc."}` |
+| POST publikus kulccsal | 401 — a `grants_context()` megtagadja |
+| OPTIONS | 200 (CORS) |
+
+A tényleges betöltés a felületről indítható: **Pályázatfigyelő → Adatforrások →
+Betöltés most**. Utána az SQL Editorban:
+
+```sql
+select allapot, count(*) from grants.call group by 1 order by 2 desc;
+select source_kod, allapot, uj_db, modosult_db, valtozatlan_db, indult, hiba
+  from grants.etl_run order by indult desc limit 5;
+```
