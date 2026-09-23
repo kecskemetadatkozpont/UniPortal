@@ -1,16 +1,33 @@
 // ============================================================
 // parser.js — az EU referencia-állomány FOLYAMATOS feldolgozása
 //
-// MIÉRT SAJÁT PARSZER: a forrásállomány 2026-09-23-án 130 MB volt, 11 162
-// tétellel. Ezt egészben memóriába olvasni egy Edge Functionben nem járható:
-// ezért a fájlt darabokban olvassuk, és a `GrantTenderObj` tömb elemeit
-// egyenként vágjuk ki egy zárójel-mélységet követő szkennerrel. A memória így
-// egyetlen tételnyi + egy darabnyi, nem 130 MB.
+// MIÉRT ÍGY, ÉS NEM EGYSZERŰBBEN
+//   A forrás 2026-09-23-án 130 MB volt, 11 162 tétellel. Két korlát szorít:
+//     • memória: a fájl egészben nem olvasható be egy Edge Functionben;
+//     • CPU: az Edge Function invokációnkénti számítási kerete SZŰK. Az első
+//       változat karakterenként szkennelt (zárójel-mélység + string-állapot),
+//       és élesben WORKER_RESOURCE_LIMIT hibával elhasalt 5,6 másodperc után
+//       (mérve). 130 millió karakter JS-ciklusban nem járható.
 //
-// MIÉRT KÜLÖN FÁJL, ÉS MIÉRT .js: ez a fájl a modul legkockázatosabb része
-// (string-határok, escape-elés, darabhatáron félbevágott objektum), ezért
-// tesztelhetőnek kell lennie. Így Node-ból is futtatható teszt nélkül
-// fordítási lépés, és a Deno is közvetlenül importálja.
+//   Ezért a mostani változat NATÍV műveletekre épül:
+//     1. a tételeket a tördelés adta határolóval vágjuk (indexOf, nem ciklus);
+//     2. a tétel szövegén CSAK néhány szűk minta fut (állapot, típus, határidő);
+//     3. JSON.parse KIZÁRÓLAG a néhány száz érdekes tételre hívódik, nem
+//        mind a 11 ezerre.
+//
+//   MIÉRT BIZTONSÁGOS A HATÁROLÓRA VÁGÁS: a határoló LITERÁLIS ÚJSORT
+//   tartalmaz, a JSON pedig nyers újsort nem engedhet szöveg belsejében (ott
+//   csak \n escape állhat). Egy cím vagy leírás tehát SOHA nem tartalmazhatja
+//   a határolót — hamis vágás kizárt, nem csak valószínűtlen.
+//
+//   A kulcsok NEM ábécésorrendben állnak (a sorrend: type, ccm2Id, identifier,
+//   title, …), ezért a tételszintű mezőket a BEHÚZÁS azonosítja: a tétel saját
+//   kulcsai hat szóközzel állnak, a beágyazottak (pl. actions[].status)
+//   nyolccal vagy többel.
+//
+// MIÉRT KÜLÖN FÁJL, ÉS MIÉRT .js: ez a modul legkockázatosabb része, ezért
+// tesztelhetőnek kell lennie. Node-ból közvetlenül futtatható, a Deno pedig
+// importálja.
 // ============================================================
 
 /** Ennyi napra visszamenőleg hozzuk be a LEZÁRT felhívásokat is. */
@@ -20,26 +37,91 @@ export const FRISS_ZART_NAP = 90;
 export const TOPIC_URL =
   'https://ec.europa.eu/info/funding-tenders/opportunities/portal/screen/opportunities/topic-details/';
 
+/* A legkülső tételek határolója a forrás tördelésében (4 szóköz).
+   A beágyazott objektumok 6 vagy több szóközzel állnak, ezért nem illeszkednek.
+   Mérve 2026-09-23: a 4 MB-os minta 400 ilyen határolót tartalmazott, ami
+   tételenként ~10 KB — egyezik a 11 162 tétel / 130 MB aránnyal. */
+const SEP = '\n    }, {\n';
+const VEG = '\n    } ]';
+
+/* A TÉTELSZINTŰ kulcsok hat szóközzel vannak behúzva, a beágyazottak nyolccal
+   vagy többel — ez a horgony. Mérve 2026-09-23 egy 600 KB-os mintán: 139 tétel,
+   139 hatszóközös `type` és `deadlineDatesLong`, 138 hatszóközös `status`,
+   szemben 69 nyolcszóközös (beágyazott, actions[].status) előfordulással.
+   A kulcsok NEM ábécésorrendben állnak (a sorrend: type, ccm2Id, identifier,
+   title, …), ezért a behúzás az egyetlen megbízható jel. */
+const HORGONY = '(?:^|\\n)      ';
+const ALLAPOT_MINTA = new RegExp(HORGONY + '"status" : \\{[^}]*"abbreviation" : "([A-Za-z]+)"');
+const TIPUS_MINTA = new RegExp(HORGONY + '"type" : (\\d+)');
+const HATARIDO_MINTA = new RegExp(HORGONY + '"deadlineDatesLong" : \\[([^\\]]*)\\]');
+
 /**
- * Darabokban érkező JSON-ból kivágja a GrantTenderObj tömb elemeit.
- * Használat: `const sz = createScanner(); for (...) out = sz.push(chunk);`
+ * Darabokban érkező JSON-ból kivágja azokat a tételeket, amelyek ÉRDEKESEK.
+ * A szűrés már itt megtörténik, mert a kihagyott tételt nem is érdemes
+ * JSON-ként értelmezni.
+ *
+ * @param {number} mostMs   a „most" időpont (tesztelhetőség)
+ * @param {number} frissNap ennyi napra visszamenőleg kellenek a lezártak
+ * @param {{kezdo?: boolean}} opts
+ *        kezdo=true  → a folyam a fájl elejéről jön, a tömb fejét meg kell találni;
+ *        kezdo=false → a folyam a fájl KÖZEPÉRŐL jön (byte-range szelet), ezért az
+ *        első, félbevágott tételt el kell dobni: az előző szelet dolgozza fel.
  */
-export function createScanner() {
+export function createScanner(mostMs = Date.now(), frissNap = FRISS_ZART_NAP, opts = {}) {
+  const kezdo = opts.kezdo !== false;
   let buf = '';
-  let pos = 0;            // eddig szkenneltük a puffert
-  let started = false;    // megtaláltuk-e a tömb nyitó szögletes zárójelét
-  let done = false;       // a tömb véget ért
-  let depth = 0;
-  let objStart = -1;
-  let inStr = false;
-  let esc = false;
-  let hibas = 0;          // értelmezhetetlen tételek száma
+  let started = kezdo ? false : true;
+  let elsoElhagyva = kezdo ? true : false;
+  let done = false;
+  let hibas = 0;      // értelmezhetetlen tétel
+  let olvasott = 0;   // ennyi tételt LÁTTUNK (szűrés előtt)
+  let kihagyott = 0;  // ennyit a szűk minta kizárt, parse nélkül
+  let horgonyHiany = 0;  // ennyinél nem illeszkedett a behúzás-horgony
+  const zartHatar = mostMs - frissNap * 86400000;
+
+  /** A tétel szövegéből eldönti, kell-e egyáltalán JSON-ként értelmezni.
+      Ha a horgony NEM illeszkedik (a forrás tördelése változott), inkább
+      értelmezzük a tételt, mint hogy csendben kihagyjuk: a pontos ellenőrzés
+      (`kell`) így is elvégzi a szűrést, csak több CPU-ért. */
+  const erdekes = (reszlet) => {
+    const t = TIPUS_MINTA.exec(reszlet);
+    if (!t) { horgonyHiany++; return true; }
+    if (t[1] !== '1') return false;                 // közbeszerzés vagy ismeretlen
+    const a = ALLAPOT_MINTA.exec(reszlet);
+    if (!a) { horgonyHiany++; return true; }
+    const st = a[1];
+    if (st === 'Open' || st === 'Forthcoming') return true;
+    if (st !== 'Closed') return false;
+    // Lezárt: csak ha a határidő a friss ablakban van — enélkül a nálunk
+    // nyitottként szereplő felhívás soha nem válna zárttá.
+    const h = HATARIDO_MINTA.exec(reszlet);
+    if (!h || !h[1].trim()) return false;
+    let max = 0;
+    for (const sz of h[1].split(',')) {
+      const n = parseInt(sz, 10);
+      if (Number.isFinite(n) && n > max) max = n;
+    }
+    return max >= zartHatar;
+  };
+
+  const feldolgoz = (reszlet, ki) => {
+    olvasott++;
+    if (!erdekes(reszlet)) { kihagyott++; return; }
+    try {
+      ki.push(JSON.parse('{' + reszlet + '}'));
+    } catch (_e) {
+      hibas++;   // egy hibás tétel ne buktassa el az egész futást
+    }
+  };
 
   return {
     get hibasDb() { return hibas; },
+    get olvasottDb() { return olvasott; },
+    get kihagyottDb() { return kihagyott; },
+    get horgonyHianyDb() { return horgonyHiany; },
     get vege() { return done; },
 
-    /** @param {string} chunk @returns {object[]} a darabban befejeződött tételek */
+    /** @param {string} chunk @returns {object[]} a darabban befejeződött ÉRDEKES tételek */
     push(chunk) {
       const ki = [];
       if (done) return ki;
@@ -48,67 +130,53 @@ export function createScanner() {
       if (!started) {
         const k = buf.indexOf('"GrantTenderObj"');
         if (k < 0) {
-          // A kulcs még nem jött meg. Ne nőjön a puffer korlátlanul: a kulcs
-          // hossza a felső korlát, amit meg kell tartanunk.
           if (buf.length > 4096) buf = buf.slice(-64);
           return ki;
         }
-        const b = buf.indexOf('[', k);
+        const b = buf.indexOf('{', buf.indexOf('[', k));
         if (b < 0) return ki;
-        buf = buf.slice(b + 1);
-        pos = 0;
+        buf = buf.slice(b + 1);   // az első tétel nyitó kapcsos zárójelét elhagyjuk
         started = true;
       }
 
-      let i = pos;
-      while (i < buf.length) {
-        const ch = buf[i];
-        if (inStr) {
-          if (esc) esc = false;
-          else if (ch === '\\') esc = true;
-          else if (ch === '"') inStr = false;
-          i++;
-          continue;
-        }
-        if (ch === '"') { inStr = true; i++; continue; }
-        if (ch === '{') {
-          if (depth === 0) objStart = i;
-          depth++;
-          i++;
-          continue;
-        }
-        if (ch === '}') {
-          depth--;
-          if (depth === 0 && objStart >= 0) {
-            const szoveg = buf.slice(objStart, i + 1);
-            try {
-              ki.push(JSON.parse(szoveg));
-            } catch (_e) {
-              hibas++;   // egy hibás tétel ne buktassa el az egész futást
-            }
-            buf = buf.slice(i + 1);
-            i = 0;
-            pos = 0;
-            objStart = -1;
-            continue;
+      // Szelet közepéről indulva az első határolóig minden az ELŐZŐ szelet
+      // tétele — eldobjuk, hogy ne értelmezzünk félbevágott objektumot.
+      if (!elsoElhagyva) {
+        const e = buf.indexOf(SEP);
+        if (e < 0) {
+          if (buf.length > 8 * 1024 * 1024) {
+            throw new Error('A szeletben 8 MB-on belül nincs tételhatároló.');
           }
-          i++;
-          continue;
+          return ki;
         }
-        if (ch === ']' && depth === 0) { done = true; buf = ''; pos = 0; return ki; }
-        i++;
+        buf = buf.slice(e + SEP.length);
+        elsoElhagyva = true;
       }
 
-      pos = buf.length;
-      // Memóriakorlát: a félbevágott tételt megtartjuk, az előtte lévő
-      // vesszőket és szóközöket eldobjuk.
-      if (depth > 0 && objStart > 0) {
-        buf = buf.slice(objStart);
-        pos = buf.length;
-        objStart = 0;
-      } else if (depth === 0) {
+      // Egy pozíciómutatóval haladunk, és CSAK darabonként egyszer vágjuk a
+      // puffert. A tételenkénti slice V8-ban „sliced string”-et hagy maga
+      // után, ami a szülő szövegre mutat, és így a memória észrevétlenül nő.
+      let pos = 0;
+      let idx;
+      while ((idx = buf.indexOf(SEP, pos)) >= 0) {
+        feldolgoz(buf.slice(pos, idx), ki);
+        pos = idx + SEP.length;
+      }
+      if (pos > 0) buf = buf.substring(pos);
+
+      const v = buf.indexOf(VEG);
+      if (v >= 0) {
+        feldolgoz(buf.slice(0, v), ki);
+        done = true;
         buf = '';
-        pos = 0;
+        return ki;
+      }
+
+      // Ha a tördelés megváltozna, a puffer korlátlanul nőne, és a függvény
+      // csendben nulla tételt töltene be. Ezt inkább hangosan elbukjuk.
+      if (buf.length > 8 * 1024 * 1024) {
+        throw new Error('A forrás tördelése megváltozott: 8 MB-on belül nem találtam '
+                      + 'tételhatárolót. A parser.js SEP mintáját kell frissíteni.');
       }
       return ki;
     },
@@ -126,12 +194,8 @@ export function allapotra(abbr) {
 }
 
 /**
- * Betöltjük-e ezt a tételt?
- *  • csak PÁLYÁZAT (type === 1) — a type 0 közbeszerzés, 2026-09-23-án 999 db,
- *    és kutatói pályázatfigyelésben csak zajt csinálna;
- *  • nyitott vagy hamarosan nyíló — ez a haszon;
- *  • nemrég lezárt is: enélkül egy nálunk nyitottként betöltött felhívás
- *    örökre nyitott maradna, mert a lezárt tételek kimaradnának a kötegből.
+ * Betöltjük-e ezt a tételt? A szkenner szűk mintája már szűrt, de a
+ * JSON-ná értelmezett tételen ELLENŐRIZZÜK is: a minta gyors, ez a pontos.
  */
 export function kell(o, mostMs = Date.now(), frissZartNap = FRISS_ZART_NAP) {
   if (!o || o.type !== 1) return false;

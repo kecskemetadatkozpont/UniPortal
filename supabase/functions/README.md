@@ -116,9 +116,22 @@ felület („Betöltés most”) ─┐
 
 ## Amit tudni kell róla
 
-* **Nem kell hozzá secret.** A `SUPABASE_URL`, az anon és a service_role kulcs a
-  futtatókörnyezetből jön. Felülírható környezeti változók: `GRANTS_EU_URL`,
-  `GRANTS_USER_AGENT`.
+* **SZELETEKBEN dolgozik.** Egy invokáció nem tudja végigolvasni a 124 MB-os
+  forrást: mérve (2026-09-23) már a tiszta olvasás is `WORKER_RESOURCE_LIMIT`-tel
+  elhal 40 és 124 MB között, feldolgozás nélkül. A forrás nem tömörít
+  (nincs `Content-Encoding`), de tud byte-range kérést (`Accept-Ranges: bytes`)
+  és ad ETag-et — ezért egy hívás ~16 MB-ot dolgoz fel, és a válasz `kovetkezo`
+  mezője mondja meg, mi a következő szelet. A felület jár végig rajtuk, és a
+  `run` azonosítót továbbadja, hogy a naplóban EGY futás legyen.
+  Mérve élesben: 8 szelet, 689 felhívás, 24 másodperc; ismételt futásra
+  689 változatlan.
+* **A cron azonosítása külön titok.** `GRANTS_CRON_SECRET` (beállítva), amit az
+  `x-grants-cron` fejlécben kell küldeni. Azért nem a service_role kulcs
+  egyezését vizsgáljuk: mérve a projekt által kiadott service_role kulcs NEM
+  azonos azzal, amit a futtatókörnyezet `SUPABASE_SERVICE_ROLE_KEY`-ként ad.
+* **Nem kell hozzá új secret a működéshez.** A `SUPABASE_URL`, az anon és a
+  service_role kulcs a futtatókörnyezetből jön. Felülírható környezeti
+  változók: `GRANTS_EU_URL`, `GRANTS_USER_AGENT`.
 * **JWT-ellenőrzés KELL** (tehát `--no-verify-jwt` nélkül kell telepíteni): a
   felület a bejelentkezett felhasználó tokenjével hív, és a jogosultságot a
   függvény a `grants_context()`-tel állapítja meg. Ütemezőből a service_role
@@ -128,6 +141,17 @@ felület („Betöltés most”) ─┐
   olvasása darabhatárokon átnyúló tételekkel), és így Node-ból tesztelhető.
 * **Idempotens**: ugyanaz a köteg másodszorra „változatlan”. Félbeszakadt futás
   után a már betöltött tételek bent maradnak, és a naplóban látszik, hol állt meg.
+
+## Üzemzavar-vizsgálat
+
+```bash
+# csak a letöltést méri, feldolgozás nélkül (így derült ki az erőforrás-korlát)
+... -d '{"probe":"olvas","maxMb":20}'
+```
+
+A válasz `tetel_latott` / `minta_kizart` / `horgony_hiany` mezői megmondják,
+hogy egy szelet egyáltalán látott-e tételeket. A `horgony_hiany` akkor nő, ha a
+forrás tördelése megváltozott — ilyenkor a parser.js mintáit kell frissíteni.
 
 ## Próbamenet és korlátozott futás
 

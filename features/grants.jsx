@@ -38,14 +38,33 @@ const GRT_api = {
   sourceSave:  (adat)        => GRT_rpc('grants_source_save', { p_adat: adat }),
   settingSave: (key, value)  => GRT_rpc('grants_setting_save', { p_key: key, p_value: value }),
   // A betöltés Edge Functionben fut: a service_role kulcs nem lehet a böngészőben.
-  fetchCalls:  (opts)        => {
+  fetchCalls: async (opts) => {
     if (!window.sb || !window.sb.functions) throw new Error('A betöltő szolgáltatás nem elérhető.');
-    return window.sb.functions.invoke('grants-fetch-calls', { body: opts || {} })
-      .then(({ data, error }) => {
-        if (error) throw error;
-        if (data && data.ok === false) throw new Error(data.hiba || 'A betöltés hibára futott.');
-        return data;
-      });
+    const { data, error } = await window.sb.functions.invoke('grants-fetch-calls', { body: opts || {} });
+    if (error) {
+      // A supabase-js a nem-2xx választ „Edge Function returned a non-2xx status
+      // code"-ra fordítja, és a TÖRZSET eldobja — pedig épp abban van a pontos
+      // ok és a szakasz. Ezért kiolvassuk belőle.
+      let reszletes = '';
+      try {
+        const v = error.context;
+        if (v && typeof v.text === 'function') {
+          const sz = await v.text();
+          try {
+            const t = JSON.parse(sz);
+            reszletes = t.hiba || t.message || t.error || '';
+            if (t.szakasz) reszletes += ' [szakasz: ' + t.szakasz + ']';
+            if (typeof t.masodperc === 'number') reszletes += ' [' + t.masodperc + ' s]';
+          } catch (e2) { reszletes = String(sz).slice(0, 300); }
+        }
+      } catch (e3) { /* ha a törzs már elfogyott, marad az általános üzenet */ }
+      throw new Error(reszletes || error.message || 'A betöltés hibára futott.');
+    }
+    if (data && data.ok === false) {
+      throw new Error((data.hiba || 'A betöltés hibára futott.')
+        + (data.szakasz ? ' [szakasz: ' + data.szakasz + ']' : ''));
+    }
+    return data;
   },
 };
 
@@ -352,7 +371,7 @@ function GRT_CallEditor({ open, onClose, onKesz }) {
 }
 
 /* --- adatforrás kártya ---------------------------------------------------- */
-function GRT_SourceCard({ f, onMent, onBetolt, betoltBusy }) {
+function GRT_SourceCard({ f, onMent, onBetolt, betoltBusy, betoltAllas }) {
   const [nyit, setNyit] = useState(false);
   const [utem, setUtem] = useState(String(f.utem_ora || 24));
   const tipusCimke = { api: 'gépi végpont', html: 'HTML-értelmező', rss: 'hírcsatorna', kezi: 'kézi rögzítés' }[f.tipus] || f.tipus;
@@ -377,11 +396,20 @@ function GRT_SourceCard({ f, onMent, onBetolt, betoltBusy }) {
         </div>
         <div className="flex flex-col gap-1.5 flex-none">
           {f.kod === 'eu_portal' && f.gepi_gyujtes && (
-            <button onClick={() => onBetolt(f.kod)} disabled={betoltBusy}
-              className={U_btnGhost + ' py-2 px-3 text-xs'}>
-              {betoltBusy ? <Lucide.Loader2 size={14} className="animate-spin" /> : <Lucide.DownloadCloud size={14} />}
-              Betöltés most
-            </button>
+            <>
+              <button onClick={() => onBetolt(f.kod, false)} disabled={betoltBusy}
+                className={U_btnGhost + ' py-2 px-3 text-xs'}>
+                {betoltBusy ? <Lucide.Loader2 size={14} className="animate-spin" /> : <Lucide.DownloadCloud size={14} />}
+                {betoltBusy && betoltAllas ? betoltAllas : 'Betöltés most'}
+              </button>
+              {/* Próbamenet: letölt és feldolgoz, de NEM ír — üzemzavar
+                  kivizsgálásához ez mondja meg, a forrás vagy az adatbázis
+                  oldalán van-e a baj. */}
+              <button onClick={() => onBetolt(f.kod, true)} disabled={betoltBusy}
+                className={U_btnGhost + ' py-2 px-3 text-[11px]'}>
+                <Lucide.FlaskConical size={13} /> Próbamenet
+              </button>
+            </>
           )}
           <button onClick={() => setNyit(!nyit)} className={U_btnGhost + ' py-2 px-3 text-xs'}>
             <Lucide.Settings2 size={14} /> Beállítás
@@ -441,6 +469,7 @@ function GRT_OfficeView({ user }) {
   const [ujOpen, setUjOpen] = useState(false);
   const [runs, setRuns] = useState(null);
   const [betoltBusy, setBetoltBusy] = useState(false);
+  const [betoltAllas, setBetoltAllas] = useState('');
 
   const ctxBetolt = () => GRT_api.context().then(setCtx).catch(e => setErr(GRT_msg(e)));
 
@@ -465,16 +494,50 @@ function GRT_OfficeView({ user }) {
     catch (e) { setErr(GRT_msg(e)); }
   };
 
-  const betolt = async (kod) => {
-    setBetoltBusy(true); setErr('');
+  /* A betöltés SZELETEKBEN megy. Egy Edge Function-invokáció nem tudja
+     végigolvasni a 124 MB-os forrást (mérve: erőforrás-korlátba fut), ezért a
+     függvény byte-range szeletet dolgoz fel, és megmondja, mi a következő. A
+     felület jár végig rajtuk, és közben kiírja, hol tart. A naplóban ez EGY
+     futás marad: a run azonosítóját visszaadjuk a következő szeletnek. */
+  const betolt = async (kod, dry) => {
+    setBetoltBusy(true); setErr(''); setBetoltAllas('');
+    const ossz = { uj: 0, modosult: 0, valtozatlan: 0, kivalasztott: 0, masodperc: 0 };
     try {
-      const r = await GRT_api.fetchCalls({});
-      setToast(`Betöltés kész: ${r.uj || 0} új, ${r.modosult || 0} módosult, ${r.valtozatlan || 0} változatlan.`);
+      let szelet = 0;
+      let run = null;
+      let szeletek = null;
+      let kor = 0;
+      while (szelet !== null && szelet !== undefined && kor < 64) {
+        kor++;
+        const r = await GRT_api.fetchCalls({
+          ...(dry ? { dry: true } : {}),
+          szelet,
+          ...(run !== null && run !== undefined ? { run } : {}),
+        });
+        if (r && r.run !== null && r.run !== undefined) run = r.run;
+        szeletek = (r && r.szeletek) || szeletek;
+        ossz.uj += (r && r.uj) || 0;
+        ossz.modosult += (r && r.modosult) || 0;
+        ossz.valtozatlan += (r && r.valtozatlan) || 0;
+        ossz.kivalasztott += (r && r.kivalasztott) || 0;
+        ossz.masodperc += (r && r.masodperc) || 0;
+        setBetoltAllas(`${(r && typeof r.szelet === 'number' ? r.szelet : szelet) + 1}/${szeletek || '?'} szelet`);
+        szelet = (r && r.kovetkezo !== undefined) ? r.kovetkezo : null;
+      }
+      setToast(dry
+        ? `Próbamenet kész: ${ossz.kivalasztott} tétel jött volna be (${ossz.masodperc} s), írás nem történt.`
+        : `Betöltés kész: ${ossz.uj} új, ${ossz.modosult} módosult, ${ossz.valtozatlan} változatlan (${ossz.masodperc} s).`);
       await ctxBetolt();
       GRT_api.etlRuns(20).then(setRuns).catch(() => {});
       GRT_api.calls({ q, allapot, program, napon: napon ? Number(napon) : null, limit: 60 }).then(setLista).catch(() => {});
-    } catch (e) { setErr(GRT_msg(e)); }
-    finally { setBetoltBusy(false); }
+    } catch (e) {
+      // A részeredmény megmarad: ami már betöltődött, az bent van. Ezt ki is írjuk,
+      // hogy ne tűnjön úgy, mintha az egész futás kárba ment volna.
+      setErr(GRT_msg(e) + (ossz.uj || ossz.modosult
+        ? ` — a megszakadásig ${ossz.uj} új és ${ossz.modosult} módosult felhívás betöltődött.`
+        : ''));
+    }
+    finally { setBetoltBusy(false); setBetoltAllas(''); }
   };
 
   const beallitasMent = async (key, value) => {
@@ -637,7 +700,8 @@ function GRT_OfficeView({ user }) {
           )}
           <div className="space-y-3">
             {forrasok.map(f => (
-              <GRT_SourceCard key={f.kod} f={f} onMent={forrasMent} onBetolt={betolt} betoltBusy={betoltBusy} />
+              <GRT_SourceCard key={f.kod} f={f} onMent={forrasMent} onBetolt={betolt}
+                betoltBusy={betoltBusy} betoltAllas={betoltAllas} />
             ))}
           </div>
 
