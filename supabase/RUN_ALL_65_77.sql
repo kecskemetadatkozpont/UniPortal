@@ -44,8 +44,17 @@
 --   NOTICE: Rendben: 76 — kampanyonkenti kizarasi szabalyok ...
 --   NOTICE: Rendben: 77 — grants sema, 6 forras a regiszterben ...
 --   (a 65 és a 21 csendes, ha minden rendben)
+--
+-- JAVÍTÁS (2026-09-23, az első futtatási kísérlet után): a 77-es fájl
+-- grant-blokkja eredetileg csak a public és az anon szerepkörtől vonta vissza a
+-- jogokat. A Supabase viszont az új public sémás függvényekre az
+-- authenticated-nek is ad alapértelmezett jogot, ezért a service_role-nak szánt
+-- ETL-függvényeket bejelentkezett felhasználó is hívhatta volna — a 77-es saját
+-- önellenőrzése ezt élesben elkapta, és a teljes szkript visszaforgott (mérve:
+-- utána sem a 76-os, sem a 77-es függvényei nem léteztek). A javított változat
+-- az authenticated-től is visszavon, és ezt egy Supabase-szerű
+-- alapjogosultságokkal felállított próbaadatbázison ellenőriztük.
 -- ============================================================================
-
 
 
 -- ############################################################################
@@ -1876,10 +1885,17 @@ end $$;
 -- ------------------------------------------------------------
 -- Postgresben minden új függvény EXECUTE jogot ad a PUBLIC szerepkörnek,
 -- ezért mindegyikről előbb visszavesszük, majd célzottan adjuk oda.
+-- FONTOS, ÉLESBEN MÉRVE (2026-09-23): a Supabase alapértelmezett jogokat ad az
+-- új public sémás függvényekre az anon ÉS az authenticated szerepkörnek is.
+-- Ezért nem elég a "from public, anon" — az authenticated-től is vissza kell
+-- vonni, különben a service_role-nak szánt ETL-függvényeket bárki hívhatná, aki
+-- be van jelentkezve. A 74_webshop.sql ezt helyesen teszi; ez a fájl első
+-- változata nem, és pont az itteni önellenőrzés bukott el rajta élesben.
 do $grants$
 declare
   f text;
   has_anon boolean := exists (select 1 from pg_roles where rolname = 'anon');
+  has_auth boolean := exists (select 1 from pg_roles where rolname = 'authenticated');
   has_srv  boolean := exists (select 1 from pg_roles where rolname = 'service_role');
 begin
   -- Belső (grants séma) függvények: senkinek.
@@ -1889,6 +1905,7 @@ begin
   ] loop
     execute format('revoke all on function %s from public', f);
     if has_anon then execute format('revoke all on function %s from anon', f); end if;
+    if has_auth then execute format('revoke all on function %s from authenticated', f); end if;
   end loop;
 
   -- Felületi RPC-k: bejelentkezett felhasználónak (a törzs dönt a jogról).
@@ -1917,6 +1934,7 @@ begin
   ] loop
     execute format('revoke all on function %s from public', f);
     if has_anon then execute format('revoke all on function %s from anon', f); end if;
+    if has_auth then execute format('revoke all on function %s from authenticated', f); end if;
     if has_srv then execute format('grant execute on function %s to service_role', f); end if;
   end loop;
 end $grants$;
