@@ -13704,6 +13704,10 @@ Object.entries({
   'Nem lett kitöltve — legalább egy célt adj meg (e nélkül a félév végén nincs mit értékelni).': 'Not filled in — add at least one goal (otherwise there is nothing to evaluate at the end of the term).',
   'A hiányzó válaszokat pirossal jelöltük a kérdéseknél.': 'Missing answers are marked in red at the questions.',
   'Célmeghatározás/Értékelés': 'Goal setting/Evaluation',
+  /* 83 — a validált lista importja */
+  'validált listából': 'from the validated list',
+  'kurzus a listából': 'courses from the list',
+  'óraarány': 'teaching load share',
   /* 82 — rendezhető kutatói lista, forrás-metrikák */
   'Csak validált (oktatói nyilvántartásból)': 'Validated only (from the teacher registry)',
   'Nincs betöltött mű': 'No works loaded',

@@ -82,7 +82,7 @@ const GRTR_OSZLOP = [
 
 // CSV a pályázati irodának: a lista úgy, ahogy éppen szűrve és rendezve van.
 function GRTR_csv(sorok) {
-  const fej = ['Név', 'Típus', 'Kar', 'Intézet', 'E-mail', 'ORCID', 'Kurzus',
+  const fej = ['Kód', 'Név', 'Típus', 'Kar', 'Intézet', 'E-mail', 'ORCID', 'Kurzus',
                'Mű (nálunk)', 'Idézet (nálunk)', 'h-index (nálunk)',
                'Forrás: mű', 'Forrás: idézet', 'Forrás: h-index',
                'Első év', 'Utolsó év', 'Fő témák', 'OpenAlex', 'MTMT',
@@ -91,7 +91,7 @@ function GRTR_csv(sorok) {
     const t = v == null ? '' : String(v);
     return /[";\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
   };
-  const sor = (r) => [r.nev, GRTR_TIPUS[r.tipus] || r.tipus, r.kar, r.intezet, r.email, r.orcid,
+  const sor = (r) => [r.kod, r.nev, GRTR_TIPUS[r.tipus] || r.tipus, r.kar, r.intezet, r.email, r.orcid,
     r.kurzus_db, r.mu_db, r.idezet, r.h_index, r.forras_mu_db, r.forras_idezet, r.forras_h_index,
     r.elso_ev, r.utolso_ev, (r.fo_temak || []).join(' | '),
     r.openalex_id || '', r.mtmt_id || '', r.validalt ? 'igen' : 'nem',
@@ -117,7 +117,14 @@ const GRTR_METRIKA = {
   tudomanyterulet: 'tudományterület', fokozat: 'fokozat',
   q1_db: 'Q1-es közlemény', q2_db: 'Q2-es közlemény',
   q3_db: 'Q3-as közlemény', q4_db: 'Q4-es közlemény',
+  // a validált listából jövő, kézi értékek
+  kurzus_db: 'kurzus a listából', oraarany: 'óraarány',
+  kurzusok_2026_27_1: 'kurzus 2026/27/1',
 };
+
+// A forrás neve a profilban. A „kézi" itt azt jelenti: a validált listából jött,
+// nem publikációs adatbázisból — ezért nem is számít bele a forrás-oszlopokba.
+const GRTR_FORRASNEV = { openalex: 'OpenAlex', mtmt: 'MTMT', kezi: 'validált listából' };
 
 const GRTR_SKILL = { modszer: 'módszer', infrastruktura: 'infrastruktúra', nyelv: 'nyelv',
                      trl: 'TRL', ipari: 'ipari kapcsolat', szerep: 'szerep', egyeb: 'egyéb' };
@@ -287,7 +294,7 @@ function GRTR_ProfilModal({ open, id, onClose, onValtozott }) {
                 <div key={forras} className="bg-white border border-slate-100 rounded-2xl p-4">
                   <div className="flex items-baseline justify-between gap-2 mb-2">
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                      {forras === 'openalex' ? 'OpenAlex' : forras === 'mtmt' ? 'MTMT' : forras} szerint
+                      {GRTR_FORRASNEV[forras] || forras} szerint
                     </p>
                     <p className="text-[10px] font-bold text-slate-300">
                       {blokk.frissitve ? GRT_dt(blokk.frissitve) : ''}
@@ -800,7 +807,7 @@ function GRTR_KutatokView() {
                         <td className="px-3 py-2.5">
                           <p className="text-sm font-black text-slate-800">{r.nev}</p>
                           <p className="text-[10px] text-slate-400 font-bold">
-                            {[r.kar, r.intezet].filter(Boolean).join(' · ') || '—'}
+                            {[r.kod, r.kar, r.intezet].filter(Boolean).join(' · ') || '—'}
                           </p>
                           <div className="flex items-center gap-1 flex-wrap mt-1">
                             {r.orcid && <UBadge tone="green">ORCID</UBadge>}
