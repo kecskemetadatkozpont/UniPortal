@@ -868,6 +868,7 @@ function GRT_OfficeView({ user }) {
         {[
           { id: 'felhivasok', cim: 'Felhívások', ikon: <Lucide.List size={14} /> },
           { id: 'naptar', cim: 'Határidőnaptár', ikon: <Lucide.CalendarDays size={14} /> },
+          { id: 'kutatok', cim: 'Kutatók', ikon: <Lucide.Users size={14} /> },
           { id: 'forrasok', cim: 'Adatforrások', ikon: <Lucide.Database size={14} />, jel: elavultDb },
           { id: 'beallitas', cim: 'Beállítások', ikon: <Lucide.Settings size={14} /> },
         ].map(t => (
@@ -946,6 +947,8 @@ function GRT_OfficeView({ user }) {
       )}
 
       {ful === 'naptar' && <GRT_Naptar onNyit={setNyitottId} />}
+
+      {ful === 'kutatok' && <GRTR_KutatokView />}
 
       {ful === 'forrasok' && (
         <div className="space-y-4">
