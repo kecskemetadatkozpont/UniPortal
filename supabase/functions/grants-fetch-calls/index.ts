@@ -26,6 +26,8 @@
 //     — a hívó jogosultságát a grants_context() dönti el (grants_office kell)
 //   • ütemezőből: x-grants-cron: <GRANTS_CRON_SECRET>
 //   • egy szelet:              { "szelet": 0, "szeletek": 8, "run": 12 }
+//   • LÁNC (cronhoz): { "lanc": true } — a szelet végén a függvény maga hívja
+//     a következőt, így EGY cron-bejegyzés elég, és a naplóban egy futás lesz.
 //   • próbamenet írás nélkül:  { "dry": true }
 //   • korlátozott menet:       { "max": 50 }
 //   • csak olvasás mérése:     { "probe": "olvas", "maxMb": 20 }
@@ -135,6 +137,11 @@ Deno.serve(async (req) => {
 
   const szamok = { olvasott: 0, kivalasztott: 0, uj: 0, modosult: 0, valtozatlan: 0, hibas_tetel: 0, koteg: 0 };
   const kezdet = Date.now();
+  // Láncolt futás: a szelet végén magunkat hívjuk a következő szelettel.
+  // Ehhez a cron-titok kell (a saját hívás is átmegy a kapun), és MAX 20
+  // láncszem, hogy egy hibás állapot ne indítson végtelen kört.
+  const lanc = test.lanc === true && CRON_SECRET !== '';
+  const lancHossz = typeof test.lanc_hossz === 'number' ? test.lanc_hossz : 0;
 
 
   const koteget_kuld = async (tetelek: unknown[]) => {
@@ -249,7 +256,31 @@ Deno.serve(async (req) => {
     if (!dry && utolso) {
       await svc.rpc('grants_etl_finish', { p_run: runId, p_ok: true, p_hiba: null, p_reszletek: reszletek });
     }
-    return json({ ok: true, forras: FORRAS, etag, teljes, run: runId,
+    // A lánc következő szemét NEM várjuk meg: a válasz azonnal megy, a hívás
+    // pedig a háttérben fut tovább (EdgeRuntime.waitUntil). Ha a lánc bárhol
+    // megszakad, a futás 'fut' állapotban marad, és a másnapi cron újrakezdi —
+    // a betöltés idempotens, tehát ez nem okoz kárt.
+    let lancolt = false;
+    if (lanc && !utolso && lancHossz < 20) {
+      const kovetkezoTest = { szelet: szelet + 1, szeletek, run: runId, lanc: true,
+                              lanc_hossz: lancHossz + 1, ...(dry ? { dry: true } : {}) };
+      const hivas = fetch(`${SUPABASE_URL}/functions/v1/grants-fetch-calls`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-grants-cron': CRON_SECRET,
+                   'Authorization': `Bearer ${SERVICE_KEY}`, 'apikey': ANON_KEY },
+        body: JSON.stringify(kovetkezoTest),
+      }).catch(() => undefined);
+      // @ts-ignore — a Supabase futtatókörnyezet adja
+      if (typeof EdgeRuntime !== 'undefined' && EdgeRuntime.waitUntil) {
+        // @ts-ignore
+        EdgeRuntime.waitUntil(hivas);
+      } else {
+        await hivas;
+      }
+      lancolt = true;
+    }
+
+    return json({ ok: true, forras: FORRAS, etag, teljes, run: runId, lancolt,
                   kovetkezo: utolso ? null : szelet + 1, ...reszletek });
 
   } catch (e) {
