@@ -166,6 +166,18 @@ function ECHO_lang() {
   catch (e) { return 'hu'; }
 }
 
+/* A KURZUS NEVE A KÉRDŐÍV NYELVÉN. A név ADAT (echo.course.name_hu / name_en),
+   nem felületi felirat: gépi fordítás nem érintheti, de a megfelelő VÁLTOZATOT
+   meg kell mutatni. Angol nyelvű kurzusnál a magyar cím félrevezető — MÉRVE:
+   az angol kérdőív fölött „Angol nyelvű alapozó” állt. Ha nincs angol név,
+   marad a magyar: jobb a másik nyelvű név, mint az üres cím. */
+function ECHO_kurzusNev(course, lang) {
+  const c = course || {};
+  const hu = String(c.course_name || c.name || '').trim();
+  const en = String(c.course_name_en || c.name_en || '').trim();
+  return (lang === 'en' && en) ? en : (hu || en);
+}
+
 // hu/en mezőpár feloldása egy compiled-objektumon.
 function ECHO_txt(o, lang) {
   if (!o) return '';
@@ -1385,13 +1397,14 @@ function ECHO_GoalsView({ course, onBack, onSaved }) {
               {part1 ? <ECHO_Src>{ECHO_txt(part1, lang)}</ECHO_Src> : 'Célmeghatározás'}
             </h2>
             <p className="text-sm text-slate-400 font-medium mt-0.5">
-              <ECHO_Src>{course.course_code} · {course.course_name}</ECHO_Src>{(course.campaign_ref_no || course.campaign_code) ? <span className="ml-2 align-middle"><ECHO_KampanyId sorszam={course.campaign_ref_no} kod={course.campaign_code} kicsi /></span> : null}
+              <ECHO_Src>{course.course_code} · {ECHO_kurzusNev(course, lang)}</ECHO_Src>{(course.campaign_ref_no || course.campaign_code) ? <span className="ml-2 align-middle"><ECHO_KampanyId sorszam={course.campaign_ref_no} kod={course.campaign_code} kicsi /></span> : null}
             </p>
             {langFellBack && (
               <p className="mt-1.5 text-[11px] font-bold text-amber-700 inline-flex items-start gap-1.5">
                 <Lucide.Languages size={13} className="flex-none mt-px" />
-                A kurzus nyelvén ({ECHO_courseLang(courseMeta).toUpperCase()}) nincs jóváhagyott
-                fordítás, ezért a kérdőívet magyarul mutatjuk.
+                {/* EGY szövegcsomópont: a nyelvkód beszúrása három darabra törte a
+                    mondatot, és angol módban MÉRVE magyarul maradt. */}
+                {`A kurzus nyelvén (${ECHO_courseLang(courseMeta).toUpperCase()}) nincs jóváhagyott fordítás, ezért a kérdőívet magyarul mutatjuk.`}
               </p>
             )}
           </div>
@@ -1975,7 +1988,7 @@ function ECHO_Wizard({ course, onBack, onSubmitted }) {
       {/* fejléc + lépésjelző */}
       <div className="bg-white rounded-3xl border border-slate-100 p-5 sm:p-6 mb-4">
         <p className="text-xs font-bold text-slate-400 mb-1">
-          <ECHO_Src>{course.course_code} · {course.course_name}</ECHO_Src>{(course.campaign_ref_no || course.campaign_code) ? <span className="ml-2 align-middle"><ECHO_KampanyId sorszam={course.campaign_ref_no} kod={course.campaign_code} kicsi /></span> : null}
+          <ECHO_Src>{course.course_code} · {ECHO_kurzusNev(course, lang)}</ECHO_Src>{(course.campaign_ref_no || course.campaign_code) ? <span className="ml-2 align-middle"><ECHO_KampanyId sorszam={course.campaign_ref_no} kod={course.campaign_code} kicsi /></span> : null}
         </p>
         <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
           {cur.kind === 'review' ? title : <ECHO_Src>{title}</ECHO_Src>}
@@ -1992,8 +2005,9 @@ function ECHO_Wizard({ course, onBack, onSubmitted }) {
         {langFellBack && (
           <p className="mt-2 text-[11px] font-bold text-amber-700 inline-flex items-start gap-1.5">
             <Lucide.Languages size={13} className="flex-none mt-px" />
-            A kurzus nyelvén ({ECHO_courseLang(courseMeta).toUpperCase()}) nincs jóváhagyott
-            fordítás, ezért a kérdőívet magyarul mutatjuk.
+            {/* EGY szövegcsomópont: a nyelvkód beszúrása három darabra törte a
+                mondatot, és angol módban MÉRVE magyarul maradt. */}
+            {`A kurzus nyelvén (${ECHO_courseLang(courseMeta).toUpperCase()}) nincs jóváhagyott fordítás, ezért a kérdőívet magyarul mutatjuk.`}
           </p>
         )}
         {cur.kind === 'goal' && (
@@ -2007,7 +2021,9 @@ function ECHO_Wizard({ course, onBack, onSubmitted }) {
         )}
         <div className="mt-4">
           <div className="flex items-center justify-between text-[11px] font-black uppercase tracking-wider text-slate-400 mb-1.5">
-            <span>{step + 1}. lépés / {steps.length}</span><span>{pct}%</span>
+            {/* EGY szövegcsomópont: a „{n}. lépés / {m}” három csomópontra törve
+                lefordíthatatlan volt, és angol módban magyarul maradt. */}
+            <span>{`${step + 1}. lépés / ${steps.length}`}</span><span>{pct}%</span>
           </div>
           <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
             <div className="h-full bg-primary rounded-full transition-all duration-300" style={{ width: pct + '%' }} />
@@ -2025,13 +2041,16 @@ function ECHO_Wizard({ course, onBack, onSubmitted }) {
                     : <Lucide.Cloud size={13} />}
           </span>
           <p className="text-[11px] font-medium text-slate-400 leading-relaxed">
+            {/* MONDATONKÉNT EGY CSOMÓPONT. Ez a bekezdés mondja meg a hallgatónak,
+                mit tudunk róla és meddig — angol módban MÉRVE magyarul maradt,
+                mert a kiemelések három darabra törték a mondatot, és a szótár
+                csak teljes szövegcsomópontra illeszkedik. */}
             {saving ? <b className="text-slate-500">Mentés…</b>
              : saveErr ? <b className="text-amber-600">A piszkozatot most nem sikerült menteni — a válaszaid a böngészőben megvannak.</b>
-             : savedAt ? <b className="text-slate-500">Piszkozat mentve {ECHO_dateTime(savedAt)}.</b>
+             : savedAt ? <b className="text-slate-500">{`Piszkozat mentve ${ECHO_dateTime(savedAt)}.`}</b>
              : <b className="text-slate-500">A kitöltésed automatikusan mentődik.</b>}
-            {' '}A piszkozat a beküldésig <b className="text-slate-500">visszakereshető hozzád</b>, de
-            a tartalmát rajtad kívül senki nem látja. A beküldés pillanatában ez a kapcsolat
-            elszakad, és a piszkozat törlődik.
+            {' '}<b className="text-slate-500">A piszkozat a beküldésig visszakereshető hozzád.</b>
+            {' '}A tartalmát rajtad kívül senki nem látja. A beküldés pillanatában ez a kapcsolat elszakad, és a piszkozat törlődik.
           </p>
         </div>
       </div>
@@ -2384,7 +2403,7 @@ function ECHO_StudentView({ user }) {
         <div className="flex items-start justify-between gap-3 mb-3">
           <div className="min-w-0">
             <p className="text-[11px] font-black text-slate-400 tracking-wider flex flex-wrap items-center gap-x-2 gap-y-1"><ECHO_Src>{c.course_code}</ECHO_Src><ECHO_KampanyId sorszam={c.campaign_ref_no} kod={c.campaign_code} kicsi /></p>
-            <h3 className="font-black text-slate-900 leading-snug mt-0.5"><ECHO_Src>{c.course_name}</ECHO_Src></h3>
+            <h3 className="font-black text-slate-900 leading-snug mt-0.5"><ECHO_Src>{ECHO_kurzusNev(c, ECHO_courseLang(c))}</ECHO_Src></h3>
           </div>
           <ECHO_StateBadge allapot={allapot} />
         </div>

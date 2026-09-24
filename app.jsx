@@ -12560,6 +12560,11 @@ Object.assign(HU_EN, {
 HU_EN_PHRASES.push(
   // 79-80 — kutatók
   [/(\d+) \/ (\d+) kutató/g, '$1 / $2 researchers'],
+  /* ECHO: számot tartalmazó keretfeliratok */
+  [/^A kurzus nyelvén \((\w+)\) nincs jóváhagyott fordítás, ezért a kérdőívet magyarul mutatjuk\.$/g,
+    'There is no approved translation in the course language ($1), so the questionnaire is shown in Hungarian.'],
+  [/^(\d+)\. lépés \/ (\d+)$/g, 'Step $1 / $2'],
+  [/^Piszkozat mentve (.+)\.$/g, 'Draft saved $1.'],
   /* Külügyi iroda (2026-09-24) — számot tartalmazó feliratok */
   [/^(\d+)\/(\d+) beküldés felhasználva — még (\d+) próbálkozásod van\.$/g,
     '$1/$2 submissions used — you have $3 attempt(s) left.'],
@@ -13378,6 +13383,37 @@ Object.entries({
   'Nem lett kitöltve — legalább egy célt adj meg (e nélkül a félév végén nincs mit értékelni).': 'Not filled in — add at least one goal (otherwise there is nothing to evaluate at the end of the term).',
   'A hiányzó válaszokat pirossal jelöltük a kérdéseknél.': 'Missing answers are marked in red at the questions.',
   'Célmeghatározás/Értékelés': 'Goal setting/Evaluation',
+  /* ECHO — a félév eleji célmeghatározó képernyő feliratai */
+  'A félév elején kitűzött célok csak a Tiéd — az oktató nem látja őket, és a félév végi értékelésbe sem kerülnek át. Egyedül azt visszük tovább, hogy a céljaid mennyiben teljesültek.':
+    'The goals you set at the start of term are yours alone — the teacher does not see them, and they are not carried into the end-of-term evaluation. The only thing carried over is how far your goals were met.',
+  'Céljaim ezen a kurzuson': 'My goals for this course',
+  'Legalább 1, legfeljebb 3 cél. Konkrét, félév végén eldönthető megfogalmazás segít a legtöbbet.':
+    'At least 1 and at most 3 goals. A concrete wording you can judge at the end of term helps most.',
+  'Elvárásaim az oktatótól': 'What I expect from the teacher',
+  'Legfeljebb 3 elvárás — ez a rész nem kötelező.': 'At most 3 expectations — this part is optional.',
+  'Célok mentése': 'Save goals',
+  'Pl. magabiztosan írjak SQL lekérdezést': 'e.g. write SQL queries with confidence',
+  'Pl. kapjak érdemi visszajelzést a beadandóra': 'e.g. get meaningful feedback on my assignment',
+  'Nem lett kitöltve — legalább egy célt adj meg (e nélkül a félév végén nincs mit értékelni).':
+    'Not filled in — add at least one goal (otherwise there is nothing to evaluate at the end of term).',
+  /* ECHO kérdőív — a KERET feliratai (a kérdőív TARTALMÁT az ECHO_Src védi).
+     Ezek a szövegek 2026-09-24-én MÉRVE angol módban is magyarul maradtak. */
+  'Kilépés — a válaszaid piszkozatként megmaradnak': 'Exit — your answers are kept as a draft',
+  'A kitöltésed automatikusan mentődik.': 'Your answers are saved automatically.',
+  'A piszkozat a beküldésig visszakereshető hozzád.': 'Until you submit, the draft can be traced back to you.',
+  'A tartalmát rajtad kívül senki nem látja. A beküldés pillanatában ez a kapcsolat elszakad, és a piszkozat törlődik.':
+    'Nobody but you can see its contents. The moment you submit, that link is severed and the draft is deleted.',
+  'A piszkozatot most nem sikerült menteni — a válaszaid a böngészőben megvannak.':
+    'The draft could not be saved just now — your answers are kept in your browser.',
+  /* Kurzusállapotok a kurzusértékelés listáján */
+  'Nem kezdett': 'Not started',
+  'Félbehagyott': 'In progress',
+  'Célkitűzés': 'Goal setting',
+  'A kitöltési ablak nyitva.': 'The response window is open.',
+  'Van mentett piszkozatod — a kitöltés folytatható.': 'You have a saved draft — you can continue.',
+  'A félév eleji célok adhatók meg.': 'The start-of-term goals can be set.',
+  'A kitöltési ablak bezárt.': 'The response window is closed.',
+  'A kampány még nem indult.': 'The campaign has not started yet.',
   /* Külügyi iroda észrevételei (2026-09-24) — jelentkezési folyamat */
   'A céglátogatásokra, tanulmányi kirándulásokra és továbbképzésekre a már felvett hallgatók jelentkezhetnek. A te felvételi eljárásod még folyamatban van — amint megszületik a döntés, ez a jelentkezés is megnyílik.':
     'Company visits, study excursions and trainings are open to students who have already been admitted. Your admission procedure is still in progress — once the decision is made, this application opens up as well.',
