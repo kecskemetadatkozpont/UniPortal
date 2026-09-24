@@ -12897,6 +12897,8 @@ Object.assign(HU_EN, {
 HU_EN_PHRASES.push(
   // 79-80 — kutatók
   [/(\d+) \/ (\d+) kutató/g, '$1 / $2 researchers'],
+  [/^(\d+) összekötve; (\d+) névjavaslat maradt egyenkénti döntésre\.$/g,
+    '$1 linked; $2 name suggestions left for one-by-one decisions.'],
   /* 82 — a rendezhető kutatói lista számot tartalmazó feliratai */
   [/^(\d+) validált$/g, '$1 validated'],
   [/^(\d+) ORCID-del$/g, '$1 with ORCID'],
@@ -13704,6 +13706,8 @@ Object.entries({
   'Nem lett kitöltve — legalább egy célt adj meg (e nélkül a félév végén nincs mit értékelni).': 'Not filled in — add at least one goal (otherwise there is nothing to evaluate at the end of the term).',
   'A hiányzó válaszokat pirossal jelöltük a kérdéseknél.': 'Missing answers are marked in red at the questions.',
   'Célmeghatározás/Értékelés': 'Goal setting/Evaluation',
+  /* 84 — sorrendfüggetlen névegyeztetés */
+  'Névjavaslatok elfogadása': 'Accept name suggestions',
   /* 83 — a validált lista importja */
   'validált listából': 'from the validated list',
   'kurzus a listából': 'courses from the list',

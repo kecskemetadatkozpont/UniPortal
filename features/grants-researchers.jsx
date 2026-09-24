@@ -22,6 +22,11 @@ const GRTR_api = {
                                p_rend: p.rend || 'nev', p_irany: p.irany || 'asc' }),
   rosterStat:   ()         => GRT_rpc('grants_roster_stats'),
   parositas:    (forras)   => GRT_rpc('grants_match_roster', { p_forras: forras || null }),
+  kotegeltKotes: (p)       => GRT_rpc('grants_roster_bulk_link', {
+                               p_forras: p.forras || null,
+                               p_csak_utolso_affiliacio: p.csakUtolso !== false,
+                               p_csak_validalt: p.csakValidalt !== false,
+                               p_min_mu: p.minMu || 0, p_limit: p.limit || 400 }),
   get:          (id)       => GRT_rpc('grants_researcher_get', { p_id: id }),
   save:         (adat)     => GRT_rpc('grants_researcher_save', { p_adat: adat }),
   skillsSet:    (id, it)   => GRT_rpc('grants_researcher_skills_set', { p_id: id, p_items: it }),
@@ -697,6 +702,18 @@ function GRTR_KutatokView() {
               }}
               disabled={busy} className={U_btnGhost + ' py-2 px-3 text-xs'}>
               <Lucide.Link2 size={14} /> Párosítás a felderítéssel
+            </button>
+            <button onClick={() => {
+                if (!window.confirm('Elfogadjuk a NÉVEGYEZÉSEN alapuló javaslatokat arra a szűk körre, '
+                    + 'ahol a gépi döntés védhető: a név mindkét oldalon egyedi, a kutató a validált '
+                    + 'listából van, és a forrás szerint az NJE a legutolsó affiliációja. '
+                    + 'Minden összekötés visszavonható a profilban (Azonosító törlése).')) return;
+                muvelet(() => GRTR_api.kotegeltKotes({}),
+                  r => `${r.osszekotve} összekötve; ${r.maradt_nev_javaslat} névjavaslat maradt `
+                       + 'egyenkénti döntésre.');
+              }}
+              disabled={busy} className={U_btnGhost + ' py-2 px-3 text-xs'}>
+              <Lucide.UserCheck size={14} /> Névjavaslatok elfogadása
             </button>
             <button onClick={() => {
                 if (!window.confirm('Letöltjük a metaadatokat minden összekötött kutatóról: '
