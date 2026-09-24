@@ -18,7 +18,10 @@ const GRTR_api = {
   lista:        (p)        => GRT_rpc('grants_researchers', {
                                p_q: p.q || null, p_tipus: p.tipus || null, p_kar: p.kar || null,
                                p_allapot: p.allapot || null, p_szures: p.szures || null,
-                               p_limit: p.limit || 100, p_offset: p.offset || 0 }),
+                               p_limit: p.limit || 300, p_offset: p.offset || 0,
+                               p_rend: p.rend || 'nev', p_irany: p.irany || 'asc' }),
+  rosterStat:   ()         => GRT_rpc('grants_roster_stats'),
+  parositas:    (forras)   => GRT_rpc('grants_match_roster', { p_forras: forras || null }),
   get:          (id)       => GRT_rpc('grants_researcher_get', { p_id: id }),
   save:         (adat)     => GRT_rpc('grants_researcher_save', { p_adat: adat }),
   skillsSet:    (id, it)   => GRT_rpc('grants_researcher_skills_set', { p_id: id, p_items: it }),
@@ -40,23 +43,82 @@ const GRTR_api = {
                                p_csak_utolso_affiliacio: p.csakUtolso !== false,
                                p_limit: p.limit || 200 }),
   // A felderítés és a profilbetöltés Edge Functionben fut.
-  felderitesInditas: (forras) => {
-    if (!window.sb || !window.sb.functions) throw new Error('A felderítő szolgáltatás nem elérhető.');
-    return window.sb.functions.invoke('grants-discover', { body: { forras } })
+  // A supabase-js a nem 2xx válasz TÖRZSÉT eldobja, ezért olvassuk ki magunk —
+  // különben csak annyi látszik, hogy "non-2xx status code".
+  edge: (nev, body) => {
+    if (!window.sb || !window.sb.functions) throw new Error('A szolgáltatás nem elérhető.');
+    return window.sb.functions.invoke(nev, { body })
       .then(async ({ data, error }) => {
         if (error) {
           let r = '';
           try { const t = await error.context.text(); const j = JSON.parse(t); r = j.hiba || t; } catch (e) {}
           throw new Error(r || error.message);
         }
-        if (data && data.ok === false) throw new Error(data.hiba || 'A felderítés hibára futott.');
+        if (data && data.ok === false) throw new Error(data.hiba || 'A futás hibára futott.');
         return data;
       });
   },
+  felderitesInditas: (forras) => GRTR_api.edge('grants-discover', { forras }),
+  // Kötegenként hívjuk, nem szerveroldali lánccal: így a felületen LÁTSZIK,
+  // hol tart, és meg is lehet állítani.
+  profilKoteg:  (p)        => GRTR_api.edge('grants-fetch-profiles',
+                               { koteg: p.koteg || 8, napok: p.napok ?? 7,
+                                 forras: p.forras || 'mind', max_mu: p.maxMu || 300 }),
 };
+
+// A lista rendezhető oszlopai. A kulcsok a 82-es migráció fehérlistájával
+// egyeznek — ami nincs benne, azt a szerver visszautasítja.
+const GRTR_OSZLOP = [
+  { k: 'nev',           cim: 'Név',        alap: 'asc'  },
+  { k: 'kurzus',        cim: 'Kurzus',     alap: 'desc', cim2: 'Kurzusok az oktatói nyilvántartásból' },
+  { k: 'mu',            cim: 'Mű',         alap: 'desc', cim2: 'Nálunk tárolt művek száma' },
+  { k: 'idezet',        cim: 'Idézet',     alap: 'desc', cim2: 'A nálunk tárolt művek idézetei összesen' },
+  { k: 'h_index',       cim: 'h-index',    alap: 'desc', cim2: 'A nálunk tárolt művekből számolva' },
+  { k: 'forras_mu',     cim: 'Forrás: mű', alap: 'desc', cim2: 'A forrás szerinti TELJES pályamű' },
+  { k: 'forras_idezet', cim: 'Forrás: idézet', alap: 'desc', cim2: 'A forrás saját idézetszáma' },
+  { k: 'forras_h',      cim: 'Forrás: h',  alap: 'desc', cim2: 'A forrás saját h-indexe' },
+  { k: 'szinkron',      cim: 'Szinkron',   alap: 'desc' },
+];
+
+// CSV a pályázati irodának: a lista úgy, ahogy éppen szűrve és rendezve van.
+function GRTR_csv(sorok) {
+  const fej = ['Név', 'Típus', 'Kar', 'Intézet', 'E-mail', 'ORCID', 'Kurzus',
+               'Mű (nálunk)', 'Idézet (nálunk)', 'h-index (nálunk)',
+               'Forrás: mű', 'Forrás: idézet', 'Forrás: h-index',
+               'Első év', 'Utolsó év', 'Fő témák', 'OpenAlex', 'MTMT',
+               'Validált', 'Utolsó szinkron', 'Hiányosság'];
+  const cella = (v) => {
+    const t = v == null ? '' : String(v);
+    return /[";\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+  };
+  const sor = (r) => [r.nev, GRTR_TIPUS[r.tipus] || r.tipus, r.kar, r.intezet, r.email, r.orcid,
+    r.kurzus_db, r.mu_db, r.idezet, r.h_index, r.forras_mu_db, r.forras_idezet, r.forras_h_index,
+    r.elso_ev, r.utolso_ev, (r.fo_temak || []).join(' | '),
+    r.openalex_id || '', r.mtmt_id || '', r.validalt ? 'igen' : 'nem',
+    r.utolso_szinkron ? GRT_dt(r.utolso_szinkron) : '', (r.hianyok || []).join(' | ')];
+  // BOM: az Excel különben nem ismeri fel az UTF-8-at, és a hosszú ő-t elrontja.
+  return '\uFEFF' + [fej, ...sorok.map(sor)].map(x => x.map(cella).join(';')).join('\r\n');
+}
 
 const GRTR_TIPUS = { oktato: 'oktató', kutato: 'kutató', phd: 'PhD-hallgató',
                      asszisztens: 'asszisztens', egyeb: 'egyéb' };
+// A forrás-metrikák kulcsainak magyar neve. Amit nem ismerünk, az a saját
+// kulcsával jelenik meg — nem tüntetjük el csak azért, mert új.
+const GRTR_METRIKA = {
+  mu_db: 'mű', idezet: 'idézet', h_index: 'h-index', i10: 'i10-index',
+  ket_ev_atlagos_idezet: '2 éves átlagos idézet', orcid: 'ORCID',
+  nje_affiliacio: 'NJE-affiliáció', nje_affiliacio_ev_db: 'NJE-s évek száma',
+  fuggetlen_idezet: 'független idézet', scopus_idezet: 'Scopus-idézet',
+  wos_idezet: 'WoS-idézet', idezo_mu_db: 'idéző művek',
+  folyoiratcikk_db: 'folyóiratcikk', konyv_db: 'könyv', konyvreszlet_db: 'könyvrészlet',
+  konferenciakozlemeny_db: 'konferenciaközlemény', oltalmi_forma_db: 'oltalmi forma',
+  kutatasi_adat_db: 'kutatási adat',
+  elso_kozlemeny_ev: 'első közlemény', utolso_kozlemeny_ev: 'utolsó közlemény',
+  tudomanyterulet: 'tudományterület', fokozat: 'fokozat',
+  q1_db: 'Q1-es közlemény', q2_db: 'Q2-es közlemény',
+  q3_db: 'Q3-as közlemény', q4_db: 'Q4-es közlemény',
+};
+
 const GRTR_SKILL = { modszer: 'módszer', infrastruktura: 'infrastruktúra', nyelv: 'nyelv',
                      trl: 'TRL', ipari: 'ipari kapcsolat', szerep: 'szerep', egyeb: 'egyéb' };
 
@@ -202,14 +264,49 @@ function GRTR_ProfilModal({ open, id, onClose, onValtozott }) {
                   <span className="font-bold text-slate-600">{d.szamok?.mu_openalex ?? 0}</span></div>
                 <div><span className="text-slate-400 font-medium">MTMT-ből: </span>
                   <span className="font-bold text-slate-600">{d.szamok?.mu_mtmt ?? 0}</span></div>
+                <div><span className="text-slate-400 font-medium">h-index: </span>
+                  <span className="font-bold text-slate-600">{d.mutatok?.h_index ?? 0}</span></div>
+                <div><span className="text-slate-400 font-medium">Kurzus: </span>
+                  <span className="font-bold text-slate-600">{d.mutatok?.kurzus_db ?? 0}</span></div>
                 {d.szamok?.elso_ev && (
                   <div className="col-span-2 text-[11px] text-slate-400 font-bold">
                     {d.szamok.elso_ev}–{d.szamok.utolso_ev} közötti termés
                   </div>
                 )}
+                <p className="col-span-2 text-[10px] text-slate-400 font-medium leading-relaxed">
+                  Ezek a NÁLUNK tárolt művekből számolnak. A forrás saját összesítői lent, külön.
+                </p>
               </div>
             </div>
           </div>
+
+          {/* a forrás saját összesítői — külön, hogy ne mosódjon össze a mienkkel */}
+          {Object.keys(d.metrikak || {}).length > 0 && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              {Object.entries(d.metrikak).map(([forras, blokk]) => (
+                <div key={forras} className="bg-white border border-slate-100 rounded-2xl p-4">
+                  <div className="flex items-baseline justify-between gap-2 mb-2">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                      {forras === 'openalex' ? 'OpenAlex' : forras === 'mtmt' ? 'MTMT' : forras} szerint
+                    </p>
+                    <p className="text-[10px] font-bold text-slate-300">
+                      {blokk.frissitve ? GRT_dt(blokk.frissitve) : ''}
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+                    {Object.entries(blokk.ertekek || {}).map(([k, v]) => (
+                      <div key={k} className="text-[11px] flex justify-between gap-2 border-b border-slate-50 py-0.5">
+                        <span className="text-slate-400 font-medium">{GRTR_METRIKA[k] || k}</span>
+                        <span className="font-black text-slate-700 tabular-nums text-right">
+                          {typeof v === 'number' ? Math.round(v * 100) / 100 : v}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* azonosító-javaslatok */}
           {(d.jeloltek || []).filter(j => j.allapot === 'javasolt').length > 0 && (
@@ -316,6 +413,8 @@ function GRTR_ProfilModal({ open, id, onClose, onValtozott }) {
                     <span className="text-slate-600"> · {w.cim}</span>
                     {w.forrasnev && <span className="text-slate-400"> · {w.forrasnev}</span>}
                     {w.idezet ? <span className="text-slate-400"> · {w.idezet} idézet</span> : null}
+                    {w.sjr && <UBadge tone="violet" className="ml-1">{w.sjr}</UBadge>}
+                    {w.nyilt_hozzaferes && <UBadge tone="green" className="ml-1">OA</UBadge>}
                     <UBadge tone="slate" className="ml-1">{w.forras}</UBadge>
                   </div>
                 ))}
@@ -437,8 +536,13 @@ function GRTR_KutatokView() {
   const [tipus, setTipus] = useState('');
   const [kar, setKar] = useState('');
   const [szures, setSzures] = useState('');
+  const [rend, setRend] = useState('nev');
+  const [irany, setIrany] = useState('asc');
   const [lista, setLista] = useState(null);
   const [nyitottId, setNyitottId] = useState(null);
+  const [rstat, setRstat] = useState(null);
+  const [halad, setHalad] = useState('');   // a metaadat-letöltés állapotsora
+  const allj = useRef(false);
 
   // felderítés
   const [fForras, setFForras] = useState('openalex');
@@ -451,17 +555,56 @@ function GRTR_KutatokView() {
   const optsBetolt = () => {
     GRTR_api.options().then(setOpts).catch(e => setErr(GRT_msg(e)));
     GRTR_api.felderitesStat().then(setStat).catch(() => {});
+    GRTR_api.rosterStat().then(setRstat).catch(() => {});
   };
   useEffect(() => { optsBetolt(); }, []);
 
-  const torzsBetolt = () => GRTR_api.lista({ q, tipus, kar, szures, limit: 100 })
+  const torzsBetolt = () => GRTR_api.lista({ q, tipus, kar, szures, rend, irany, limit: 300 })
     .then(setLista).catch(e => setErr(GRT_msg(e)));
   useEffect(() => {
     if (ful !== 'torzs') return;
     let el = true;
     const t = setTimeout(() => { if (el) torzsBetolt(); }, 300);
     return () => { el = false; clearTimeout(t); };
-  }, [ful, q, tipus, kar, szures]);
+  }, [ful, q, tipus, kar, szures, rend, irany]);
+
+  // Kattintás az oszlopfejre: ugyanaz az oszlop = irányváltás, más oszlop = az
+  // oszlop természetes iránya (névnél A-tól, számnál a legnagyobbtól).
+  const rendez = (o) => {
+    if (rend === o.k) setIrany(irany === 'asc' ? 'desc' : 'asc');
+    else { setRend(o.k); setIrany(o.alap); }
+  };
+
+  // Metaadat-letöltés: kötegenként, látható haladással. A szerver minden
+  // kötegnél megmondja, mennyi maradt — addig hívjuk, amíg van dolga.
+  const metaadatok = async () => {
+    setBusy(true); setErr(''); allj.current = false;
+    let kutato = 0, mu = 0, korok = 0;
+    try {
+      for (;;) {
+        korok++;
+        const r = await GRTR_api.profilKoteg({ koteg: 8, napok: 7 });
+        kutato += r.kutato || 0; mu += r.mu || 0;
+        setHalad(`${kutato} kutató, ${mu} mű — még ${r.maradt ?? 0} kutató hátra`
+                 + (r.hiba ? ` (${r.hiba} hiba)` : ''));
+        torzsBetolt(); optsBetolt();
+        if (!r.maradt || allj.current) break;
+        // Biztonsági korlát: ha a szerver számai nem csökkennének, ne hívjuk
+        // vég nélkül. 40 kör × 8 kutató jóval a mostani 273 fölött van.
+        if (korok >= 40) { setHalad(h => h + ' — a letöltés megállt, indítsd újra'); break; }
+      }
+      setToast(`Metaadatok letöltve: ${kutato} kutató, ${mu} mű.`);
+    } catch (e) { setErr(GRT_msg(e)); }
+    finally { setBusy(false); }
+  };
+
+  const csvLetolt = () => {
+    const csv = GRTR_csv(lista && lista.sorok ? lista.sorok : []);
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    a.download = `nje-kutatok-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click(); URL.revokeObjectURL(a.href);
+  };
 
   const feldBetolt = () => GRTR_api.felderites({
       forras: fForras, allapot: fAllapot, q: fQ,
@@ -487,6 +630,7 @@ function GRTR_KutatokView() {
 
   const sz = (opts && opts.szamok) || {};
   const fstat = (stat && stat.forrasonkent) || {};
+  const rs = rstat || {};
 
   return (
     <div className="space-y-4">
@@ -496,16 +640,23 @@ function GRTR_KutatokView() {
         </div>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-4 lg:grid-cols-5">
         {[
-          { c: 'Kutató a törzsben', v: sz.osszes, tone: 'text-slate-700' },
-          { c: 'Azonosítóval összekötve', v: sz.osszekotve, tone: 'text-emerald-600' },
-          { c: 'Döntésre váró javaslat', v: sz.jelolt, tone: 'text-amber-600' },
-          { c: 'Betöltött publikáció', v: sz.mu, tone: 'text-sky-600' },
+          { c: 'Kutató a törzsben', v: rs.kutato ?? sz.osszes, tone: 'text-slate-700',
+            alcim: rs.validalt != null ? `${rs.validalt} validált` : null },
+          { c: 'Azonosítóval összekötve', v: sz.osszekotve, tone: 'text-emerald-600',
+            alcim: rs.orcid != null ? `${rs.orcid} ORCID-del` : null },
+          { c: 'Van publikációs adata', v: rs.van_mu, tone: 'text-sky-600',
+            alcim: rs.mu_ossz != null ? `${rs.mu_ossz} mű összesen` : null },
+          { c: 'Van forrás-metrikája', v: rs.van_metrika, tone: 'text-violet-600',
+            alcim: rs.van_temaprofil != null ? `${rs.van_temaprofil} témaprofil` : null },
+          { c: 'Szinkronra vár', v: rs.szinkronra_var, tone: 'text-amber-600',
+            alcim: rs.jelolt != null ? `${rs.jelolt} döntésre váró javaslat` : null },
         ].map(k => (
           <div key={k.c} className="bg-white border border-slate-100 rounded-2xl p-4">
             <p className={'text-2xl font-black ' + k.tone}>{k.v ?? 0}</p>
             <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider mt-0.5">{k.c}</p>
+            {k.alcim && <p className="text-[10px] font-bold text-slate-300 mt-0.5">{k.alcim}</p>}
           </div>
         ))}
       </div>
@@ -522,18 +673,41 @@ function GRTR_KutatokView() {
         ))}
         <div className="flex-1" />
         {ful === 'torzs' && (
-          <button onClick={() => muvelet(() => GRTR_api.syncTeachers(),
-                                         r => `Törzs feltöltve: ${r.uj} új kutató (összesen ${r.osszes}).`)}
-            disabled={busy} className={U_btnGhost + ' py-2 px-3 text-xs'}>
-            <Lucide.UserCog size={14} /> Feltöltés az oktatói nyilvántartásból
-          </button>
+          <>
+            <button onClick={() => muvelet(() => GRTR_api.syncTeachers(),
+                                           r => `Törzs feltöltve: ${r.uj} új kutató (összesen ${r.osszes}).`)}
+              disabled={busy} className={U_btnGhost + ' py-2 px-3 text-xs'}>
+              <Lucide.UserCog size={14} /> Feltöltés az oktatói nyilvántartásból
+            </button>
+            <button onClick={() => {
+                if (!window.confirm('Összepárosítjuk a törzset a felderített szerzőkkel. '
+                    + 'ORCID-egyezésre — ha a név is stimmel — azonnal összeköt; '
+                    + 'névegyezésre csak javaslatot tesz, azt neked kell jóváhagyni.')) return;
+                muvelet(() => GRTR_api.parositas(),
+                  r => `${r.orcid_alapjan_kotve} összekötve ORCID alapján, `
+                       + `${r.nev_alapjan_javasolt} javaslat névegyezésre`
+                       + (r.orcid_nevkonfliktus ? `, ${r.orcid_nevkonfliktus} névkonfliktus` : '') + '.');
+              }}
+              disabled={busy} className={U_btnGhost + ' py-2 px-3 text-xs'}>
+              <Lucide.Link2 size={14} /> Párosítás a felderítéssel
+            </button>
+            <button onClick={() => {
+                if (!window.confirm('Letöltjük a metaadatokat minden összekötött kutatóról: '
+                    + 'művek, témaprofil, és a forrás saját összesítői. Kötegenként fut, '
+                    + 'közben látszik, hol tart.')) return;
+                metaadatok();
+              }}
+              disabled={busy} className={U_btnPrimary + ' py-2 px-3 text-xs'}>
+              <Lucide.DownloadCloud size={14} /> Metaadatok letöltése
+            </button>
+          </>
         )}
       </div>
 
       {ful === 'torzs' && (
         <>
-          <div className="bg-white border border-slate-100 rounded-2xl p-4 grid gap-3 sm:grid-cols-4">
-            <div className="relative sm:col-span-2">
+          <div className="bg-white border border-slate-100 rounded-2xl p-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="relative lg:col-span-2">
               <Lucide.Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-300" />
               <input className={U_input + ' pl-10'} value={q} onChange={e => setQ(e.target.value)}
                 placeholder="Keresés névre, ORCID-re, e-mailre…" />
@@ -542,52 +716,153 @@ function GRTR_KutatokView() {
               <option value="">Minden típus</option>
               {Object.entries(GRTR_TIPUS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select>
-            <select className={U_input} value={szures} onChange={e => setSzures(e.target.value)}>
+            <select className={U_input} value={kar} onChange={e => setKar(e.target.value)}>
+              <option value="">Minden kar</option>
+              {((rs.kar) || []).filter(x => x.ertek).map(x => (
+                <option key={x.ertek} value={x.ertek}>{x.ertek} ({x.db})</option>
+              ))}
+            </select>
+            <select className={U_input + ' lg:col-span-2'} value={szures}
+              onChange={e => setSzures(e.target.value)}>
               <option value="">Mind</option>
+              <option value="validalt">Csak validált (oktatói nyilvántartásból)</option>
               <option value="jelolt">Döntésre váró javaslat</option>
               <option value="hianyos">Nincs összekötött azonosító</option>
+              <option value="nincs_mu">Nincs betöltött mű</option>
+              <option value="nincs_metrika">Nincs forrás-metrika</option>
               <option value="kikapcsolt">Gépi építés kikapcsolva</option>
             </select>
+            <div className="lg:col-span-2 flex items-center gap-2 justify-end">
+              {busy && halad && (
+                <button type="button" onClick={() => { allj.current = true; }}
+                  className="text-[11px] font-black text-slate-400 hover:text-slate-600">
+                  megállítás a köteg után
+                </button>
+              )}
+              <button type="button" onClick={csvLetolt}
+                disabled={!lista || !(lista.sorok || []).length}
+                className={U_btnGhost + ' py-2 px-3 text-xs disabled:opacity-40'}>
+                <Lucide.Download size={14} /> CSV-export
+              </button>
+            </div>
           </div>
+
+          {halad && (
+            <div className="bg-sky-50 border border-sky-100 rounded-2xl px-4 py-3 flex gap-2.5 items-center">
+              {busy ? <Lucide.Loader2 size={15} className="text-sky-500 animate-spin flex-none" />
+                    : <Lucide.CheckCircle2 size={15} className="text-sky-500 flex-none" />}
+              <p className="text-[11px] font-bold text-sky-700">{halad}</p>
+            </div>
+          )}
 
           {lista === null ? (
             <div className="space-y-2">{[0, 1, 2, 3].map(i => <SkeletonBar key={i} h={70} />)}</div>
           ) : (lista.sorok || []).length === 0 ? (
-            <UEmpty icon={<Lucide.Users size={28} />} title="Nincs kutató a törzsben"
-              subtitle="Töltsd fel az oktatói nyilvántartásból, vagy vegyél fel valakit a Felderítés fülön." />
+            <UEmpty icon={<Lucide.Users size={28} />} title="Nincs kutató a listában"
+              subtitle="Töltsd fel az oktatói nyilvántartásból, vagy engedd fel a szűrőket." />
           ) : (
             <div className="space-y-2">
-              <p className="text-[11px] font-bold text-slate-400">{lista.mutatva} / {lista.ossz} kutató</p>
-              {lista.sorok.map(r => (
-                <button key={r.id} type="button" onClick={() => setNyitottId(r.id)}
-                  className="w-full text-left border border-slate-100 rounded-2xl px-4 py-3 bg-white
-                             hover:border-primary/40 transition-all">
-                  <div className="flex items-start justify-between gap-3 flex-wrap">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap mb-1">
-                        <UBadge tone="slate">{GRTR_TIPUS[r.tipus] || r.tipus}</UBadge>
-                        {r.orcid && <UBadge tone="green">ORCID</UBadge>}
-                        {r.openalex_id && <UBadge tone="blue">OpenAlex</UBadge>}
-                        {r.mtmt_id && <UBadge tone="violet">MTMT</UBadge>}
-                        {Number(r.jelolt_db) > 0 && <UBadge tone="amber">{r.jelolt_db} javaslat</UBadge>}
-                        {!r.gepi_epites && <UBadge tone="slate">kikapcsolva</UBadge>}
-                      </div>
-                      <p className="text-sm font-black text-slate-800">{r.nev}</p>
-                      <p className="text-[11px] text-slate-400 font-bold">
-                        {[r.kar, r.intezet, r.mu_db + ' mű', r.topic_db + ' téma'].filter(Boolean).join(' · ')}
-                      </p>
-                    </div>
-                    <div className="text-right flex-none">
-                      <p className="text-[11px] font-bold text-slate-400">
-                        {r.utolso_szinkron ? GRT_dt(r.utolso_szinkron) : 'nincs szinkron'}
-                      </p>
-                      {(r.hianyok || []).length > 0 && (
-                        <p className="text-[11px] font-black text-amber-600">{r.hianyok.length} hiányosság</p>
-                      )}
-                    </div>
-                  </div>
-                </button>
-              ))}
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <p className="text-[11px] font-bold text-slate-400">
+                  {lista.mutatva} / {lista.ossz} kutató
+                  {lista.ossz > lista.mutatva ? ' — szűkíts, ha a többit is látni akarod' : ''}
+                </p>
+                <p className="text-[11px] font-bold text-slate-300">
+                  Rendezés: {(GRTR_OSZLOP.find(o => o.k === rend) || {}).cim}
+                  {irany === 'desc' ? ' ↓' : ' ↑'}
+                </p>
+              </div>
+
+              {/* A táblázat a saját tartójában csúszik oldalra — az oldal nem. */}
+              <div className="bg-white border border-slate-100 rounded-2xl overflow-x-auto">
+                <table className="w-full text-left border-collapse min-w-[900px]">
+                  <thead>
+                    <tr className="border-b border-slate-100">
+                      {GRTR_OSZLOP.map(o => (
+                        <th key={o.k} title={o.cim2 || ''}
+                          className={'px-3 py-2.5 ' + (o.k === 'nev' ? 'text-left' : 'text-right')}>
+                          <button type="button" onClick={() => rendez(o)}
+                            className={'inline-flex items-center gap-1 text-[10px] font-black uppercase '
+                                       + 'tracking-wider transition-colors '
+                                       + (rend === o.k ? 'text-primary' : 'text-slate-400 hover:text-slate-600')}>
+                            {o.cim}
+                            {rend === o.k && (irany === 'asc' ? <Lucide.ChevronUp size={12} />
+                                                              : <Lucide.ChevronDown size={12} />)}
+                          </button>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {lista.sorok.map(r => (
+                      <tr key={r.id} onClick={() => setNyitottId(r.id)}
+                        className="border-b border-slate-50 last:border-0 hover:bg-slate-50/70 cursor-pointer">
+                        <td className="px-3 py-2.5">
+                          <p className="text-sm font-black text-slate-800">{r.nev}</p>
+                          <p className="text-[10px] text-slate-400 font-bold">
+                            {[r.kar, r.intezet].filter(Boolean).join(' · ') || '—'}
+                          </p>
+                          <div className="flex items-center gap-1 flex-wrap mt-1">
+                            {r.orcid && <UBadge tone="green">ORCID</UBadge>}
+                            {r.openalex_id && <UBadge tone="blue">OpenAlex</UBadge>}
+                            {r.mtmt_id && <UBadge tone="violet">MTMT</UBadge>}
+                            {Number(r.jelolt_db) > 0 && <UBadge tone="amber">{r.jelolt_db} javaslat</UBadge>}
+                            {!r.gepi_epites && <UBadge tone="slate">kikapcsolva</UBadge>}
+                            {(r.fo_temak || []).slice(0, 1).map(t => (
+                              <span key={t} className="text-[10px] font-bold text-slate-400 truncate max-w-[220px]">
+                                {t}
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2.5 text-right text-sm font-bold text-slate-500 tabular-nums">
+                          {r.kurzus_db || '—'}
+                        </td>
+                        <td className="px-3 py-2.5 text-right text-sm font-black text-slate-700 tabular-nums">
+                          {r.mu_db || '—'}
+                        </td>
+                        <td className="px-3 py-2.5 text-right text-sm font-bold text-slate-600 tabular-nums">
+                          {r.idezet || '—'}
+                        </td>
+                        <td className="px-3 py-2.5 text-right text-sm font-bold text-slate-600 tabular-nums">
+                          {r.h_index || '—'}
+                        </td>
+                        <td className="px-3 py-2.5 text-right text-sm font-bold text-slate-400 tabular-nums">
+                          {r.forras_mu_db ?? '—'}
+                        </td>
+                        <td className="px-3 py-2.5 text-right text-sm font-bold text-slate-400 tabular-nums">
+                          {r.forras_idezet ?? '—'}
+                        </td>
+                        <td className="px-3 py-2.5 text-right text-sm font-bold text-slate-400 tabular-nums">
+                          {r.forras_h_index ?? '—'}
+                        </td>
+                        <td className="px-3 py-2.5 text-right">
+                          <p className="text-[11px] font-bold text-slate-400">
+                            {r.utolso_szinkron ? GRT_dt(r.utolso_szinkron) : 'nincs'}
+                          </p>
+                          {(r.hianyok || []).length > 0 && (
+                            <p className="text-[10px] font-black text-amber-600">
+                              {r.hianyok.length} hiányosság
+                            </p>
+                          )}
+                          {r.szinkron_hiba && (
+                            <p className="text-[10px] font-black text-red-500">szinkronhiba</p>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="bg-slate-50 rounded-2xl px-4 py-3 flex gap-2.5">
+                <Lucide.Info size={15} className="text-slate-400 flex-none mt-0.5" />
+                <p className="text-[11px] text-slate-500 font-medium leading-relaxed">
+                  A <b>Mű / Idézet / h-index</b> oszlop a NÁLUNK tárolt művekből számol — a letöltés
+                  kutatónként felső korláttal fut. A <b>Forrás</b> oszlopok a forrás saját összesítői a
+                  teljes pályaműre. A kettő eltérése tehát nem hiba: a második a szélesebb kép.
+                </p>
+              </div>
             </div>
           )}
         </>
