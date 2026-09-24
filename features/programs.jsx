@@ -44,6 +44,18 @@ const PROG_fromRow = (r) => !r ? r : ({
   updated_at:      r.updated_at,
 });
 
+/* A LÉPÉSEK SORRENDJE — a kulcsok sorrendje ITT dönti el a sávot.
+   2026-09-24, a külügyi iroda észrevétele alapján átrendezve:
+     képzések és félév → személyes adatok → dokumentumok → [nyelv] →
+     motivációs levél → BEADÁS → matematika → interjú
+   MIÉRT: korábban a beadás volt az utolsó lépés, így MINDENKI kitöltötte a
+   szintfelmérőt és kapott interjúidőpontot — azok is, akiket a beadott
+   anyagból már korábban elutasítanánk. A beadás előrehozásával az iroda a
+   dokumentumokból dönthet, mielőtt a szintfelmérő és az interjú kapacitását
+   elkölti rá.
+   A `fee` KIKERÜLT a jelentkezési folyamatból: a jelentkezési díjat csak a
+   felvett hallgatónak kell rendeznie, ezért a döntés után jelenik meg
+   (PROG_folyamatAllapot, 'utan' fázis). */
 const PROG_STEP_DEFS = {
   // Csak a képzésre szóló jelentkezés első lépése — a szerkesztőben nem választható.
   choice:     { label: 'Képzések és félév',   icon: Lucide.ListChecks },
@@ -51,11 +63,23 @@ const PROG_STEP_DEFS = {
   documents:  { label: 'Dokumentumok',           icon: Lucide.Upload },
   language:   { label: 'Angol nyelvtudás',  icon: Lucide.Languages },
   motivation: { label: 'Motivációs levél',    icon: Lucide.PenLine },
+  review:     { label: 'Beadás',       icon: Lucide.Send },
   math:       { label: 'Matematika szintfelmérő',  icon: Lucide.Calculator },
   interview:  { label: 'Online interjú',     icon: Lucide.Video },
+  // A folyamatban már nem szerepel; a felvétel UTÁN külön lépésként jelenik meg.
   fee:        { label: 'Jelentkezési díj',       icon: Lucide.CreditCard },
-  review:     { label: 'Beadás és ellenőrzés',       icon: Lucide.Send },
 };
+// Ami a jelentkezési folyamatban szerepelhet (a díj nem).
+const PROG_FOLYAMAT_LEPESEK = Object.keys(PROG_STEP_DEFS).filter(k => k !== 'fee');
+// Ezek a lépések a BEADÁS UTÁN következnek — a beadás nem függ tőlük.
+const PROG_BEADAS_UTAN = ['math', 'interview'];
+const PROG_beadasElott = (k) => !PROG_BEADAS_UTAN.includes(k) && k !== 'review';
+/* Egy lépéssor rendezése és tisztítása: a defs sorrendjében, a díj nélkül, és
+   a beadás MINDIG szerepel benne (a defs szerinti helyén). */
+function PROG_lepesSor(steps) {
+  const van = new Set([...(steps || []).filter(x => x !== 'fee'), 'review']);
+  return PROG_FOLYAMAT_LEPESEK.filter(k => van.has(k));
+}
 const PROG_DOC_DEFS = {
   passport:       'Útlevél (adatoldal)',
   hs_diploma:     'Érettségi bizonyítvány + leckekönyv',
@@ -125,8 +149,13 @@ const PROG_LEVEL_TONE = { preparatory: 'amber', course: 'green', training: 'viol
      program          — kisebb, eseti programok (céglátogatás, továbbképzés,
                         eseti kurzus…): mindkét oldalon a „Programok” menüpont.
    A `level` szabad szöveg az adatbázisban, új típushoz nem kell migráció. */
-const PROG_DEGREE_LEVELS = ['bachelor', 'master', 'doctoral'];
-const PROG_PROGRAM_LEVELS = ['course', 'training', 'company_visit', 'preparatory', 'excursion'];
+/* Az ELŐKÉSZÍTŐ (Preparatory Course) 2026-09-24 óta a Képzések közt van, a
+   külügyi iroda kérésére: nem ad diplomát, de féléves, és a jelentkező akkor
+   tud választani, ha az adott félév minden induló képzését EGY helyen látja.
+   Így a kártyája is a félév szerint szűrődik, és a jelentkezésbe a többi
+   képzés mellé felvehető. */
+const PROG_DEGREE_LEVELS = ['preparatory', 'bachelor', 'master', 'doctoral'];
+const PROG_PROGRAM_LEVELS = ['course', 'training', 'company_visit', 'excursion'];
 /* A kártyán megjelenő címke alapértéke típusonként — a szerkesztő ezt írja be,
    amíg az admin át nem írja a sajátjára. */
 const PROG_DEFAULT_DEGREE = { preparatory: 'Certificate', course: 'Short course', training: 'Training', company_visit: 'Company visit', excursion: 'Excursion', bachelor: 'BSc', master: 'MA', doctoral: 'PhD' };
@@ -167,7 +196,39 @@ function PROG_termLabel(code, rovid) {
   if (rovid) return alap;
   return `${alap} (kezdés: ${osz ? m[1] + '. szeptember' : (Number(m[1]) + 1) + '. február'})`;
 }
+/* CÉLKÖZÖNSÉG (85-ös migráció, külügyi iroda 2026-09-24).
+   A mai kínálat végig a külföldieknek meghirdetett, angol nyelvű képzés, ezért
+   az alapérték 'mind' — a megkülönböztetés akkor él, ha az iroda átállítja.
+   A döntés alapja a jelentkező ÁLLAMPOLGÁRSÁGA. Az oszlop hiányozhat (amíg a
+   85 nem futott le): olyankor mindenki mindent lát, mint eddig. */
+const PROG_AUDIENCE = { mind: 'Mindenkinek', kulfoldi: 'Csak külföldi jelentkezőknek', magyar: 'Csak magyar jelentkezőknek' };
+let PROG_AUDIENCE_COL = false;
+const PROG_audienceOf = (p) => (p && PROG_AUDIENCE[p.audience]) ? p.audience : 'mind';
+const PROG_MAGYAR = ['hungary', 'magyarország', 'magyarorszag', 'hu', 'hun'];
+const PROG_magyarAllampolgar = (orszag) => PROG_MAGYAR.includes(String(orszag || '').trim().toLowerCase());
+/* Jelentkezhet-e erre a képzésre? Ha nem tudjuk az állampolgárságot, nem
+   zárunk ki senkit — a hiányzó adat nem tiltás, csak hiányzó adat. */
+function PROG_celzasOk(program, orszag) {
+  const a = PROG_audienceOf(program);
+  if (a === 'mind') return true;
+  if (!orszag) return true;
+  return a === 'magyar' ? PROG_magyarAllampolgar(orszag) : !PROG_magyarAllampolgar(orszag);
+}
+
 const PROG_MAX_DEGREES = 3;
+/* RÖVID PROGRAMOK CSAK FELVETT HALLGATÓKNAK (külügyi iroda, 2026-09-24).
+   A céglátogatás, a tanulmányi kirándulás és a továbbképzés a már felvett
+   hallgatóknak szól — aki még a felvételi eljárásban van, azt böngészni
+   engedjük, jelentkezni nem. Felvettnek azt tekintjük, akinek VAN felvételi
+   döntése „admitted" kimenettel, vagy akinek a jelentkezése elfogadott /
+   lezárult állapotban van. */
+function PROG_felvettHallgato(apps) {
+  return (apps || []).some(a => {
+    const d = (a && a.data && a.data.decision) || null;
+    if (d && d.outcome === 'admitted') return true;
+    return a && (a.status === 'accepted' || a.done === true);
+  });
+}
 // Egy jelentkezés képzései preferencia-sorrendben (azonosítók).
 const PROG_appIds = (a) => (a && Array.isArray(a.program_ids) && a.program_ids.length) ? a.program_ids
   : (a && a.data && Array.isArray(a.data.program_ids) && a.data.program_ids.length) ? a.data.program_ids
@@ -175,14 +236,13 @@ const PROG_appIds = (a) => (a && Array.isArray(a.program_ids) && a.program_ids.l
 /* Több képzés EGY folyamatban: a lépések és a kötelező dokumentumok uniója; a
    lépések a PROG_STEP_DEFS sorrendjében, a beadás mindig a végén. */
 function PROG_mergeFlow(progs) {
-  const rend = Object.keys(PROG_STEP_DEFS);
   const lepesek = new Set(), dok = [];
   (progs || []).forEach(p => {
     (p.steps || []).forEach(x => lepesek.add(x));
     (p.required_docs || []).forEach(x => { if (!dok.includes(x)) dok.push(x); });
   });
-  const steps = rend.filter(x => lepesek.has(x) && x !== 'review' && x !== 'choice').concat(['review']);
-  return { steps, required_docs: dok };
+  lepesek.delete('choice');
+  return { steps: PROG_lepesSor([...lepesek]), required_docs: dok };
 }
 
 /* ============================================================
@@ -208,7 +268,8 @@ function PROG_folyamVaz(program, valasztott) {
   const isDeg = PROG_kind(program) === 'degree';
   const folyam = isDeg
     ? PROG_mergeFlow(valasztott && valasztott.length ? valasztott : [program])
-    : { steps: program.steps || ['personal', 'review'], required_docs: program.required_docs || [] };
+    // A rövid programoknál is a defs sorrendje és a díj nélküli sor érvényes.
+    : { steps: PROG_lepesSor(program.steps || ['personal', 'review']), required_docs: program.required_docs || [] };
   return { isDeg, steps: isDeg ? ['choice', ...folyam.steps] : folyam.steps, required_docs: folyam.required_docs };
 }
 
@@ -270,7 +331,7 @@ function PROG_folyamatAllapot(proc, katalogus) {
     valasztott = ids.map(keres).filter(Boolean);
     const alap = valasztott[0] || { id: ids[0], kind: Array.isArray(data.program_ids) ? 'degree' : 'program', steps: ['personal', 'documents', 'review'], required_docs: [] };
     const vaz = PROG_folyamVaz(alap, valasztott);
-    const virt = { ...alap, steps: vaz.steps, required_docs: vaz.required_docs, _valasztott: valasztott, _katalogus: Array.isArray(katalogus) ? katalogus : Object.values(katalogus || {}) };
+    const virt = { ...alap, steps: vaz.steps, required_docs: vaz.required_docs, _beadva: beadva, _valasztott: valasztott, _katalogus: Array.isArray(katalogus) ? katalogus : Object.values(katalogus || {}) };
     vaz.steps.forEach(key => lepesek.push({ key, fazis: 'hallgato', label: (PROG_STEP_DEFS[key] || {}).label || key, kesz: PROG_lepesKesz(key, virt, data, beadva) }));
     dok = PROG_dokKovetelmeny(data, valasztott, vaz.required_docs);
     lepesek.push({ key: 'check', fazis: 'iroda', label: 'Dokumentum-ellenőrzés', kesz: beadva && dok.hitelesitve === dok.osszes, megj: dok.osszes ? `${dok.hitelesitve}/${dok.osszes} dokumentum jóváhagyva` : '' });
@@ -280,6 +341,14 @@ function PROG_folyamatAllapot(proc, katalogus) {
     }
     lepesek.push({ key: 'decision', fazis: 'iroda', label: 'Felvételi döntés', kesz: !!dontes, elutasitva: !!dontes && dontes.outcome !== 'admitted', megj: dontes ? PROG_DONTES_CIMKE[dontes.outcome] : '' });
     lepesek.push({ key: 'letter', fazis: 'iroda', label: 'Felvételi levél', kesz: levelKiment, kihagyva: !!dontes && dontes.outcome !== 'admitted' });
+    /* JELENTKEZÉSI DÍJ CSAK FELVÉTEL UTÁN (külügyi iroda, 2026-09-24).
+       A jelentkezés közben nem jelenik meg: a díjat a felvett hallgató
+       rendezi, a feltételes felvételi levélben megadott határidőig. */
+    if (dontes && dontes.outcome === 'admitted') {
+      const fee = data.fee || {};
+      lepesek.push({ key: 'fee', fazis: 'utan', label: 'Jelentkezési díj', kesz: !!(fee.paid || fee.declared),
+                     megj: fee.paid ? 'Befizetés jóváhagyva' : fee.declared ? 'Átutalás bejelentve' : '' });
+    }
   } else {
     tipus = 'irodai';
     const SD = (typeof JourneyShared !== 'undefined' && JourneyShared.STEP_DEFS) || [];
@@ -446,6 +515,8 @@ async function PROG_loadPrograms() {
   }
   // A 60-as migráció után a sorok hordozzák az intakes mezőt; localStorage-ban bármi tárolható.
   PROG_INTAKE_COL = DL_PROBE[PROG_TABLE] === 'ls' || list.some(x => x && Object.prototype.hasOwnProperty.call(x, 'intakes'));
+  // Ugyanígy a 85-ös célközönség-oszlop: amíg nincs, mindenki mindent lát.
+  PROG_AUDIENCE_COL = DL_PROBE[PROG_TABLE] === 'ls' || list.some(x => x && Object.prototype.hasOwnProperty.call(x, 'audience'));
   PROG_KAT_CACHE = merged;
   return merged;
 }
@@ -554,8 +625,8 @@ function ProgramApply({ program, programs, app, user, onExit, onSaved, notice, b
   const vaz = PROG_folyamVaz(program, valasztott);
   const steps = vaz.steps;
   const nevek = valasztott.map(x => x.name);
-  const virt = { ...program, steps, required_docs: vaz.required_docs, name: nevek.length > 1 ? nevek.join(', ') : program.name, _valasztott: valasztott, _katalogus: katalogus };
   const beadva = !!cur.status && cur.status !== 'draft';
+  const virt = { ...program, steps, required_docs: vaz.required_docs, name: nevek.length > 1 ? nevek.join(', ') : program.name, _beadva: beadva, _valasztott: valasztott, _katalogus: katalogus };
   /* VALÓS ÁLLAPOT A LÉPÉSSÁVON. A pipa korábban a megtekintett lépés indexéből
      jött (i < lepes): aki az utolsó lépésre kattintott, annak minden korábbi
      lépése „kész” lett, visszakattintva pedig eltűntek a pipák. Most minden
@@ -563,10 +634,14 @@ function ProgramApply({ program, programs, app, user, onExit, onSaved, notice, b
      számítás, amit a gyűjtőnézet és az admin „Folyamat állapota” használ.
      A hallgatói lépések után az irodai szakasz is látszik (ellenőrzés,
      döntés, levél), hogy a beadás után is kiderüljön, hol tart az eljárás. */
-  const irodai = PROG_folyamatAllapot({ ...cur, data }, katalogus).lepesek.filter(l => l.fazis === 'iroda');
+  const teljesAllapot = PROG_folyamatAllapot({ ...cur, data }, katalogus);
+  const irodai = teljesAllapot.lepesek.filter(l => l.fazis === 'iroda');
+  // A felvétel utáni lépés (jelentkezési díj) a hallgatóé: ő rendezi.
+  const utan = teljesAllapot.lepesek.filter(l => l.fazis === 'utan');
   const rail = [
     ...steps.map(key => ({ key, fazis: 'hallgato', label: (PROG_STEP_DEFS[key] || {}).label || key, icon: (PROG_STEP_DEFS[key] || {}).icon || Lucide.Circle, kesz: PROG_lepesKesz(key, virt, data, beadva) })),
     ...irodai.map(l => ({ ...l, icon: PROG_IRODA_IKON[l.key] || Lucide.Circle })),
+    ...utan.map(l => ({ ...l, icon: (PROG_STEP_DEFS[l.key] || {}).icon || Lucide.Circle })),
   ];
   const railKesz = rail.filter(l => l.kesz).length;
   const railOsszes = rail.filter(l => !l.kihagyva).length;
@@ -584,7 +659,9 @@ function ProgramApply({ program, programs, app, user, onExit, onSaved, notice, b
     return Math.min((app.step_index || 0) + (regiPiszkozat ? 1 : 0), nyitott, steps.length - 1);
   });
   const lepes = Math.max(0, Math.min(idx, rail.length - 1));
-  const hallgatoiNezet = lepes < steps.length;
+  /* Szerkeszthető-e ez a lépés? A díjlépés az irodai szakasz UTÁN áll a
+     sávban, de a hallgatóé — ezért a fázis dönt, nem az index. */
+  const hallgatoiNezet = !!(rail[lepes] && rail[lepes].fazis !== 'iroda');
   const [saving, setSaving] = useState(false);
   // Üzenetváltás a felvételi irodával (features/messages.jsx, 62) — a jelentkezés nézetéből is.
   const [uzenetNyitva, setUzenetNyitva] = useState(false);
@@ -600,9 +677,29 @@ function ProgramApply({ program, programs, app, user, onExit, onSaved, notice, b
     if (saved) { const m = PROG_fromRow(saved); setCur(m); onSaved && onSaved(m); }
     return saved;
   };
-  const goNext = async () => { const n = Math.min(lepes + 1, steps.length - 1); setIdx(n); await persist({ student_step: n }); };
+  const goNext = async () => { const n = Math.min(lepes + 1, rail.length - 1); setIdx(n); await persist({ student_step: Math.min(n, steps.length - 1) }); };
   const goPrev = () => setIdx(Math.max(0, lepes - 1));
-  const stepKey = hallgatoiNezet ? steps[lepes] : null;
+  const stepKey = hallgatoiNezet ? (rail[lepes] || {}).key : null;
+  /* NE ENGEDJEN TOVÁBB HIÁNYOS ADATTAL (külügyi iroda, 2026-09-24).
+     Eddig a „Folytatás" gomb tiltva volt ugyan, de a sávon bármelyik későbbi
+     lépésre rá lehetett kattintani, és ott ki lehetett tölteni mindent.
+     Mostantól a sávon is csak addig lehet előre lépni, ameddig a mentett adat
+     tart: a kész lépések, az első hiányos lépés, és — megtekintésre — az
+     irodai szakasz. Visszafelé mindig szabad. */
+  const elsoHianyos = (() => {
+    for (let i = 0; i < rail.length; i++) {
+      const l = rail[i];
+      if (l.fazis !== 'hallgato' || l.kihagyva) continue;
+      if (!l.kesz) return i;
+    }
+    return rail.length - 1;
+  })();
+  const lepesNyithato = (i) => {
+    const l = rail[i];
+    if (!l) return false;
+    if (l.fazis === 'iroda' || l.fazis === 'utan') return true;   // megtekintés / felvétel utáni
+    return i <= Math.max(elsoHianyos, lepes);
+  };
   const statusz = PROG_STATUS[cur.status] || null;
 
   return (
@@ -649,12 +746,17 @@ function ProgramApply({ program, programs, app, user, onExit, onSaved, notice, b
         {/* step rail */}
         <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-3 h-fit">
           <div className="px-3 pt-1 pb-2 text-[11px] font-bold text-slate-400" data-lepes-osszesito="1">{`${railKesz}/${railOsszes} lépés kész`}</div>
-          {rail.map((s, i) => { const I = s.icon; const active = i === lepes; const elsoIrodai = s.fazis === 'iroda' && (i === 0 || rail[i - 1].fazis !== 'iroda'); return (
+          {rail.map((s, i) => { const I = s.icon; const active = i === lepes;
+            const ujFazis = i === 0 || rail[i - 1].fazis !== s.fazis;
+            const fejlec = ujFazis && s.fazis === 'iroda' ? 'Felvételi iroda' : ujFazis && s.fazis === 'utan' ? 'Felvétel után' : '';
+            const nyithato = lepesNyithato(i); return (
             <React.Fragment key={s.fazis + ':' + s.key}>
-              {elsoIrodai && <div className="px-3 pt-4 pb-1 mt-2 border-t border-slate-100 text-[10px] font-black uppercase tracking-widest text-slate-400">Felvételi iroda</div>}
-              <button onClick={() => setIdx(i)} data-lepes={s.key} data-kesz={s.kesz ? '1' : '0'} aria-current={active ? 'step' : undefined}
-                className={'w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-left transition-colors ' + (active ? 'bg-primary/10 text-primary' : s.elutasitva ? 'text-red-600 hover:bg-slate-50' : s.kesz ? 'text-emerald-600 hover:bg-slate-50' : s.kihagyva ? 'text-slate-300 hover:bg-slate-50' : 'text-slate-500 hover:bg-slate-50')}>
-                <span className={'w-7 h-7 rounded-lg flex items-center justify-center flex-none ' + (s.elutasitva ? 'bg-red-500 text-white' : s.kesz ? 'bg-emerald-500 text-white' : active ? 'bg-primary text-white' : 'bg-slate-100 text-slate-400')}>{s.elutasitva ? <Lucide.X size={15} /> : s.kesz ? <Lucide.Check size={15} /> : <I size={15} />}</span>
+              {fejlec && <div className="px-3 pt-4 pb-1 mt-2 border-t border-slate-100 text-[10px] font-black uppercase tracking-widest text-slate-400">{fejlec}</div>}
+              <button onClick={() => { if (nyithato) setIdx(i); }} disabled={!nyithato}
+                title={nyithato ? undefined : 'Előbb töltsd ki az előtte lévő lépéseket.'}
+                data-lepes={s.key} data-kesz={s.kesz ? '1' : '0'} data-zarolt={nyithato ? '0' : '1'} aria-current={active ? 'step' : undefined}
+                className={'w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-left transition-colors ' + (!nyithato ? 'text-slate-300 cursor-not-allowed' : active ? 'bg-primary/10 text-primary' : s.elutasitva ? 'text-red-600 hover:bg-slate-50' : s.kesz ? 'text-emerald-600 hover:bg-slate-50' : s.kihagyva ? 'text-slate-300 hover:bg-slate-50' : 'text-slate-500 hover:bg-slate-50')}>
+                <span className={'w-7 h-7 rounded-lg flex items-center justify-center flex-none ' + (s.elutasitva ? 'bg-red-500 text-white' : s.kesz ? 'bg-emerald-500 text-white' : active ? 'bg-primary text-white' : 'bg-slate-100 text-slate-400')}>{s.elutasitva ? <Lucide.X size={15} /> : s.kesz ? <Lucide.Check size={15} /> : !nyithato ? <Lucide.Lock size={13} /> : <I size={15} />}</span>
                 <span className="text-[13px] font-bold">{s.label}</span>
               </button>
             </React.Fragment>
@@ -678,7 +780,8 @@ function ProgramApply({ program, programs, app, user, onExit, onSaved, notice, b
             <button onClick={goPrev} disabled={lepes === 0} className={U_btnGhost + (lepes === 0 ? ' opacity-0 pointer-events-none' : '')}><Lucide.ArrowLeft size={15} /> Vissza</button>
             <div className="flex items-center gap-3">
               <button onClick={async () => { await persist(); onExit && onExit(); }} disabled={saving} className="text-sm font-bold text-slate-400 hover:text-slate-700 transition-colors disabled:opacity-50">{saving ? 'Mentés…' : 'Mentés és kilépés'}</button>
-              {hallgatoiNezet && lepes < steps.length - 1 && <button onClick={goNext} className={U_btnPrimary} disabled={!PROG_canAdvance(stepKey, virt, data)}>Folytatás <Lucide.ArrowRight size={15} /></button>}
+              {hallgatoiNezet && rail[lepes + 1] && rail[lepes + 1].fazis === 'hallgato'
+                && <button onClick={goNext} className={U_btnPrimary} disabled={!PROG_canAdvance(stepKey, virt, data)}>Folytatás <Lucide.ArrowRight size={15} /></button>}
             </div>
           </div>
         </div>
@@ -695,17 +798,40 @@ function PROG_canAdvance(stepKey, program, data) {
     return !!evszak && ids.length >= 1 && ids.length <= PROG_MAX_DEGREES
       && ids.every(id => { const p = kat.find(x => x.id === id); return !p || PROG_intakesOf(p).includes(evszak); });
   }
-  if (stepKey === 'documents') return (program.required_docs || []).every(d => data.docs && data.docs[d]);
-  if (stepKey === 'math') return data.math && data.math.passed;
+  /* VALÓDI FELTÖLTÉS: korábban elég volt, hogy a kulcs létezzen a docs-ban —
+     egy félbehagyott feltöltés üres bejegyzése is továbbengedett. Most
+     ugyanaz a mérce, mint a lépéssávon és az irodai nézetben. */
+  if (stepKey === 'documents') return (program.required_docs || []).every(d => PROG_dokFeltoltve((data.docs || {})[d]));
+  /* A szintfelmérő a beadás UTÁN van: ha valaki a megengedett próbálkozásokat
+     elhasználta, ne ragadjon be — a felvételi iroda dönt az eredményről. */
+  if (stepKey === 'math') return !!(data.math && (data.math.passed || PROG_mathKimeritve(data)));
   if (stepKey === 'motivation') return (data.motivation || '').trim().length >= 40;
+  // A beadás tényét a hívó adja át a virtuális programon (_beadva).
+  if (stepKey === 'review') return !!(program && program._beadva);
   // Új (61-es) formában a `booked` dönt; a régi, beégetett foglalásnak csak `slot`-ja van.
   if (stepKey === 'interview') return !!(data.interview && (data.interview.booked || (!data.interview.status && data.interview.slot)));
   // A díj akkor enged tovább, ha a pénzügy jóváhagyta (paid), VAGY a jelentkező bejelentette az
   // átutalást (declared). A bejelentés nem befizetés — a pénzügy a bankkivonaton ellenőrzi.
   if (stepKey === 'fee') return program.tuition === 0 || (data.fee && (data.fee.paid || data.fee.declared));
-  if (stepKey === 'personal') return data.personal && data.personal.name && data.personal.country;
+  /* ÚTLEVÉLSZÁM KÖTELEZŐ (külügyi iroda, 2026-09-24): a vízumügyintézés és a
+     jelentkezők megkülönböztetése is ezen múlik — név és születési dátum
+     egyezhet, útlevélszám nem. */
+  if (stepKey === 'personal') { const pr = data.personal || {}; return !!(pr.name && pr.country && PROG_utlevelOk(pr.passport)); }
   return true;
 }
+
+/* Az útlevélszám formátuma országonként más, ezért csak azt kérjük meg, hogy
+   legyen értelmes hosszúságú és ne tartalmazzon szóközt — a pontos ellenőrzés
+   az útlevél adatoldalának feltöltésekor, emberi szemmel történik. */
+const PROG_utlevelOk = (v) => /^[A-Za-z0-9]{5,20}$/.test(String(v || '').trim());
+
+/* MATEMATIKA SZINTFELMÉRŐ — hány beküldés engedélyezett.
+   A külügyi iroda kérése (2026-09-24): legfeljebb 3 beküldés után ne
+   generáljon új feladatsort. A számláló a jelentkezés adatában él, tehát
+   böngészőváltás vagy újratöltés sem nullázza. */
+const PROG_MATH_MAX_BEKULDES = 3;
+const PROG_mathBekuldesek = (data) => Number((data && data.math && data.math.bekuldesek) || 0);
+const PROG_mathKimeritve = (data) => PROG_mathBekuldesek(data) >= PROG_MATH_MAX_BEKULDES;
 
 /* ---------- per-step bodies ---------- */
 function PROG_StepBody({ stepKey, program, data, setData, user, cur, onSubmit }) {
@@ -781,8 +907,10 @@ function PROG_StepBody({ stepKey, program, data, setData, user, cur, onSubmit })
     );
   }
   if (stepKey === 'personal') {
-    const p = data.personal || { name: (user && user.name) || '', email: (user && user.email) || '', phone: '', country: '', dob: '' };
+    const p = data.personal || { name: (user && user.name) || '', email: (user && user.email) || '', phone: '', country: '', dob: '', passport: '' };
     const set = (k, v) => setData({ personal: { ...p, [k]: v } });
+    const utlevel = String(p.passport || '');
+    const utlevelHiba = utlevel.trim() !== '' && !PROG_utlevelOk(utlevel);
     return (
       <div className="space-y-5">
         <PROG_Head icon={Lucide.User} title="Személyes adatok" sub="Erősítsd meg a kapcsolattartási adataidat ehhez a jelentkezéshez." />
@@ -792,6 +920,17 @@ function PROG_StepBody({ stepKey, program, data, setData, user, cur, onSubmit })
           <UField label="Telefon"><input className={U_input} value={p.phone} onChange={e => set('phone', e.target.value)} placeholder="+…" /></UField>
           <UField label="Állampolgárság szerinti ország"><CTRY_Select value={p.country} onChange={v => set('country', v)} inputClassName={U_input} /></UField>
           <UField label="Születési dátum"><input type="date" className={U_input} value={p.dob} onChange={e => set('dob', e.target.value)} /></UField>
+          {/* KÖTELEZŐ: a vízumügyintézés ezen múlik, és két jelentkezőt is ez
+              különböztet meg egymástól — a név és a születési dátum egyezhet. */}
+          <UField label="Útlevélszám">
+            <input className={U_input + (utlevelHiba ? ' !border-red-300 !ring-red-100' : '')} value={utlevel}
+              onChange={e => set('passport', e.target.value.toUpperCase().replace(/\s+/g, ''))}
+              placeholder="pl. AB1234567" data-utlevel="1" aria-invalid={utlevelHiba ? 'true' : undefined} />
+            <p className={'mt-1 text-[11px] font-bold ' + (utlevelHiba ? 'text-red-600' : 'text-slate-400')}>
+              {utlevelHiba ? 'Az útlevélszám 5–20 betű vagy szám, szóköz nélkül.'
+                           : 'Kötelező — pontosan úgy, ahogy az útleveled adatoldalán szerepel.'}
+            </p>
+          </UField>
         </div>
       </div>
     );
@@ -965,7 +1104,12 @@ function PROG_StepBody({ stepKey, program, data, setData, user, cur, onSubmit })
     );
   }
   if (stepKey === 'review') {
-    const ok = program.steps.filter(s => s !== 'review').every(s => PROG_canAdvance(s, program, data));
+    /* A BEADÁS CSAK AZ ELŐTTE LÉVŐ LÉPÉSEKTŐL FÜGG. A szintfelmérő és az
+       interjú a beadás UTÁN következik — ha azokat is megkövetelnénk, épp az
+       a sorrend állna vissza, amit a külügyi iroda kifogásolt. */
+    const elotte = (program.steps || []).filter(s => PROG_beadasElott(s));
+    const utana = (program.steps || []).filter(s => PROG_BEADAS_UTAN.includes(s));
+    const ok = elotte.every(s => PROG_canAdvance(s, program, data));
     const submitted = cur.status && cur.status !== 'draft';
     return (
       <div className="space-y-5">
@@ -975,6 +1119,19 @@ function PROG_StepBody({ stepKey, program, data, setData, user, cur, onSubmit })
             <div className="w-14 h-14 rounded-2xl bg-emerald-500 text-white flex items-center justify-center mx-auto mb-3"><Lucide.CheckCircle2 size={28} /></div>
             <div className="font-black text-emerald-800 text-lg">Köszönjük, {(data.personal && data.personal.name || '').split(' ')[0] || 'jelentkező'}!</div>
             <p className="text-sm text-slate-500 mt-1 max-w-sm mx-auto">Megkaptuk a jelentkezésedet a(z) <b>{program.name}</b> képzésre. A következő lépésekről e-mailben és a Hírfolyamban értesítünk.</p>
+            {utana.length > 0 && (
+              <div className="mt-4 pt-4 border-t border-emerald-100 text-left">
+                <div className="text-[10px] font-black text-emerald-700 uppercase tracking-widest mb-2">Ezek még hátravannak</div>
+                <ul className="space-y-1">
+                  {utana.map(s2 => { const def = PROG_STEP_DEFS[s2]; const kesz = PROG_canAdvance(s2, program, data); return (
+                    <li key={s2} className="flex items-center gap-2 text-sm font-bold text-slate-600">
+                      <span className={'w-5 h-5 rounded-md flex items-center justify-center flex-none ' + (kesz ? 'bg-emerald-500 text-white' : 'bg-white border border-emerald-200 text-emerald-600')}>{kesz ? <Lucide.Check size={12} /> : <Lucide.Clock size={12} />}</span>
+                      {def ? def.label : s2}
+                    </li>
+                  ); })}
+                </ul>
+              </div>
+            )}
           </div>
         ) : (
           <>
@@ -988,10 +1145,16 @@ function PROG_StepBody({ stepKey, program, data, setData, user, cur, onSubmit })
               </div>
             )}
             <div className="space-y-2">
-              {program.steps.filter(s => s !== 'review').map(s => { const def = PROG_STEP_DEFS[s]; const done = PROG_canAdvance(s, program, data); return (
+              {elotte.map(s => { const def = PROG_STEP_DEFS[s]; const done = PROG_canAdvance(s, program, data); return (
                 <div key={s} className="flex items-center gap-3 p-3 rounded-xl bg-slate-50"><span className={'w-6 h-6 rounded-lg flex items-center justify-center flex-none ' + (done ? 'bg-emerald-500 text-white' : 'bg-amber-400 text-white')}>{done ? <Lucide.Check size={13} /> : <Lucide.Minus size={13} />}</span><span className="text-sm font-bold text-slate-600">{def ? def.label : s}</span><span className="ml-auto text-[11px] font-black uppercase tracking-wider text-slate-400">{done ? 'Kész' : 'Hiányos'}</span></div>
               ); })}
             </div>
+            {utana.length > 0 && (
+              <p className="text-[12px] font-semibold text-slate-500 leading-relaxed" data-beadas-utan="1">
+                {'A beadás után következik: ' + utana.map(s2 => (PROG_STEP_DEFS[s2] || {}).label || s2).join(', ')
+                  + '. Ezeket a beadott jelentkezésednél tudod elvégezni.'}
+              </p>
+            )}
             <button className={U_btnPrimary + ' w-full py-4'} disabled={!ok} onClick={onSubmit}>{ok ? 'Jelentkezés beadása' : 'A beadáshoz minden lépést teljesíts'}</button>
           </>
         )}
@@ -1206,13 +1369,37 @@ function PROG_MathStep({ data, setData }) {
   const [tasks, setTasks] = useState(null);
   const [ans, setAns] = useState({});
   const [result, setResult] = useState(data.math || null);
+  /* BEKÜLDÉSI KORLÁT (külügyi iroda, 2026-09-24): legfeljebb 3 beküldés, és
+     utána nem generálunk új feladatsort. A számláló a jelentkezés mentett
+     adatában van, nem a komponens állapotában — így az újratöltés, a
+     böngészőváltás és a „Mentés és kilépés" sem nullázza. */
+  const bekuldesek = PROG_mathBekuldesek(data);
+  const kimerult = PROG_mathKimeritve(data);
+  const maradt = Math.max(PROG_MATH_MAX_BEKULDES - bekuldesek, 0);
   useEffect(() => { if (!tasks) setTasks(PROG_genMath()); }, []);
-  const grade = () => { const r = PROG_gradeMath(tasks, ans); setResult(r); setData({ math: r }); };
-  const reset = () => { setTasks(PROG_genMath()); setAns({}); setResult(null); setData({ math: null }); };
+  const grade = () => {
+    if (kimerult) return;
+    const r = PROG_gradeMath(tasks, ans);
+    const uj = { ...r, bekuldesek: bekuldesek + 1, utolso: todayStr() };
+    setResult(uj); setData({ math: uj });
+  };
+  /* Új feladatsor CSAK akkor, ha maradt beküldés. A korábbi eredményt nem
+     dobjuk el (a számláló benne van), csak a megjelenítést nullázzuk. */
+  const reset = () => {
+    if (kimerult) return;
+    setTasks(PROG_genMath()); setAns({}); setResult(null);
+    setData({ math: { bekuldesek, passed: false, ujrakezdve: todayStr() } });
+  };
   if (!tasks) return null;
   return (
     <div className="space-y-5">
       <PROG_Head icon={Lucide.Calculator} title="Matematika szintfelmérő" sub="Három rövid feladat. A megfeleléshez legalább 2 helyes válasz kell." />
+      <div className={'flex items-center gap-2 px-4 py-2.5 rounded-2xl text-[12px] font-bold ' + (kimerult ? 'bg-red-50 text-red-600' : 'bg-slate-50 text-slate-500')} data-matek-kiserlet={String(bekuldesek)}>
+        <Lucide.Info size={14} className="flex-none" />
+        {kimerult
+          ? `Elhasználtad mind a ${PROG_MATH_MAX_BEKULDES} beküldési lehetőséget — új feladatsor már nem generálható. Az eredményt a felvételi iroda értékeli.`
+          : `${bekuldesek}/${PROG_MATH_MAX_BEKULDES} beküldés felhasználva — még ${maradt} próbálkozásod van.`}
+      </div>
       <div className="space-y-4">
         {tasks.map((t, i) => (
           <div key={t.id} className="p-4 rounded-2xl border border-slate-100">
@@ -1220,17 +1407,17 @@ function PROG_MathStep({ data, setData }) {
             {/* TESZT-SEGÍTSÉG: a megoldás a kérdés végén, amíg a felületet teszteljük (ugyanígy az app.jsx matek-lépésében). Élesítés előtt törlendő. */}
             <p className="text-sm font-bold text-slate-700 mb-3">{t.prompt}<span data-teszt-megoldas className="ml-2 inline-flex items-center gap-1 align-middle text-xs font-bold text-amber-600"><Lucide.FlaskConical size={12} /> TESZT — helyes válasz: {t.fields.map(f => f.label + ' ' + t.answers[f.key]).join(', ')}</span></p>
             <div className="flex flex-wrap gap-3">
-              {t.fields.map(f => <label key={f.key} className="flex items-center gap-2 text-sm font-bold text-slate-500">{f.label}<input disabled={!!result} className="w-24 bg-slate-50 border border-slate-100 rounded-lg px-3 py-1.5 text-slate-800 focus:outline-none focus:ring-2 focus:ring-primary/20" value={ans[t.id + '_' + f.key] || ''} onChange={e => setAns(a => ({ ...a, [t.id + '_' + f.key]: e.target.value }))} /></label>)}
+              {t.fields.map(f => <label key={f.key} className="flex items-center gap-2 text-sm font-bold text-slate-500">{f.label}<input disabled={!!(result && result.total) || kimerult} className="w-24 bg-slate-50 border border-slate-100 rounded-lg px-3 py-1.5 text-slate-800 focus:outline-none focus:ring-2 focus:ring-primary/20" value={ans[t.id + '_' + f.key] || ''} onChange={e => setAns(a => ({ ...a, [t.id + '_' + f.key]: e.target.value }))} /></label>)}
             </div>
           </div>
         ))}
       </div>
-      {result ? (
-        <div className={'p-4 rounded-2xl border flex items-center justify-between ' + (result.passed ? 'bg-emerald-50 border-emerald-100' : 'bg-red-50 border-red-100')}>
-          <div className={'font-black ' + (result.passed ? 'text-emerald-700' : 'text-red-600')}>{result.passed ? <span className="flex items-center gap-2"><Lucide.CheckCircle2 size={18} /> Sikeres — {result.correct}/{result.total} helyes</span> : <span className="flex items-center gap-2"><Lucide.XCircle size={18} /> {result.correct}/{result.total} helyes — próbáld újra</span>}</div>
-          {!result.passed && <button className={U_btnGhost} onClick={reset}><Lucide.RefreshCw size={15} /> Új teszt</button>}
+      {result && result.total ? (
+        <div className={'p-4 rounded-2xl border flex flex-wrap items-center justify-between gap-3 ' + (result.passed ? 'bg-emerald-50 border-emerald-100' : 'bg-red-50 border-red-100')}>
+          <div className={'font-black ' + (result.passed ? 'text-emerald-700' : 'text-red-600')}>{result.passed ? <span className="flex items-center gap-2"><Lucide.CheckCircle2 size={18} /> Sikeres — {result.correct}/{result.total} helyes</span> : <span className="flex items-center gap-2"><Lucide.XCircle size={18} /> {result.correct}/{result.total} helyes</span>}</div>
+          {!result.passed && !kimerult && <button className={U_btnGhost} onClick={reset} data-matek-uj="1"><Lucide.RefreshCw size={15} /> Új feladatsor</button>}
         </div>
-      ) : <button className={U_btnPrimary} onClick={grade}>Válaszok beadása</button>}
+      ) : <button className={U_btnPrimary} onClick={grade} disabled={kimerult} data-matek-bekuld="1">Válaszok beadása</button>}
     </div>
   );
 }
@@ -1398,7 +1585,7 @@ function PROG_Catalog({ programs, myApps, onOpen, onContinue, isDeg, felev, setF
 function PROG_Editor({ open, program, onClose, onSaved, scope }) {
   const isDeg = scope === 'degrees';
   const levelOpts = isDeg ? PROG_DEGREE_LEVELS : PROG_PROGRAM_LEVELS;
-  const blank = { id: '', code: '', name: '', level: isDeg ? 'bachelor' : 'course', faculty: '', degree: isDeg ? 'BSc' : 'Short course', duration_semesters: isDeg ? 7 : 2, ects: isDeg ? 210 : 30, tuition: isDeg ? 2500 : 400, currency: 'EUR', language: 'English', deadline: '2026-06-30', capacity: 30, seats_taken: 0, is_open: true, summary: '', image_url: '', required_docs: isDeg ? ['passport', 'hs_diploma', 'english'] : ['passport'], steps: isDeg ? ['personal', 'documents', 'interview', 'fee', 'review'] : ['personal', 'fee', 'review'], tags: [], intakes: ['autumn', 'spring'] };
+  const blank = { id: '', code: '', name: '', level: isDeg ? 'bachelor' : 'course', faculty: '', degree: isDeg ? 'BSc' : 'Short course', duration_semesters: isDeg ? 7 : 2, ects: isDeg ? 210 : 30, tuition: isDeg ? 2500 : 400, currency: 'EUR', language: 'English', deadline: '2026-06-30', capacity: 30, seats_taken: 0, is_open: true, summary: '', image_url: '', required_docs: isDeg ? ['passport', 'hs_diploma', 'english'] : ['passport'], steps: isDeg ? ['personal', 'documents', 'motivation', 'review', 'math', 'interview'] : ['personal', 'review'], tags: [], intakes: ['autumn', 'spring'] };
   const [f, setF] = useState(blank);
   const [busy, setBusy] = useState(false);
   // Egyedi dokumentumtípusok: minden megnyitáskor frissen, hogy a más admin
@@ -1443,9 +1630,14 @@ function PROG_Editor({ open, program, onClose, onSaved, scope }) {
 
   const save = async () => {
     if (!f.name.trim()) return; setBusy(true);
-    const row = { ...f, tuition: Number(f.tuition) || 0, ects: Number(f.ects) || 0, duration_semesters: Number(f.duration_semesters) || 0, capacity: Number(f.capacity) || 0, tags: typeof f.tags === 'string' ? f.tags.split(',').map(s => s.trim()).filter(Boolean) : f.tags };
+    /* A lépéssor mentéskor a hivatalos sorrendbe rendeződik, és kiesik belőle
+       a díj (az már nem a jelentkezés része). Így a régi, „fee"-t tartalmazó
+       képzések is megtisztulnak, amint valaki hozzájuk nyúl. */
+    const row = { ...f, steps: PROG_lepesSor(f.steps), tuition: Number(f.tuition) || 0, ects: Number(f.ects) || 0, duration_semesters: Number(f.duration_semesters) || 0, capacity: Number(f.capacity) || 0, tags: typeof f.tags === 'string' ? f.tags.split(',').map(s => s.trim()).filter(Boolean) : f.tags };
     // A 60-as migráció előtt nincs intakes oszlop: a mezőt nem küldjük, különben az egész mentés elbukna.
     if (!PROG_INTAKE_COL) delete row.intakes; else row.intakes = PROG_intakesOf(f);
+    // A 85-ös migráció előtt nincs audience oszlop — a mezőt ilyenkor nem küldjük.
+    if (!PROG_AUDIENCE_COL) delete row.audience; else row.audience = PROG_audienceOf(f);
     if (program) { await dlUpdate(PROG_TABLE, program.id, row, PROG_LS); }
     else { row.id = uid('prog'); row.created_at = todayStr(); await dlInsert(PROG_TABLE, row, PROG_LS); }
     setBusy(false); onSaved && onSaved(); onClose();
@@ -1497,6 +1689,16 @@ function PROG_Editor({ open, program, onClose, onSaved, scope }) {
               ); })}
             </div>
             {!PROG_INTAKE_COL && <p className="text-[12px] font-semibold text-amber-700 mt-2">A félév mentéséhez futtasd le a 60-as adatbázis-migrációt — addig minden képzés mindkét félévben indul.</p>}
+            <div className="mt-4">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1.5">Kinek hirdetjük</label>
+              <select className={U_input} value={PROG_audienceOf(f)} onChange={e => set('audience', e.target.value)} data-celkozonseg="1">
+                {Object.entries(PROG_AUDIENCE).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
+              <p className="text-[11px] font-semibold text-slate-400 mt-1">
+                A jelentkező állampolgársága dönt. „Csak külföldi jelentkezőknek” esetén magyar állampolgár nem tud jelentkezni rá.
+              </p>
+              {!PROG_AUDIENCE_COL && <p className="text-[12px] font-semibold text-amber-700 mt-2">A célközönség mentéséhez futtasd le a 85-ös adatbázis-migrációt — addig minden képzés mindenkinek szól.</p>}
+            </div>
           </div>
         )}
 
@@ -1504,7 +1706,9 @@ function PROG_Editor({ open, program, onClose, onSaved, scope }) {
         <div className="rounded-2xl border border-slate-100 p-4">
           <div className="flex items-center gap-2 mb-3"><Lucide.ListChecks size={16} className="text-primary" /><span className="text-sm font-black text-slate-700">Felvételi folyamat — lépések</span></div>
           <div className="grid sm:grid-cols-2 gap-2 mb-4">
-            {Object.entries(PROG_STEP_DEFS).filter(([k]) => k !== 'choice').map(([k, def]) => { const on = f.steps.includes(k); const I = def.icon; return (
+            {/* A díj nem a jelentkezési folyamat része (csak felvétel után),
+                a beadás pedig nem kapcsolható ki — mindkettő szándékos. */}
+            {Object.entries(PROG_STEP_DEFS).filter(([k]) => k !== 'choice' && k !== 'fee' && k !== 'review').map(([k, def]) => { const on = f.steps.includes(k); const I = def.icon; return (
               <button key={k} onClick={() => toggleArr('steps', k)} className={'flex items-center gap-2 px-3 py-2 rounded-xl border text-[13px] font-bold transition-all ' + (on ? 'border-primary bg-primary/5 text-primary' : 'border-slate-100 text-slate-400 hover:border-slate-200')}><I size={15} /> {def.label}{on && <Lucide.Check size={14} className="ml-auto" />}</button>
             ); })}
           </div>
@@ -1638,6 +1842,10 @@ const ProgramsView = ({ user, scope = 'programs', embedded = false }) => {
   const [programs, setPrograms] = useState(null);
   const [apps, setApps] = useState([]);
   const [detail, setDetail] = useState(null);
+  // Rövid programra kattintott, de még nincs felvéve — ezt elmagyarázzuk.
+  const [programZar, setProgramZar] = useState(false);
+  // Célközönség miatt nem jelentkezhet: itt tároljuk, melyik korlátba ütközött.
+  const [celzasZar, setCelzasZar] = useState('');
   const [applying, setApplying] = useState(null); // {program, app}
   const [editor, setEditor] = useState({ open: false, program: null });
   /* A közös isAdmin() csak az ADMIN szerepkört nézi, ezért a SUPERADMIN eddig
@@ -1657,6 +1865,10 @@ const ProgramsView = ({ user, scope = 'programs', embedded = false }) => {
   const myApps = (apps || []).filter(a => sajatEmail && String(a.applicant_email || '').toLowerCase() === sajatEmail);
 
   const openApply = async (program) => {
+    // Rövid program: csak felvett hallgató indíthat rá jelentkezést.
+    if (PROG_kind(program) === 'program' && !felvett) { setDetail(null); setProgramZar(true); return; }
+    // Célközönség: a lista már szűr, de a közvetlen hívás is védve legyen.
+    if (!PROG_celzasOk(program, allampolgarsag)) { setDetail(null); setCelzasZar(PROG_audienceOf(program)); return; }
     let app = myApps.find(a => a.program_id === program.id);
     if (!app) {
       const sor = {
@@ -1726,6 +1938,8 @@ const ProgramsView = ({ user, scope = 'programs', embedded = false }) => {
   const startDegreeApply = (idsBe, term) => {
     const ids = idsBe.filter((x, i) => idsBe.indexOf(x) === i).slice(0, PROG_MAX_DEGREES);
     if (!ids.length || !user || inditasRef.current) return;
+    const tiltott = ids.map(keresProg).filter(x => x && !PROG_celzasOk(x, allampolgarsag));
+    if (tiltott.length) { setDetail(null); setCelzasZar(PROG_audienceOf(tiltott[0])); return; }
     const nyitott = myApps.filter(a => a.status === 'draft' && !(a.data && a.data._cancelled) && kepzesApp(a));
     const beadott = myApps.filter(a => a.status !== 'draft' && !(a.data && a.data._cancelled) && kepzesApp(a) && PROG_appIds(a).some(id => ids.includes(id)));
     // Ha nincs mivel ütköznie, azonnal indul; különben a hallgató választ.
@@ -1742,9 +1956,21 @@ const ProgramsView = ({ user, scope = 'programs', embedded = false }) => {
   }
 
   const staff = kezelo && !embedded;
+  const felvett = staff || PROG_felvettHallgato(myApps);
+  /* A jelentkező állampolgársága: a legutóbbi jelentkezés személyes adataiból,
+     különben a profilból. Ha nem tudjuk, nem szűrünk — a hiányzó adat nem
+     tiltás. */
+  const allampolgarsag = (() => {
+    const abol = myApps.map(a => ((a.data || {}).personal || {}).country).filter(Boolean);
+    return abol[abol.length - 1] || (user && (user.country || user.nationality)) || '';
+  })();
   // A hallgató is csak a saját kínálatát látja: a Programok alatt a kisebb
   // programokat, a Képzések alatt a féléves képzéseket — nem a kettő keverékét.
-  const scopedPrograms = programs.filter(p => PROG_kind(p) === (isDeg ? 'degree' : 'program'));
+  const scopedPrograms = programs
+    .filter(p => PROG_kind(p) === (isDeg ? 'degree' : 'program'))
+    // Kezelőnek a teljes kínálat; a jelentkezőnek csak ami neki szól — kivéve,
+    // amire már jelentkezett (azt ne tüntessük el a szeme elől).
+    .filter(p => staff || PROG_celzasOk(p, allampolgarsag) || myApps.some(a => PROG_appIds(a).includes(p.id)));
   const scopedApps = apps.filter(a => scopedPrograms.some(p => PROG_appIds(a).includes(p.id)));
   return (
     <div className={keret}>
@@ -1769,6 +1995,12 @@ const ProgramsView = ({ user, scope = 'programs', embedded = false }) => {
         </div>
       </div>}
 
+      {!staff && !isDeg && !felvett && (
+        <div className="mb-5 flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800" data-program-zar="1">
+          <Lucide.Info size={16} className="flex-none mt-0.5" />
+          <span>Ezekre a programokra a <b>már felvett hallgatók</b> jelentkezhetnek. Böngészd nyugodtan — amint megszületik a felvételi döntésed, a jelentkezés is megnyílik.</span>
+        </div>
+      )}
       {!staff && (
         <>
           <PROG_Catalog programs={scopedPrograms} isDeg={isDeg} myApps={myApps} onOpen={setDetail}
@@ -1853,6 +2085,37 @@ const ProgramsView = ({ user, scope = 'programs', embedded = false }) => {
       {staff && tab === 'applicants' && <PROG_Applicants programs={scopedPrograms} apps={scopedApps} onChange={refetch} />}
 
       <PROG_Detail program={detail} myApp={detail ? myApps.find(a => PROG_appIds(a).includes(detail.id)) : null} onClose={() => setDetail(null)} onApply={isDeg ? (x) => startDegreeApply([x.id], felev) : openApply} />
+      {celzasZar && (
+        <UModal open={!!celzasZar} onClose={() => setCelzasZar('')} max="max-w-md" title="Ez a képzés nem a te körödnek szól"
+          icon={<Lucide.Users size={18} />}>
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600 leading-relaxed">
+              {celzasZar === 'kulfoldi'
+                ? 'Ezt a képzést külföldi állampolgárságú jelentkezőknek hirdetjük meg. A magyar állampolgárok számára meghirdetett képzéseket a listában találod.'
+                : 'Ezt a képzést magyar állampolgárságú jelentkezőknek hirdetjük meg.'}
+            </p>
+            <p className="text-sm text-slate-500 leading-relaxed">
+              Ha szerinted tévedés, írj a felvételi irodának — az állampolgárságot a jelentkezés személyes adataiból vesszük.
+            </p>
+            <div className="flex justify-end"><button className={U_btnPrimary} onClick={() => setCelzasZar('')}>Értem</button></div>
+          </div>
+        </UModal>
+      )}
+      {programZar && (
+        <UModal open={programZar} onClose={() => setProgramZar(false)} max="max-w-md" title="Ez a program a felvett hallgatóké"
+          icon={<Lucide.Lock size={18} />}>
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600 leading-relaxed">
+              A céglátogatásokra, tanulmányi kirándulásokra és továbbképzésekre a <b>már felvett hallgatók</b> jelentkezhetnek.
+              A te felvételi eljárásod még folyamatban van — amint megszületik a döntés, ez a jelentkezés is megnyílik.
+            </p>
+            <p className="text-sm text-slate-500 leading-relaxed">
+              Addig a <b>Képzések</b> menüpontban tudsz jelentkezni a féléves képzésekre és az előkészítőre.
+            </p>
+            <div className="flex justify-end"><button className={U_btnPrimary} onClick={() => setProgramZar(false)}>Értem</button></div>
+          </div>
+        </UModal>
+      )}
       <PROG_Editor open={editor.open} program={editor.program} scope={scope} onClose={() => setEditor({ open: false, program: null })} onSaved={refetch} />
     </div>
   );

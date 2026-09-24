@@ -940,335 +940,13 @@ function useApi(apiMethod) {
 }
 
 
-/* ===== VideoInterviewSystem ===== */
-const VideoInterviewSystem = (() => {
-interface VideoInterviewSystemProps {
-  onComplete: (videos: VideoInterview[]) => void;
-}
-
-const VideoInterviewSystem: React.FC<VideoInterviewSystemProps> = ({ onComplete }) => {
-  const [currentStep, setCurrentStep] = useState<'intro' | 'recording' | 'review' | 'completed'>('intro');
-  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
-  const [isRecording, setIsRecording] = useState(false);
-  const [recordedVideos, setRecordedVideos] = useState<VideoInterview[]>([]);
-  const [timeLeft, setTimeLeft] = useState(0);
-  const [stream, setStream] = useState<MediaStream | null>(null);
-  const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
-
-  const questions = mockDatabase.videoInterviewQuestions;
-  const currentQuestion = questions[currentQuestionIndex];
-
-  useEffect(() => {
-    if (currentStep === 'recording' || currentStep === 'intro') {
-      startCamera();
-    } else {
-      stopCamera();
-    }
-    return () => stopCamera();
-  }, [currentStep]);
-
-  const startCamera = async () => {
-    try {
-      const mediaStream = await navigator.mediaDevices.getUserMedia({ 
-        video: { width: 1280, height: 720 }, 
-        audio: true 
-      });
-      setStream(mediaStream);
-      if (videoRef.current) {
-        videoRef.current.srcObject = mediaStream;
-      }
-    } catch (err) {
-      console.error("Error accessing camera:", err);
-      alert("Kérjük, engedélyezze a kamera és mikrofon hozzáférést a folytatáshoz.");
-    }
-  };
-
-  const stopCamera = () => {
-    if (stream) {
-      stream.getTracks().forEach(track => track.stop());
-      setStream(null);
-    }
-  };
-
-  const startRecording = () => {
-    if (!stream) return;
-
-    chunksRef.current = [];
-    const mediaRecorder = new MediaRecorder(stream);
-    mediaRecorderRef.current = mediaRecorder;
-
-    mediaRecorder.ondataavailable = (e) => {
-      if (e.data.size > 0) {
-        chunksRef.current.push(e.data);
-      }
-    };
-
-    mediaRecorder.onstop = () => {
-      const blob = new Blob(chunksRef.current, { type: 'video/webm' });
-      setRecordedBlob(blob);
-      setPreviewUrl(URL.createObjectURL(blob));
-      setCurrentStep('review');
-    };
-
-    mediaRecorder.start();
-    setIsRecording(true);
-    setTimeLeft(currentQuestion.durationLimit);
-
-    timerRef.current = setInterval(() => {
-      setTimeLeft((prev) => {
-        if (prev <= 1) {
-          stopRecording();
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-  };
-
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-      if (timerRef.current) clearInterval(timerRef.current);
-    }
-  };
-
-  const handleSaveAndNext = () => {
-    if (recordedBlob) {
-      const newVideo: VideoInterview = {
-        id: `V-${Date.now()}`,
-        question: currentQuestion.text,
-        videoUrl: previewUrl || '',
-        duration: `${currentQuestion.durationLimit - timeLeft}s`
-      };
-
-      const updatedVideos = [...recordedVideos, newVideo];
-      setRecordedVideos(updatedVideos);
-
-      if (currentQuestionIndex < questions.length - 1) {
-        setCurrentQuestionIndex(prev => prev + 1);
-        setCurrentStep('recording');
-        setRecordedBlob(null);
-        setPreviewUrl(null);
-      } else {
-        setCurrentStep('completed');
-        onComplete(updatedVideos);
-      }
-    }
-  };
-
-  const handleRetake = () => {
-    setRecordedBlob(null);
-    setPreviewUrl(null);
-    setCurrentStep('recording');
-  };
-
-  const renderIntro = () => (
-    <div className="flex flex-col items-center justify-center text-center space-y-6 p-8">
-      <div className="w-20 h-20 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center">
-        <ICONS.Video size={40} />
-      </div>
-      <div>
-        <h3 className="text-2xl font-bold text-slate-900">AI interjú-gyakorlás</h3>
-        <p className="text-slate-500 mt-2 max-w-md">
-          Felkészülési gyakorlat: 4 tipikus felvételi kérdésre válaszolhatsz videón.
-          Kérjük, győződj meg róla, hogy jól megvilágított helyen vagy és a mikrofonod megfelelően működik.
-        </p>
-      </div>
-      <div className="bg-amber-50 border border-amber-100 p-4 rounded-xl flex items-start gap-3 text-left max-w-md">
-        <ICONS.AlertCircle className="text-amber-500 shrink-0 mt-0.5" size={18} />
-        <p className="text-xs text-amber-800">
-          <span className="font-bold">Ez gyakorlás, nem a valódi felvételi interjú.</span> A felvétel nálad marad,
-          nem küldjük be a felvételi bizottságnak, és nem számít bele a bírálatba. A valódi interjúra az
-          Interjúk fülön tudsz időpontot foglalni. Minden kérdésre meghatározott idő áll rendelkezésre — a
-          felvétel automatikusan leáll, ha az idő lejár.
-        </p>
-      </div>
-      <button 
-        onClick={() => setCurrentStep('recording')}
-        className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 flex items-center gap-2"
-      >
-        Gyakorlás megkezdése <ICONS.ArrowRight size={18} />
-      </button>
-    </div>
-  );
-
-  const renderRecording = () => (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="space-y-1">
-          <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-widest">
-            {currentQuestionIndex + 1} / {questions.length} Kérdés
-          </span>
-          <h3 className="text-xl font-bold text-slate-900">{currentQuestion.text}</h3>
-        </div>
-        {isRecording && (
-          <div className="flex items-center gap-2 bg-red-50 text-red-600 px-4 py-2 rounded-full font-mono font-bold animate-pulse">
-            <div className="w-2 h-2 bg-red-600 rounded-full" />
-            00:{timeLeft < 10 ? `0${timeLeft}` : timeLeft}
-          </div>
-        )}
-      </div>
-
-      <div className="relative aspect-video bg-slate-900 rounded-3xl overflow-hidden shadow-2xl border-4 border-white">
-        <video 
-          ref={videoRef} 
-          autoPlay 
-          muted 
-          playsInline 
-          className="w-full h-full object-cover mirror"
-        />
-        
-        {!isRecording && (
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center">
-            <button 
-              onClick={startRecording}
-              className="w-20 h-20 bg-white text-indigo-600 rounded-full flex items-center justify-center hover:scale-110 transition-all shadow-xl"
-            >
-              <ICONS.Play size={32} fill="currentColor" />
-            </button>
-          </div>
-        )}
-
-        {isRecording && (
-          <div className="absolute bottom-6 left-1/2 -translate-x-1/2">
-            <button 
-              onClick={stopRecording}
-              className="bg-white text-red-600 px-6 py-3 rounded-full font-bold flex items-center gap-2 shadow-xl hover:bg-red-50 transition-all"
-            >
-              <div className="w-3 h-3 bg-red-600 rounded-sm" /> Felvétel leállítása
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-
-  const renderReview = () => (
-    <div className="space-y-6">
-      <div className="space-y-1">
-        <h3 className="text-xl font-bold text-slate-900">Ellenőrizze a választ</h3>
-        <p className="text-sm text-slate-500">Visszanézheti a felvételt, mielőtt továbblépne a következő kérdésre.</p>
-      </div>
-
-      <div className="relative aspect-video bg-slate-900 rounded-3xl overflow-hidden shadow-2xl border-4 border-white">
-        <video 
-          src={previewUrl || ''} 
-          controls 
-          className="w-full h-full object-cover"
-        />
-      </div>
-
-      <div className="flex items-center justify-between gap-4">
-        <button 
-          onClick={handleRetake}
-          className="flex-1 border-2 border-slate-200 text-slate-600 py-4 rounded-2xl font-bold hover:bg-slate-50 transition-all flex items-center justify-center gap-2"
-        >
-          <ICONS.RotateCcw size={18} /> Új felvétel
-        </button>
-        <button 
-          onClick={handleSaveAndNext}
-          className="flex-1 bg-indigo-600 text-white py-4 rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 flex items-center justify-center gap-2"
-        >
-          {currentQuestionIndex < questions.length - 1 ? 'Következő kérdés' : 'Gyakorlás befejezése'} <ICONS.ArrowRight size={18} />
-        </button>
-      </div>
-    </div>
-  );
-
-  const renderCompleted = () => (
-    <div className="flex flex-col items-center justify-center text-center space-y-6 p-8">
-      <div className="w-20 h-20 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center">
-        <ICONS.CheckCircle size={40} />
-      </div>
-      <div>
-        <h3 className="text-2xl font-bold text-slate-900">Készen vagy a gyakorlással!</h3>
-        <p className="text-slate-500 mt-2 max-w-md">
-          Végigmentél mind a 4 gyakorlókérdésen. A felvételeidet nem küldtük el senkinek — a gyakorlás
-          eredménye nem számít bele a felvételi bírálatba.
-        </p>
-        <p className="text-sm font-bold text-slate-700 mt-3 max-w-md">
-          A következő lépés: foglalj időpontot a valódi felvételi interjúra az Interjúk fülön.
-        </p>
-      </div>
-      <div className="grid grid-cols-2 gap-4 w-full max-w-md">
-        {recordedVideos.map((video, idx) => (
-          <div key={video.id} className="bg-white p-3 rounded-xl border border-slate-100 flex items-center gap-3">
-            <div className="w-8 h-8 bg-slate-100 rounded-lg flex items-center justify-center text-xs font-bold text-slate-500">
-              {idx + 1}
-            </div>
-            <div className="text-left">
-              <p className="text-[10px] font-bold text-slate-400 uppercase">Kérdés</p>
-              <p className="text-xs font-bold text-slate-700 truncate w-32">{video.question}</p>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-
-  return (
-    <div className="max-w-3xl mx-auto bg-white rounded-[40px] shadow-xl border border-slate-100 overflow-hidden">
-      {/* Végig látható szalag: a felhasználó egy pillanatra se hihesse, hogy ez
-          a valódi felvételi interjú. */}
-      <div className="bg-slate-900 text-white px-8 py-3 flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest">
-        <ICONS.Sparkles size={14} /> Gyakorlási mód — nem a valódi felvételi interjú
-      </div>
-      <div className="p-8 md:p-12">
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={currentStep}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            transition={{ duration: 0.3 }}
-          >
-            {currentStep === 'intro' && renderIntro()}
-            {currentStep === 'recording' && renderRecording()}
-            {currentStep === 'review' && renderReview()}
-            {currentStep === 'completed' && renderCompleted()}
-          </motion.div>
-        </AnimatePresence>
-      </div>
-      
-      {currentStep !== 'completed' && (
-        <div className="bg-slate-50 px-8 py-4 flex items-center justify-between border-t border-slate-100">
-          <div className="flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${stream ? 'bg-emerald-500' : 'bg-red-500'}`} />
-            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-              Kamera: {stream ? 'Aktív' : 'Nincs kapcsolat'}
-            </span>
-          </div>
-          <div className="flex gap-1">
-            {questions.map((_, idx) => (
-              <div 
-                key={idx} 
-                className={`h-1 w-8 rounded-full transition-all ${
-                  idx < currentQuestionIndex ? 'bg-indigo-600' : 
-                  idx === currentQuestionIndex ? 'bg-indigo-400' : 'bg-slate-200'
-                }`} 
-              />
-            ))}
-          </div>
-        </div>
-      )}
-
-      <style>{`
-        .mirror {
-          transform: scaleX(-1);
-        }
-      `}</style>
-    </div>
-  );
-};
-return VideoInterviewSystem;
-})();
+/* ===== Előre felvett (videós) interjú — ELTÁVOLÍTVA 2026-09-24 =====
+   A külügyi iroda észrevétele: „Az előre felvett interjú nem szükséges.
+   Mindenki élőben fog interjúzni.” Itt korábban egy VideoInterviewSystem
+   komponens állt (kamerás felvétel 4 kérdésre, gyakorlási módban). A
+   jelentkező interjúja mostantól kizárólag az élő, Teams-es időpontfoglalás
+   (features/interview-calendar.jsx) — egy út van, nincs mellette egy
+   második, amit magyarázni kell. */
 
 /* ===== Reszponzív keret — az oldalsáv állapota =====
    Három üzemmód, matchMedia-val figyelve (NEM resize-eseménnyel: az minden
@@ -1918,7 +1596,11 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
                 <th className="px-6 py-4">Képzés</th>
                 <th className="px-6 py-4">Ügynökség</th>
                 <th className="px-6 py-4">Státusz</th>
-                <th className="px-6 py-4 text-right">Részletek</th>
+                {/* A Részletek oszlop a táblázat jobb szélén áll, és keskeny
+                    képernyőn kigörgött a képből — az ügyintéző csak kereséssel
+                    tudta megnyitni a jelentkezést (külügyi iroda, 2026-09-24).
+                    Most ODARAGAD a jobb szélhez, tehát mindig látszik. */}
+                <th className="px-6 py-4 text-right sticky right-0 z-20 bg-slate-50 shadow-[-8px_0_12px_-8px_rgba(15,23,42,0.18)]">Részletek</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
@@ -2844,8 +2526,20 @@ function ADM_DokLista({ dok }) {
   );
   return (
     <div className="space-y-2" data-dok-lista="1">
-      <p className="text-[12px] font-semibold text-slate-500">{`${dok.feltoltve}/${dok.osszes} kötelező dokumentum feltöltve · ${dok.hitelesitve} jóváhagyva`}</p>
-      {dok.items.length === 0 && <p className="text-sm text-slate-400">A megjelölt képzések nem kérnek dokumentumot.</p>}
+      {/* NULLA ELŐÍRÁS ≠ MINDEN RENDBEN. A „0/0 kötelező dokumentum feltöltve”
+          sor félreérthető volt: úgy olvasódott, mintha készen lenne, holott
+          egyszerűen nincs mit megnyitni (külügyi iroda, 2026-09-24). */}
+      <p className="text-[12px] font-semibold text-slate-500">{dok.osszes === 0
+        ? 'Ehhez a jelentkezéshez nincs kötelező dokumentum megadva.'
+        : `${dok.feltoltve}/${dok.osszes} kötelező dokumentum feltöltve · ${dok.hitelesitve} jóváhagyva`}</p>
+      {dok.items.length === 0 && dok.extra.length === 0 && (
+        <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] font-semibold text-amber-800" data-dok-ures="1">
+          <Lucide.AlertTriangle size={14} className="flex-none mt-0.5" />
+          <span>Nincs mit megnyitni: a jelentkezés képzéseinél nincs beállítva kötelező dokumentum, és a jelentkező sem töltött fel semmit.
+            A kötelező dokumentumokat a <b>Képzések</b> menüpontban, a képzés szerkesztőjében lehet megadni.</span>
+        </div>
+      )}
+      {dok.items.length === 0 && dok.extra.length > 0 && <p className="text-sm text-slate-400">A megjelölt képzések nem kérnek dokumentumot.</p>}
       {dok.items.map(sor)}
       {dok.extra.length > 0 && <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400 pt-2">Egyéb feltöltött fájl (nem kötelező)</div>}
       {dok.extra.map(sor)}
@@ -3377,7 +3071,10 @@ const AdmissionsCore = ({ user }) => {
       const orszag = ADM_orszag(p) || ((students.find(st => email && String(st.email || '').toLowerCase() === String(email).toLowerCase()) || {}).country || '');
       const felev = d.term || '';
       const elozmeny = ADM_elozmenyek(p, journeyProcs, students);
-      return { p, fa, nev, email, azon, orszag, felev, elozmeny, dontes: dontesAdat, progs, missing, pct, stLabel, lepesSzoveg, allapot, allapotRend, cancelled, hallgatonal,
+      // Hány kötelező dokumentumot ír elő a képzés? 0 esetén a „Minden feltöltve"
+      // félrevezető lenne — az oszlop ilyenkor semleges állapotot mutat.
+      const dokOsszes = fa ? fa.dok.osszes : kell.length;
+      return { p, fa, nev, email, azon, orszag, felev, elozmeny, dontes: dontesAdat, progs, missing, dokOsszes, pct, stLabel, lepesSzoveg, allapot, allapotRend, cancelled, hallgatonal,
         frissitve: p.updatedAt || p.createdAt || '',
         kereso: ADM_norm([nev, email, p.id, azon, FIZ_kozlemeny(p.refNo), FIZ_kozlemeny(p.refNo).replace(/-/g, ''), orszag, felev, (felev && typeof PROG_termLabel === 'function') ? PROG_termLabel(felev) : '', stLabel, ...progs.map(x => x.name + ' ' + x.code)].join(' ')) };
     };
@@ -3645,7 +3342,16 @@ const AdmissionsCore = ({ user }) => {
               </div>
               <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
                 <div className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-1">Dokumentumok</div>
-                <p className="text-[12px] font-semibold text-slate-500 mb-4">{`${faD.dok.feltoltve}/${faD.dok.osszes} kötelező dokumentum feltöltve · ${faD.dok.hitelesitve} jóváhagyva`}</p>
+                <p className="text-[12px] font-semibold text-slate-500 mb-4">{faD.dok.osszes === 0
+                  ? 'Ehhez a jelentkezéshez nincs kötelező dokumentum megadva.'
+                  : `${faD.dok.feltoltve}/${faD.dok.osszes} kötelező dokumentum feltöltve · ${faD.dok.hitelesitve} jóváhagyva`}</p>
+                {faD.dok.osszes === 0 && faD.dok.extra.length === 0 && (
+                  <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] font-semibold text-amber-800" data-dok-ures="1">
+                    <Lucide.AlertTriangle size={14} className="flex-none mt-0.5" />
+                    <span>Nincs mit megnyitni: a jelentkezés képzéseinél nincs beállítva kötelező dokumentum, és a jelentkező sem töltött fel semmit.
+                      A kötelező dokumentumokat a <b>Képzések</b> menüpontban, a képzés szerkesztőjében lehet megadni.</span>
+                  </div>
+                )}
                 <div className="space-y-2" data-dok-lista="1">
                   {[...faD.dok.items, ...faD.dok.extra].map(d0 => { const d = { ...d0, Icon: d0.Icon || Lucide.FileText }; const up = docs[d.id] && (docs[d.id].fileName || docs[d.id].path); const dv = up && docs[d.id].verified; const attached = (msgDraft.attachments || []).some(a => a.id === d.id); return (
                     <div key={d.id} className="rounded-xl border border-slate-100 overflow-hidden"><div className="flex items-center gap-3 p-3 flex-wrap">
@@ -3813,6 +3519,7 @@ const AdmissionsCore = ({ user }) => {
                             {mezo('name', 'Név')}
                             <div className="grid grid-cols-2 gap-3">{mezo('passport', 'Útlevélszám')}{mezo('country', 'Ország')}</div>
                             <div className="grid grid-cols-2 gap-3">{mezo('startTerm', 'Kezdés')}{mezo('deadline', 'Befizetési határidő')}</div>
+                            <p className="text-[11px] font-semibold text-slate-400 -mt-1">A befizetési határidő alapértelmezés szerint a levél keltétől számított két hét. Csak indokolt esetben írd át.</p>
                             <div className="grid grid-cols-2 gap-3">{mezo('tuition', 'Tandíj / félév (EUR)', 'number')}{mezo('applicationFee', 'Jelentkezési díj (EUR)', 'number')}</div>
                             <div className="grid grid-cols-2 gap-3">{mezo('dormitoryFee', 'Kollégiumi díj / félév (EUR)', 'number')}{mezo('dormitoryDeposit', 'Kollégiumi kaució (EUR)', 'number')}</div>
                             <div><label className={lbl}>Kiegészítő bekezdés (nem kötelező)</label><textarea rows={3} className={inCls + ' resize-y'} value={szerk.note || ''} onChange={e => setMezo('note', e.target.value)} /></div>
@@ -4033,16 +3740,25 @@ const AdmissionsCore = ({ user }) => {
                 const felirat = { red: 'text-red-500', emerald: 'text-emerald-600', amber: 'text-amber-600', primary: 'text-primary' }[szin];
                 const csik = { red: 'bg-red-300', emerald: 'bg-emerald-500', amber: 'bg-amber-400', primary: 'bg-primary' }[szin];
                 return (
-                  <tr key={p.id || idx} className={'hover:bg-slate-50 transition-colors align-top' + (cancelled ? ' opacity-70' : '')}>
+                  <tr key={p.id || idx} className={'group hover:bg-slate-50 [&>td.sticky]:group-hover:bg-slate-50 transition-colors align-top' + (cancelled ? ' opacity-70' : '')}>
                     <td className="px-6 py-4 whitespace-nowrap"><span className="font-mono text-[11px] font-bold text-slate-500 tabular-nums" title={p.id}>{x.azon}</span></td>
                     <td className="px-6 py-4"><div className="flex items-center gap-3"><Face p={p} size={36} /><div className="min-w-0"><p className="font-semibold text-slate-800 truncate">{x.nev}</p><p className="text-xs text-slate-400 truncate">{x.email}</p>{msgTerkep[p.id] && msgTerkep[p.id].unread > 0 && <span className="mt-1 mr-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-primary/10 text-primary text-[10px] font-bold" data-msg-sor={p.id}><Lucide.MessageSquare size={11} /> {`${msgTerkep[p.id].unread} új üzenet`}</span>}{x.elozmeny.length > 0 && <span className="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-50 text-red-600 text-[10px] font-bold" data-elozmeny="1" title={x.elozmeny.map(h => h.azon + (h.leiras ? ' · ' + h.leiras : '')).join('\n')}><ICONS.AlertTriangle size={11} /> Korábban elutasítva</span>}</div></div></td>
                     <td className="px-6 py-4 text-[12px] font-semibold text-slate-600 whitespace-nowrap">{x.orszag || <span className="text-slate-300">—</span>}</td>
                     <td className="px-6 py-4"><div className="flex flex-wrap gap-1">{x.progs.length ? x.progs.map((pr, i) => { const felvett = !!(x.dontes && x.dontes.outcome === 'admitted' && x.dontes.programId === pr.id); return <span key={i} title={pr.name} className={'px-2 py-0.5 rounded text-[10px] font-bold ' + (felvett ? 'bg-emerald-500 text-white' : 'bg-primary/10 text-primary')}>{(x.progs.length > 1 && Array.isArray(p.data && p.data.program_ids) ? (i + 1) + '. ' : '') + pr.code}</span>; }) : <span className="text-[10px] text-slate-400">—</span>}</div>{x.felev && <div className="text-[10px] font-bold text-violet-600 mt-1 whitespace-nowrap">{typeof PROG_termLabel === 'function' ? PROG_termLabel(x.felev, true) : x.felev}</div>}</td>
                     <td className="px-6 py-4"><div className="w-32"><div className="flex items-center justify-between text-[10px] font-bold mb-1"><span className={felirat}>{cancelled ? 'Megszakítva' : x.stLabel}</span><span className="text-slate-400">{x.lepesSzoveg}</span></div><div className="h-1.5 bg-slate-100 rounded-full overflow-hidden"><div className={csik + ' h-full rounded-full'} style={{ width: x.pct + '%' }}></div></div></div></td>
-                    <td className="px-6 py-4">{x.missing.length ? <div className="flex flex-wrap gap-1 max-w-xs">{x.missing.map(d => <span key={d.id} className="px-2 py-0.5 bg-red-50 text-red-600 rounded text-[10px] font-bold inline-flex items-center gap-1"><ICONS.AlertCircle size={11} /> {d.label}</span>)}</div> : <span className="text-[10px] font-bold text-emerald-600 inline-flex items-center gap-1"><ICONS.CheckCircle size={12} /> Minden feltöltve</span>}</td>
+                    {/* A „Minden feltöltve" korábban akkor is kiírt, ha a képzéshez
+                        EGYETLEN kötelező dokumentum sincs megadva — így a 0/0 is
+                        késznek látszott, a Részletek alatt viszont nem volt mit
+                        megnyitni (külügyi iroda észrevétele, 2026-09-24). A nulla
+                        előírás most külön, semleges állapot. */}
+                    <td className="px-6 py-4">{x.missing.length
+                      ? <div className="flex flex-wrap gap-1 max-w-xs">{x.missing.map(d => <span key={d.id} className="px-2 py-0.5 bg-red-50 text-red-600 rounded text-[10px] font-bold inline-flex items-center gap-1"><ICONS.AlertCircle size={11} /> {d.label}</span>)}</div>
+                      : (x.dokOsszes || 0) === 0
+                        ? <span className="text-[10px] font-bold text-slate-400 inline-flex items-center gap-1" data-dok-nincs-eloirva="1" title="Ehhez a jelentkezéshez nincs kötelező dokumentum megadva a képzésnél."><ICONS.Minus size={12} /> Nincs előírt dokumentum</span>
+                        : <span className="text-[10px] font-bold text-emerald-600 inline-flex items-center gap-1"><ICONS.CheckCircle size={12} /> Minden feltöltve</span>}</td>
                     <td className="px-6 py-4"><span className={`text-[10px] font-bold px-2 py-1 rounded-full whitespace-nowrap inline-flex items-center gap-1 ${(cancelled || x.allapot === 'rejected') ? 'bg-red-50 text-red-600' : (x.allapot === 'accepted' || x.allapot === 'admitted') ? 'bg-emerald-50 text-emerald-600' : x.allapot === 'withdrawn' ? 'bg-slate-100 text-slate-500' : x.hallgatonal ? 'bg-amber-50 text-amber-700' : 'bg-primary/10 text-primary'}`}>{cancelled ? <><ICONS.XCircle size={11} /> Megszakítva</> : x.stLabel}</span></td>
                     <td className="px-6 py-4 text-[12px] font-semibold text-slate-500 whitespace-nowrap tabular-nums">{ADM_datum(x.frissitve)}</td>
-                    <td className="px-6 py-4 text-right"><button onClick={() => { setDetailProc(p); setMsgDraft({ subject: '', body: '' }); setMsgSent(false); }} className="bg-slate-900 text-white px-3 py-1.5 rounded-lg text-[11px] font-bold hover:bg-slate-800 inline-flex items-center gap-1.5"><ICONS.Eye size={13} /> Részletek</button></td>
+                    <td className="px-6 py-4 text-right sticky right-0 z-10 bg-white shadow-[-8px_0_12px_-8px_rgba(15,23,42,0.18)]"><button onClick={() => { setDetailProc(p); setMsgDraft({ subject: '', body: '' }); setMsgSent(false); }} className="bg-slate-900 text-white px-3 py-1.5 rounded-lg text-[11px] font-bold hover:bg-slate-800 inline-flex items-center gap-1.5" data-reszletek={p.id}><ICONS.Eye size={13} /> Részletek</button></td>
                   </tr>
                 );
               })}
@@ -6879,8 +6595,8 @@ const Evaluation: React.FC = () => {
           </div>
           <h3 className="text-xl font-bold text-slate-800 mb-2">Nincs rögzített interjú</h3>
           <p className="text-slate-500 max-w-md text-center">
-            Ehhez a jelentkezőhöz még nem tartozik rögzített felvételi interjú. A jelentkezői portál
-            AI interjú-gyakorlása szándékosan nem jelenik meg itt: az felkészülés, nem bírálati anyag.
+            Ehhez a jelentkezőhöz még nem tartozik rögzített felvételi interjú. Az interjú élőben,
+            a lefoglalt időponton zajlik — a felvétel onnan kerül ide, ha készült.
           </p>
         </div>
       );
@@ -8131,7 +7847,21 @@ const AdmissionsHub = (() => {
      Ami nincs felülírva, az a jelentkezés adataiból és a díjtáblából jön — így
      egy régi, mezők nélküli levél ugyanúgy jelenik meg, mint eddig. */
   // Az alapértékek a hivatalos Word-minta (CONDITIONAL ACCEPTANCE LETTER.docx) szerint; levelenként szerkeszthetők.
-  const LETTER_DEFAULTS = { startTerm: 'September, 2026', deadline: '15th July 2026', signerName: 'Dr. József Kárpáti PhD', signerTitle: 'Dean · Faculty of Economics and Business · John von Neumann University' };
+  const LETTER_DEFAULTS = { startTerm: 'September, 2026', signerName: 'Dr. József Kárpáti PhD', signerTitle: 'Dean · Faculty of Economics and Business · John von Neumann University' };
+  /* BEFIZETÉSI HATÁRIDŐ: A LEVÉL KELTÉTŐL SZÁMÍTVA 2 HÉT.
+     Korábban fix dátum állt itt („15th July 2026”), ami minden levélen ugyanaz
+     volt, és a nyár után értelmét vesztette. A külügyi iroda szabálya
+     (2026-09-24): mindig az adott naptól számított két hét — vis maior esetén
+     a mezőben felülírható, ezért csak ALAPÉRTÉK. */
+  const LEVEL_FIZETESI_NAP = 14;
+  const LEVEL_hataridoNap = (keltezes) => {
+    const alap = keltezes ? new Date(keltezes) : new Date();
+    const d = isNaN(alap.getTime()) ? new Date() : alap;
+    const ki = new Date(d.getTime());
+    ki.setDate(ki.getDate() + LEVEL_FIZETESI_NAP);
+    const p2 = (n) => String(n).padStart(2, '0');
+    return ki.getFullYear() + '-' + p2(ki.getMonth() + 1) + '-' + p2(ki.getDate());
+  };
   // Dátum a minta alakjában: „16th June 2026”. Nem dátum formájú szöveget változatlanul hagy.
   const LEVEL_datum = (s) => {
     if (!s) return '';
@@ -8170,7 +7900,8 @@ const AdmissionsHub = (() => {
       passport: L.passport || ex.passportNumber || '—',
       country: L.country || ex.country || acc.country || (data.personal && data.personal.country) || '—',
       startTerm: L.startTerm || LETTER_DEFAULTS.startTerm,
-      deadline: L.deadline || LETTER_DEFAULTS.deadline,
+      // A kelt + 2 hét; ha az ügyintéző felülírta, az övé az elsőbbség.
+      deadline: LEVEL_datum(L.deadline) || LEVEL_datum(LEVEL_hataridoNap(L.issuedAt)),
       signerName: L.signerName || LETTER_DEFAULTS.signerName,
       signerTitle: L.signerTitle || LETTER_DEFAULTS.signerTitle,
       note: L.note || '',
@@ -8204,7 +7935,12 @@ const AdmissionsHub = (() => {
     const dontottId = data.decision && data.decision.outcome === 'admitted' ? data.decision.programId : '';
     const first = (data.programs || []).map(pid => PROGRAMS.find(x => x.id === pid)).find(Boolean);
     const katalogusId = Array.isArray(data.program_ids) && data.program_ids.length ? data.program_ids[0] : (proc && proc.programId) || '';
-    return { fileNumber: makeFileNumber('CAL'), issuedAt: todayStr(), programId: dontottId || (first ? first.id : '') || katalogusId, status: 'draft', createdAt: new Date().toISOString() };
+    /* A BEFIZETÉSI HATÁRIDŐT A TERVEZET IS RÖGZÍTI: a levél keltétől számított
+       két hét. Így az látszik a szerkesztőben is, és vis maior esetén egyetlen
+       mezőben átírható — a szabály viszont nem a fejekben él. */
+    const kelt = todayStr();
+    return { fileNumber: makeFileNumber('CAL'), issuedAt: kelt, deadline: LEVEL_hataridoNap(kelt),
+             programId: dontottId || (first ? first.id : '') || katalogusId, status: 'draft', createdAt: new Date().toISOString() };
   };
   /* A FELTÉTELES FELVÉTELI LEVÉL — a hivatalos Word-minta (CONDITIONAL ACCEPTANCE
      LETTER.docx) szerkezete és szövege: fejlécben az NJE logó, Source Sans Pro,
@@ -9071,7 +8807,6 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
     return () => window.removeEventListener('nje:level', f);
   }, []);
   const [isLoading, setIsLoading] = useState(true);
-  const [showVideoInterview, setShowVideoInterview] = useState(false);
   // Az interjú-foglalás visszajelzései. A szerver kapuja (27_interview_gate.sql)
   // beszédes magyar hibát ad — azt MUTATJUK, nem nyeljük el a konzolba.
   const [bookError, setBookError] = useState('');
@@ -9084,8 +8819,6 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
   // A Clipboard API nem mindenhol elérhető (nem HTTPS, régi böngésző), ezért
   // van egy rejtett textarea-s tartalék ág is.
   const [copiedAppId, setCopiedAppId] = useState(false);
-  // Az AI interjú-gyakorlás legutóbbi menetének metaadatai (lásd lentebb).
-  const [practiceLog, setPracticeLog] = useState(null);
   const copyAppId = async (value) => {
     const text = String(value || '');
     if (!text) return;
@@ -9104,17 +8837,6 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
       console.error('Nem sikerült vágólapra másolni:', e);
     }
   };
-
-  // A korábbi gyakorló menet visszatöltése (csak metaadat, csak helyben).
-  useEffect(() => {
-    const key = 'nje_ai_practice_' + ((student && student.id) || (user && user.email) || 'guest');
-    try {
-      const raw = localStorage.getItem(key);
-      setPracticeLog(raw ? JSON.parse(raw) : null);
-    } catch (e) {
-      setPracticeLog(null);
-    }
-  }, [student, user]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -9228,18 +8950,6 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
   // nem írjuk a student.evaluation mezőbe, ezért a bírálatba sem számít bele.
   // Csak a saját visszanézéshez tartunk nyilván egy metaadat-naplót (kérdés,
   // hossz, dátum) a böngészőben — videó nem hagyja el a gépet.
-  const handleVideoInterviewComplete = (videos: VideoInterview[]) => {
-    const log = {
-      at: new Date().toISOString(),
-      answers: (videos || []).map(v => ({ question: v.question, duration: v.duration })),
-    };
-    setPracticeLog(log);
-    try {
-      localStorage.setItem('nje_ai_practice_' + ((student && student.id) || (user && user.email) || 'guest'), JSON.stringify(log));
-    } catch (e) {
-      // A böngésző letilthatja a tárolást — a gyakorlás enélkül is működik.
-    }
-  };
 
   if (isLoading) {
     return (
@@ -9855,20 +9565,12 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
   const gateReason = interviewBookingBlockReason(student);
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      {showVideoInterview ? (
-        <div className="space-y-6">
-          <button 
-            onClick={() => setShowVideoInterview(false)}
-            className="flex items-center gap-2 text-slate-500 hover:text-slate-800 font-bold text-sm transition-all"
-          >
-            <ICONS.ArrowLeft size={18} /> Vissza az interjúkhoz
-          </button>
-          <VideoInterviewSystem onComplete={handleVideoInterviewComplete} />
-        </div>
-      ) : (
+      {(
         <>
-          {/* A VALÓDI felvételi interjú áll elöl: ez az egyetlen, ami beleszámít
-              a bírálatba. Az AI-gyakorlás csak utána, másodlagos hangsúllyal. */}
+          {/* EGY interjú van: az élő, időpontfoglalásos felvételi beszélgetés.
+              Az előre felvett (videós) gyakorlóinterjú 2026-09-24-én kikerült —
+              a külügyi iroda szerint mindenki élőben interjúzik, és két út
+              mellett csak magyarázni kell, melyik számít. */}
           <div className="bg-white p-5 sm:p-8 rounded-3xl border-2 border-primary/20 shadow-sm">
             <div className="flex items-start gap-4 mb-2">
               <span className="w-12 h-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
@@ -9944,43 +9646,6 @@ const StudentPortal: React.FC<StudentPortalProps> = ({ user }) => {
             </div>
           </div>
 
-          {/* AI interjú — GYAKORLÁSI mód. Visszaélési kockázat miatt nem
-              helyettesíti a valódi interjút: a felvétel nálad marad, nem
-              küldjük be, és a bírálatba sem számít bele. */}
-          <div className="bg-slate-50 p-5 sm:p-8 rounded-3xl border border-slate-200">
-            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
-              <div className="space-y-3 max-w-xl">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center">
-                    <ICONS.Sparkles size={20} />
-                  </span>
-                  <h3 className="text-xl font-bold text-slate-800">AI interjú-gyakorlás</h3>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-200 text-slate-600 uppercase tracking-wide">Gyakorlás · nem értékeljük</span>
-                </div>
-                <p className="text-sm text-slate-500 leading-relaxed">
-                  Felkészülési eszköz: 4 tipikus felvételi kérdésre válaszolhatsz videón, hogy magabiztosabb legyél.
-                  <span className="font-bold text-slate-700"> Ez NEM váltja ki a valódi felvételi interjút</span> — a felvétel nálad marad,
-                  nem küldjük be a felvételi bizottságnak, és nem számít bele a bírálatba.
-                </p>
-                <div className="flex items-center gap-4 text-xs font-bold text-slate-500">
-                  <div className="flex items-center gap-1.5"><ICONS.Clock size={14} /> ~10 perc</div>
-                  <div className="flex items-center gap-1.5"><ICONS.CheckCircle size={14} /> 4 kérdés</div>
-                  <div className="flex items-center gap-1.5"><ICONS.Lock size={14} /> Csak neked látható</div>
-                </div>
-                {practiceLog && practiceLog.answers && practiceLog.answers.length > 0 && (
-                  <p className="text-[11px] text-slate-400">
-                    Legutóbbi gyakorlás: {new Date(practiceLog.at).toLocaleString('hu-HU')} · {practiceLog.answers.length} válasz
-                  </p>
-                )}
-              </div>
-              <button 
-                onClick={() => setShowVideoInterview(true)}
-                className="bg-white text-indigo-600 border-2 border-indigo-200 px-8 py-4 rounded-2xl font-bold hover:bg-indigo-50 transition-all whitespace-nowrap"
-              >
-                Gyakorlás indítása
-              </button>
-            </div>
-          </div>
         </>
       )}
     </div>
@@ -12874,13 +12539,11 @@ Object.assign(HU_EN, {
   'Valódi felvételi interjú — időpontfoglalás':'Real admission interview — book a slot',
   'Ez számít a bírálatba':'This counts toward the decision',
   'Válassz egy számodra megfelelő időpontot a felvételi beszélgetéshez (Teams/Zoom). A felvételi döntés kizárólag ezen az interjún alapul.':'Pick a slot that suits you for the admission interview (Teams/Zoom). The admission decision is based on this interview alone.',
-  'AI interjú-gyakorlás':'AI interview practice',
   'Gyakorlás · nem értékeljük':'Practice · not evaluated',
   'Felkészülési eszköz: 4 tipikus felvételi kérdésre válaszolhatsz videón, hogy magabiztosabb legyél.':'A preparation tool: answer 4 typical admission questions on video to build confidence.',
   'Ez NEM váltja ki a valódi felvételi interjút':'This does NOT replace the real admission interview',
   '— a felvétel nálad marad, nem küldjük be a felvételi bizottságnak, és nem számít bele a bírálatba.':'— the recording stays with you, it is not submitted to the admissions committee and does not count toward the decision.',
   'Csak neked látható':'Visible only to you',
-  'Gyakorlás indítása':'Start practice',
   'Gyakorlási mód — nem a valódi felvételi interjú':'Practice mode — not the real admission interview',
   'Felkészülési gyakorlat: 4 tipikus felvételi kérdésre válaszolhatsz videón. Kérjük, győződj meg róla, hogy jól megvilágított helyen vagy és a mikrofonod megfelelően működik.':'A preparation exercise: answer 4 typical admission questions on video. Please make sure you are in a well-lit place and your microphone works properly.',
   'Ez gyakorlás, nem a valódi felvételi interjú.':'This is practice, not the real admission interview.',
@@ -12890,13 +12553,22 @@ Object.assign(HU_EN, {
   'Készen vagy a gyakorlással!':'Practice complete',
   'Végigmentél mind a 4 gyakorlókérdésen. A felvételeidet nem küldtük el senkinek — a gyakorlás eredménye nem számít bele a felvételi bírálatba.':'You went through all 4 practice questions. Your recordings were not sent to anyone — the practice result does not count toward the admission decision.',
   'A következő lépés: foglalj időpontot a valódi felvételi interjúra az Interjúk fülön.':'Next step: book a slot for the real admission interview on the Interviews tab.',
-  'Ehhez a jelentkezőhöz még nem tartozik rögzített felvételi interjú. A jelentkezői portál AI interjú-gyakorlása szándékosan nem jelenik meg itt: az felkészülés, nem bírálati anyag.':'There is no recorded admission interview for this applicant yet. The AI interview practice in the applicant portal deliberately does not appear here: it is preparation, not assessment material.',
+  'Ehhez a jelentkezőhöz még nem tartozik rögzített felvételi interjú. Az interjú élőben, a lefoglalt időponton zajlik — a felvétel onnan kerül ide, ha készült.':'There is no recorded admission interview for this applicant yet. The interview takes place live at the booked slot — the recording appears here if one was made.',
   'Vissza az interjúkhoz':'Back to interviews',
 });
 // A gyakorlás-napló sora számot tartalmaz, ezért kifejezés-mintával fordítjuk.
 HU_EN_PHRASES.push(
   // 79-80 — kutatók
   [/(\d+) \/ (\d+) kutató/g, '$1 / $2 researchers'],
+  /* Külügyi iroda (2026-09-24) — számot tartalmazó feliratok */
+  [/^(\d+)\/(\d+) beküldés felhasználva — még (\d+) próbálkozásod van\.$/g,
+    '$1/$2 submissions used — you have $3 attempt(s) left.'],
+  [/^Elhasználtad mind a (\d+) beküldési lehetőséget — új feladatsor már nem generálható\. Az eredményt a felvételi iroda értékeli\.$/g,
+    'You have used all $1 submissions — no new problem set can be generated. The Admissions Office will assess the result.'],
+  [/^A beadás után következik: (.+)\. Ezeket a beadott jelentkezésednél tudod elvégezni\.$/g,
+    'After submitting: $1. You can complete these in your submitted application.'],
+  [/^Ezekre a programokra a már felvett hallgatók jelentkezhetnek\. Böngészd nyugodtan — amint megszületik a felvételi döntésed, a jelentkezés is megnyílik\.$/g,
+    'These programmes are open to students who have already been admitted. Feel free to browse — once your admission decision is made, applying opens up too.'],
   [/^(\d+) összekötve; (\d+) névjavaslat maradt egyenkénti döntésre\.$/g,
     '$1 linked; $2 name suggestions left for one-by-one decisions.'],
   /* 82 — a rendezhető kutatói lista számot tartalmazó feliratai */
@@ -13706,6 +13378,33 @@ Object.entries({
   'Nem lett kitöltve — legalább egy célt adj meg (e nélkül a félév végén nincs mit értékelni).': 'Not filled in — add at least one goal (otherwise there is nothing to evaluate at the end of the term).',
   'A hiányzó válaszokat pirossal jelöltük a kérdéseknél.': 'Missing answers are marked in red at the questions.',
   'Célmeghatározás/Értékelés': 'Goal setting/Evaluation',
+  /* Külügyi iroda észrevételei (2026-09-24) — jelentkezési folyamat */
+  'A céglátogatásokra, tanulmányi kirándulásokra és továbbképzésekre a már felvett hallgatók jelentkezhetnek. A te felvételi eljárásod még folyamatban van — amint megszületik a döntés, ez a jelentkezés is megnyílik.':
+    'Company visits, study excursions and trainings are open to students who have already been admitted. Your admission procedure is still in progress — once the decision is made, this application opens up as well.',
+  'Addig a Képzések menüpontban tudsz jelentkezni a féléves képzésekre és az előkészítőre.':
+    'Until then you can apply for the semester programmes and the preparatory course under Programmes.',
+  'Nincs mit megnyitni: a jelentkezés képzéseinél nincs beállítva kötelező dokumentum, és a jelentkező sem töltött fel semmit. A kötelező dokumentumokat a Képzések menüpontban, a képzés szerkesztőjében lehet megadni.':
+    'There is nothing to open: no required documents are set for the programmes of this application, and the applicant has not uploaded anything either. Required documents can be set in the programme editor, under Programmes.',
+  'Ehhez a jelentkezéshez nincs kötelező dokumentum megadva a képzésnél.':
+    'No required document has been set for this application at the programme.',
+  'Beadás': 'Submit',
+  'Útlevélszám': 'Passport number',
+  'Kötelező — pontosan úgy, ahogy az útleveled adatoldalán szerepel.':
+    'Required — exactly as it appears on the data page of your passport.',
+  'Az útlevélszám 5–20 betű vagy szám, szóköz nélkül.':
+    'The passport number is 5–20 letters or digits, without spaces.',
+  'Előbb töltsd ki az előtte lévő lépéseket.': 'Fill in the preceding steps first.',
+  'Felvétel után': 'After admission',
+  'Ezek még hátravannak': 'Still to come',
+  'Új feladatsor': 'New problem set',
+  'Nincs előírt dokumentum': 'No documents required',
+  'Ehhez a jelentkezéshez nincs kötelező dokumentum megadva.':
+    'No required documents have been set for this application.',
+  'Ez a program a felvett hallgatóké': 'This programme is for admitted students',
+  'Értem': 'Got it',
+  'A befizetési határidő alapértelmezés szerint a levél keltétől számított két hét. Csak indokolt esetben írd át.':
+    'By default the payment deadline is two weeks from the date of issue. Change it only with good reason.',
+  'Nincs rögzített interjú': 'No recorded interview',
   /* 84 — sorrendfüggetlen névegyeztetés */
   'Névjavaslatok elfogadása': 'Accept name suggestions',
   /* 83 — a validált lista importja */
