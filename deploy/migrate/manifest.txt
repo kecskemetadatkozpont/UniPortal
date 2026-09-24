@@ -90,3 +90,4 @@
 77_grants_core.sql
 78_grants_calendar.sql
 79_grants_researchers.sql
+80_grants_discovery.sql
