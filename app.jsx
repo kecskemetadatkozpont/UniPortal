@@ -12561,6 +12561,8 @@ HU_EN_PHRASES.push(
   // 79-80 — kutatók
   [/(\d+) \/ (\d+) kutató/g, '$1 / $2 researchers'],
   /* ECHO: számot tartalmazó keretfeliratok */
+  [/^Oktatás nyelve: (.+) · a kurzusértékelő kérdőív (.+) nyelven megy ki$/g,
+    'Language of instruction: $1 — the course evaluation questionnaire is sent in $2'],
   [/^A kurzus nyelvén \((\w+)\) nincs jóváhagyott fordítás, ezért a kérdőívet magyarul mutatjuk\.$/g,
     'There is no approved translation in the course language ($1), so the questionnaire is shown in Hungarian.'],
   [/^(\d+)\. lépés \/ (\d+)$/g, 'Step $1 / $2'],
@@ -13383,6 +13385,15 @@ Object.entries({
   'Nem lett kitöltve — legalább egy célt adj meg (e nélkül a félév végén nincs mit értékelni).': 'Not filled in — add at least one goal (otherwise there is nothing to evaluate at the end of the term).',
   'A hiányzó válaszokat pirossal jelöltük a kérdéseknél.': 'Missing answers are marked in red at the questions.',
   'Célmeghatározás/Értékelés': 'Goal setting/Evaluation',
+  /* Kurzusok — az oktatás nyelve és ami ebből következik */
+  'Minden nyelv': 'Any language',
+  'magyar': 'Hungarian', 'angol': 'English', 'német': 'German', 'egyéb': 'other',
+  'Ez dönti el, milyen nyelven kapja a hallgató a kurzusértékelő kérdőívet. Német vagy egyéb nyelvnél magyarul kérdezünk.':
+    'This decides the language of the course evaluation questionnaire the student receives. For German or other languages we ask in Hungarian.',
+  'Angol nyelvű kurzus angol megnevezés nélkül: a kérdőív fölött a magyar cím fog állni.':
+    'English-taught course without an English name: the Hungarian title will appear above the questionnaire.',
+  'A kérdőívnek csak magyar és angol változata van, ezért ezen a kurzuson magyarul kérdezünk.':
+    'The questionnaire exists only in Hungarian and English, so on this course we ask in Hungarian.',
   /* ECHO — a félév eleji célmeghatározó képernyő feliratai */
   'A félév elején kitűzött célok csak a Tiéd — az oktató nem látja őket, és a félév végi értékelésbe sem kerülnek át. Egyedül azt visszük tovább, hogy a céljaid mennyiben teljesültek.':
     'The goals you set at the start of term are yours alone — the teacher does not see them, and they are not carried into the end-of-term evaluation. The only thing carried over is how far your goals were met.',
