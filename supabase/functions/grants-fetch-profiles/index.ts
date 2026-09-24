@@ -112,7 +112,24 @@ Deno.serve(async (req) => {
   }
 
   if (!kutatok.length) {
-    return json({ ok: true, feldolgozva: 0, uzenet: 'Nincs szinkronra váró, összekötött kutató.',
+    /* MIÉRT NEM TALÁL SEMMIT: metaadatot csak arról a kutatóról lehet letölteni,
+       akit összekötöttünk egy forrással. A törzsbe felvitt személynek addig
+       nincs openalex_id / mtmt_id mezője, amíg a párosítás és az összekötés le
+       nem futott — MÉRVE 2026-09-25-én: 200 mintavett kutatóból 0-nak volt
+       azonosítója, a gomb pedig „0 kutató, 0 mű" üzenettel tért vissza, ami
+       úgy hangzott, mintha nem lenne mit letölteni. A válasz ezért most
+       megmondja, hány kutató vár összekötésre, és mi a következő lépés. */
+    const { data: ossz } = await svc.rpc('grants_researchers_to_sync', { p_limit: 200, p_napok: napok });
+    const varo = ((ossz ?? []) as { openalex_id: string | null; mtmt_id: string | null }[]);
+    const osszekotetlen = varo.filter((k) => !k.openalex_id && !k.mtmt_id).length;
+    return json({ ok: true, feldolgozva: 0, kutato: 0, mu: 0, maradt: 0,
+                  osszekotetlen,
+                  uzenet: osszekotetlen > 0
+                    ? `Nincs egyetlen ÖSSZEKÖTÖTT kutató sem: ${osszekotetlen} kutatónak nincs `
+                      + 'OpenAlex- vagy MTMT-azonosítója. Metaadatot csak összekötött kutatóról lehet '
+                      + 'letölteni — előbb futtasd a „Párosítás a felderítéssel", majd a '
+                      + '„Névjavaslatok elfogadása" lépést.'
+                    : 'Nincs szinkronra váró kutató — mindenki friss.',
                   masodperc: 0, dry });
   }
 

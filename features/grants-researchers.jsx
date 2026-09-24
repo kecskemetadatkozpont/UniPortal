@@ -596,6 +596,10 @@ function GRTR_KutatokView() {
       for (;;) {
         korok++;
         const r = await GRTR_api.profilKoteg({ koteg: 8, napok: 7 });
+        /* NINCS MIT LETÖLTENI ≠ KÉSZ. Ha a szerver azt mondja, hogy nincs
+           összekötött kutató, azt ki kell írni — a „0 kutató, 0 mű" siker-
+           üzenet korábban úgy hangzott, mintha nem lenne mit letölteni. */
+        if (r.uzenet && !r.kutato) { setHalad(r.uzenet); setToast(''); break; }
         kutato += r.kutato || 0; mu += r.mu || 0;
         setHalad(`${kutato} kutató, ${mu} mű — még ${r.maradt ?? 0} kutató hátra`
                  + (r.hiba ? ` (${r.hiba} hiba)` : ''));
@@ -605,7 +609,7 @@ function GRTR_KutatokView() {
         // vég nélkül. 40 kör × 8 kutató jóval a mostani 273 fölött van.
         if (korok >= 40) { setHalad(h => h + ' — a letöltés megállt, indítsd újra'); break; }
       }
-      setToast(`Metaadatok letöltve: ${kutato} kutató, ${mu} mű.`);
+      if (kutato || mu) setToast(`Metaadatok letöltve: ${kutato} kutató, ${mu} mű.`);
     } catch (e) { setErr(GRT_msg(e)); }
     finally { setBusy(false); }
   };
