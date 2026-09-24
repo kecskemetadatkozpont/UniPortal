@@ -174,6 +174,13 @@ async function mtmtSzerzok(max: number) {
         szervezeti_egyseg: e.nev,
         mu_db: a.publicationCount ?? null,
         idezet: a.citationCount ?? null,
+        /* JELENLEGI AFFILIÁCIÓ. Az OpenAlexnél ez azt jelenti, hogy az NJE a
+           legutolsó ismert affiliáció; az MTMT-nél viszont a lekérdezés MAGA
+           szűr az NJE intézményfájára (affiliations.worksFor), tehát aki
+           visszajön, az MOST is hozzánk tartozik. Enélkül a mező üres maradt,
+           és a kötegelt összekötés — amely alapértelmezés szerint csak a
+           jelenlegi affiliációt fogadja el — minden MTMT-sort kihagyott. */
+        utolso_affiliacio: true,
         temak: szakterulet ? [{ topic: szakterulet, db: null }] : [],
         payload: {
           mtid: a.mtid, label: a.label, szakterulet,
