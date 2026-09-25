@@ -48,13 +48,61 @@ html.sotet input[type="checkbox"], html.sotet input[type="radio"] { accent-color
    feleslegesen fest. */
 @media print { html.sotet, html.sotet body { background: #fff; color: #0f172a; } }
 
-/* AZ OLDALSÁV: a márkaszín marad, de tompítva.
-   Teljes erejű narancs egy sötét lapon éjszaka bántó — a márkát nem cseréljük
-   le, csak mélyítjük, hogy a tartalom maradjon a hangsúlyos. Az elsődleges
-   gombok (ugyanaz a bg-primary) viszont élénkek maradnak: azokból kevés van,
-   és ott a hangsúly a cél. Ezért célzott szabály, nem a bg-primary átírása. */
-html.sotet aside.nje-sidebar { background-color: #8f4a06; }
-html.sotet aside.nje-sidebar .bg-white\/10 { background-color: rgba(0, 0, 0, 0.18); }
+/* ============================================================================
+   AZ OLDALSÁV SÖTÉTBEN
+   ----------------------------------------------------------------------------
+   Világos módban az oldalsáv NARANCS FELÜLET, fehér szöveggel — ez adja a
+   lap arculatát. Sötétben ez nem működik: a teljes erejű narancs éjszaka
+   bántó, a tompított viszont (első kísérlet: #8f4a06) sáros barnának látszik,
+   mert a narancs kis fényerőn elveszíti a telítettségét.
+
+   A megoldás nem a narancs halványítása, hanem a SZEREPCSERE: sötétben az
+   oldalsáv MÉLY FELÜLET lesz — a lapnál is mélyebb, így kerethatása van —, a
+   márkaszín pedig KIEMELÉSSÉ válik. Narancs ott van, ahol jelent valamit:
+   a logón, és azon az egy menüponton, ahol a felhasználó éppen áll.
+   ============================================================================ */
+html.sotet aside.nje-sidebar {
+  background-color: #0a111e;                      /* a lapnál (#0b1220) is mélyebb */
+  border-right: 1px solid rgba(148, 163, 184, 0.10);
+  box-shadow: none;                               /* sötéten a vetett árnyék csak piszkol */
+}
+
+/* Elválasztók: a fehér áttetszőség sötéten túl erős, hűvös szürkére váltjuk. */
+html.sotet aside.nje-sidebar .border-white\/10,
+html.sotet aside.nje-sidebar .border-white\/15 { border-color: rgba(148, 163, 184, 0.12); }
+
+/* A logó és a PRO jelvény: világosban fehér folt a narancson, sötétben
+   fordítva — a narancs a jel, nem a háttér. */
+html.sotet aside.nje-sidebar [data-sidebar-jel] {
+  background-color: #d06700;
+  color: #ffffff;
+}
+
+/* Inaktív menüpont: nyugodt, hűvös szürke; a rávitel enyhén világosít. */
+html.sotet aside.nje-sidebar .text-white\/70 { color: #9fb0c7; }
+html.sotet aside.nje-sidebar .text-white\/55 { color: #6b7b93; }   /* csoportcímek */
+html.sotet aside.nje-sidebar .text-white\/50 { color: #7c8da6; }   /* ikonok */
+html.sotet aside.nje-sidebar .text-white\/80 { color: #aebdd1; }   /* alcím */
+html.sotet aside.nje-sidebar .hover\:bg-white\/10:hover { background-color: rgba(255, 255, 255, 0.06); }
+html.sotet aside.nje-sidebar .hover\:text-white:hover,
+html.sotet aside.nje-sidebar .group:hover .group-hover\:text-white { color: #f1f5fb; }
+
+/* AZ AKTÍV MENÜPONT — itt a márkaszín. Nem fehér fátyol, hanem narancs:
+   egy pillantással látszik, hol állunk. */
+html.sotet aside.nje-sidebar [aria-current="page"] {
+  background-color: rgba(208, 103, 0, 0.20);
+  box-shadow: inset 0 0 0 1px rgba(255, 152, 66, 0.28);
+  color: #ffd9b8;
+}
+html.sotet aside.nje-sidebar [aria-current="page"] span { color: #ffd9b8; }
+/* A bal széli jelölősáv (bg-white) és az összecsukott sáv gyűrűje is narancs. */
+html.sotet aside.nje-sidebar [aria-current="page"] .bg-white { background-color: #ff9842; }
+html.sotet aside.nje-sidebar [aria-current="page"].ring-white\/40 { --tw-ring-color: rgba(255, 152, 66, 0.45); }
+html.sotet aside.nje-sidebar .bg-white\/25,
+html.sotet aside.nje-sidebar .bg-white\/20 { background-color: rgba(208, 103, 0, 0.20); }
+
+/* A lap alján ülő felhasználói doboz ugyanezt a nyugodt hangot viszi. */
+html.sotet aside.nje-sidebar .bg-white\/10 { background-color: rgba(255, 255, 255, 0.05); }
 
 /* ----------------------------------------------------------------------------
    A generált leképezés. A forrás: scripts/sotet_gen.py (a használt

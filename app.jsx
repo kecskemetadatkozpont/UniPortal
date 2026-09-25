@@ -1182,6 +1182,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           <div className="flex justify-center">
             <span
               className="w-11 h-11 rounded-xl bg-white text-primary font-black text-sm flex items-center justify-center tracking-tight"
+              data-sidebar-jel="1"
               title="UniPortal Pro — Neumann János Egyetem"
             >UP</span>
           </div>
@@ -1189,7 +1190,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           <div className="flex flex-col gap-3">
             <div className="flex items-center gap-2.5">
               <span className="font-black text-2xl text-white tracking-tight leading-none">UniPortal</span>
-              <span className="text-[10px] font-black tracking-[0.15em] text-primary bg-white px-1.5 py-1 rounded">PRO</span>
+              <span data-sidebar-jel="1" className="text-[10px] font-black tracking-[0.15em] text-primary bg-white px-1.5 py-1 rounded">PRO</span>
             </div>
             <div>
               <p className="text-[10px] text-white/80 font-black uppercase tracking-widest">Neumann János Egyetem</p>
