@@ -109,3 +109,4 @@
 96_grants_team_auto.sql
 97_grants_suly_ujrahangolas.sql
 98_grants_rerank.sql
+99_grants_call_details.sql

@@ -10,6 +10,8 @@
 //   mod: 'arculat'   — a nyitott felhívások 3–6 arculatra bontása (grants-ai),
 //                      és az arculatok beágyazása
 //   mod: 'illesztes' — a friss arculatú felhívások újrapárosítása
+//   mod: 'reszletek' — beadandó dokumentumok és elvárt eredmények (KPI) az
+//                      EU téma-részlet végpontjáról
 //   mod: 'csapat'    — csapatjavaslat MINDEN felhívásra, nem csak a megnyitottra
 //   mod: 'mind'      — mind a hat, időkeretre vágva
 //
@@ -456,9 +458,13 @@ async function arculatLepes(sb: ReturnType<typeof createClient>, hatarido: numbe
           cim: c.cim, cim_en: c.cim_en, program: c.program, tipus: c.tipus,
           kedvezmenyezett: c.kedvezmenyezett,
           kivonat: c.kivonat,
-          // A felhívás teljes szövege a betöltött payloadban lehet; ha nincs, a
-          // kivonat marad. Vágjuk, hogy a kérés ne fusson korlátba.
-          szoveg: String(p.description ?? p.leiras ?? p.szoveg ?? '').slice(0, 12000) || null,
+          // A téma-részletekből jövő elvárt eredmény és hatókör a legjobb
+          // forrás; ha még nincs meg, a payload, végül a kivonat marad.
+          elvart_eredmeny: c.elvart_eredmeny || null,
+          hatokor: c.hatokor || null,
+          szoveg: String(c.elvart_eredmeny || '').concat(
+                    c.hatokor ? '\n\n' + String(c.hatokor) : '').trim()
+                  || String(p.description ?? p.leiras ?? p.szoveg ?? '').slice(0, 12000) || null,
         },
       });
       const lista = (((r.eredmeny ?? {}) as Record<string, unknown>).arculatok ?? []) as Array<Record<string, string>>;
@@ -542,6 +548,117 @@ async function csapatLepes(sb: ReturnType<typeof createClient>, hatarido: number
   return { sorban: varo.length, felhivas, csapat, jelolt_nelkul: ures, hiba, hibak };
 }
 
+/* ---------- EU téma-részletek ----------
+   MÉRVE 2026-09-25: a portál téma-részlet végpontja kulcs nélkül elérhető,
+   felhívásonként ~45 kB, és ez tartalmazza azt, amit a tömeges állomány nem:
+   a beadandó dokumentumokat névvel és linkkel, valamint az „Expected Outcome"
+   és „Scope" szakaszokat — a felhívás KPI-jait. */
+const HTML_ENTITAS: Record<string, string> = {
+  '&nbsp;': ' ', '&#xa0;': ' ', '&amp;': '&', '&lt;': '<', '&gt;': '>',
+  '&quot;': '"', '&#39;': "'", '&rsquo;': '\u2019', '&ndash;': '–', '&mdash;': '—',
+};
+function szovegge(html: string | null | undefined) {
+  let t = String(html ?? '');
+  t = t.replace(/<\/(p|div|li|tr|h[1-6])>/gi, '\n');
+  t = t.replace(/<br\s*\/?>/gi, '\n');
+  t = t.replace(/<[^>]+>/g, ' ');
+  for (const [k, v] of Object.entries(HTML_ENTITAS)) t = t.split(k).join(v);
+  t = t.replace(/&#x?[0-9a-f]+;/gi, ' ');
+  return t.replace(/[ \t]+/g, ' ').replace(/\n\s*\n+/g, '\n').trim();
+}
+
+/* A dokumentum fajtája a nevéből. Nem tökéletes besorolás, de az irodának ez
+   mondja meg, mit keres: űrlapot, költségvetést vagy szerződésmintát. */
+function dokTipus(nev: string) {
+  const n = nev.toLowerCase();
+  if (/application form|part a|part b/.test(n)) return 'urlap';
+  if (/budget/.test(n)) return 'koltsegvetes';
+  if (/evaluation form/.test(n)) return 'ertekelo';
+  if (/\bmga\b|grant agreement/.test(n)) return 'szerzodes';
+  if (/work programme|general annex/.test(n)) return 'munkaprogram';
+  if (/guide|manual|faq|guidance/.test(n)) return 'utmutato';
+  return 'egyeb';
+}
+
+async function reszletekLepes(sb: ReturnType<typeof createClient>, hatarido: number, limit: number) {
+  const { data: sor, error } = await sb.rpc('grants_call_details_queue', { p_limit: limit, p_napok: 30 });
+  if (error) throw new Error('grants_call_details_queue: ' + error.message);
+  const varo = (sor ?? []) as Array<Record<string, unknown>>;
+  let felhivas = 0, dok = 0, kpi = 0, hiba = 0;
+  const hibak: string[] = [];
+
+  for (const c of varo) {
+    if (Date.now() > hatarido) break;
+    const azon = String(c.azonosito ?? '').toLowerCase();
+    if (!azon) continue;
+    try {
+      const v = await fetch(
+        `https://ec.europa.eu/info/funding-tenders/opportunities/data/topicDetails/${encodeURIComponent(azon)}.json`,
+        { headers: { 'Accept': 'application/json', 'User-Agent': UA } });
+      if (!v.ok) throw new Error('HTTP ' + v.status);
+      const j = await v.json();
+      const d = (j?.TopicDetails ?? {}) as Record<string, unknown>;
+
+      // Az „Expected Outcome" és a „Scope" egy mezőben jön, egymás után.
+      const leiras = szovegge(d.description as string);
+      const i = leiras.search(/\bScope\s*:/i);
+      const elvart = (i > 0 ? leiras.slice(0, i) : leiras).replace(/^Expected Outcome\s*:?\s*/i, '').trim();
+      const hatokor = i > 0 ? leiras.slice(i).replace(/^Scope\s*:?\s*/i, '').trim() : '';
+
+      const felt = String(d.conditions ?? '');
+      const feltSzoveg = szovegge(felt);
+      const ertM = feltSzoveg.match(/Award criteria, scoring and thresholds([\s\S]{0,900})/i);
+      const oldM = feltSzoveg.match(/(Proposal page limit[\s\S]{0,400})/i);
+
+      // A dokumentumok a feltételek HTML-jében, horgonyokként állnak.
+      const dokok: Array<Record<string, unknown>> = [];
+      const latott = new Set<string>();
+      const kezd = felt.toLowerCase().indexOf('application and evaluation forms');
+      const szakasz = kezd >= 0 ? felt.slice(kezd) : felt;
+      const re = /<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(szakasz)) !== null && dokok.length < 30) {
+        const nev = szovegge(m[2]).slice(0, 160);
+        if (!nev || latott.has(nev)) continue;
+        latott.add(nev);
+        dokok.push({ nev, url: m[1], tipus: dokTipus(nev), fajl: /\.(pdf|docx?|xlsx?|zip)(\?|$)/i.test(m[1]) });
+      }
+      // Ami csak hivatkozás egy mellékletre („described in Annex D"), az is
+      // fontos az irodának — de NEM fájl, és ezt ki is mondjuk.
+      for (const am of feltSzoveg.matchAll(/described in ((?:General )?Annex [A-Z])/gi)) {
+        const nev = 'Hivatkozás: ' + am[1];
+        if (latott.has(nev) || dokok.length >= 40) continue;
+        latott.add(nev);
+        dokok.push({ nev, url: null, tipus: 'munkaprogram', fajl: false,
+                     megjegyzes: 'A Work Programme általános mellékletében található.' });
+      }
+
+      const { data: r, error: e2 } = await sb.rpc('grants_call_details_set', {
+        p_call: c.call_id,
+        p_adat: {
+          elvart_eredmeny: elvart.slice(0, 20000),
+          hatokor: hatokor.slice(0, 20000),
+          ertekeles: (ertM ? ertM[1] : '').trim().slice(0, 4000),
+          oldalkorlat: (oldM ? oldM[1] : '').trim().slice(0, 1000),
+          dokumentumok: dokok,
+        },
+      });
+      if (e2) throw new Error('grants_call_details_set: ' + e2.message);
+      felhivas++;
+      dok += Number((r as Record<string, number>)?.dokumentum ?? 0);
+      if (elvart) kpi++;
+      await varj(200);
+    } catch (e) {
+      hiba++;
+      if (hibak.length < 3) hibak.push(String(c.cim).slice(0, 40) + ': ' + (e instanceof Error ? e.message : String(e)).slice(0, 90));
+      // A hibát is eltesszük, hogy a sor ne kérdezze újra egy hónapig.
+      await sb.rpc('grants_call_details_set',
+        { p_call: c.call_id, p_adat: { hiba: (e instanceof Error ? e.message : String(e)).slice(0, 200) } });
+    }
+  }
+  return { sorban: varo.length, felhivas, dokumentum: dok, kpi, hiba, hibak };
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   if (req.method !== 'POST') return json({ hiba: 'Csak POST.' }, 405);
@@ -585,6 +702,9 @@ Deno.serve(async (req) => {
     if (mod === 'meta' || mod === 'mind') ki.meta = await metaLepes(sb, hatarido, limit);
     if (mod === 'beagyazas' || mod === 'mind') ki.beagyazas = await beagyazasLepes(sb, hatarido, limit);
     if (mod === 'klaszter' || mod === 'mind') ki.klaszter = await klaszterLepes(sb, hatarido, Math.min(50, limit));
+    // A részletek MEGELŐZIK az arculatokat: a gazdagabb szövegből pontosabb
+    // arculat készül, és a sorrend így egy körben hoz eredményt.
+    if (mod === 'reszletek' || mod === 'mind') ki.reszletek = await reszletekLepes(sb, hatarido, Math.min(20, limit));
     if (mod === 'arculat' || mod === 'mind') {
       const idk = Array.isArray((test as { call_ids?: unknown }).call_ids)
         ? ((test as { call_ids: unknown[] }).call_ids).map((x) => String(x)) : undefined;
@@ -592,9 +712,9 @@ Deno.serve(async (req) => {
     }
     if (mod === 'illesztes' || mod === 'mind') ki.illesztes = await illesztesLepes(sb, hatarido, Math.min(25, limit));
     if (mod === 'csapat' || mod === 'mind') ki.csapat = await csapatLepes(sb, hatarido, Math.min(25, limit));
-    if (!['meta', 'beagyazas', 'klaszter', 'arculat', 'illesztes', 'csapat', 'mind'].includes(mod)) {
+    if (!['meta', 'beagyazas', 'klaszter', 'reszletek', 'arculat', 'illesztes', 'csapat', 'mind'].includes(mod)) {
       return json({ hiba: 'Ismeretlen mód: ' + mod
-                          + '. Lehetséges: meta, beagyazas, klaszter, arculat, illesztes, csapat, mind.' }, 400);
+                          + '. Lehetséges: meta, beagyazas, klaszter, reszletek, arculat, illesztes, csapat, mind.' }, 400);
     }
     // A szöveges ujjlenyomat és a társszerzőségi gráf az új absztraktokból
     // épül újra — e nélkül a token-út nem látná az új adatot.

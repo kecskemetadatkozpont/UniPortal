@@ -31,6 +31,8 @@ const GRT_api = {
                                   p_napon_belul: p.napon || null,
                                   p_limit: p.limit || 100, p_offset: p.offset || 0 }),
   callGet:     (id)          => GRT_rpc('grants_call_get', { p_call: id }),
+  // Beadandó dokumentumok és elvárt eredmények (99_grants_call_details.sql).
+  callDetails: (id)          => GRT_rpc('grants_call_details', { p_call: id }),
   callSave:    (adat)        => GRT_rpc('grants_call_save', { p_adat: adat }),
   callArchive: (id, arch)    => GRT_rpc('grants_call_archive', { p_call: id, p_archivalt: arch !== false }),
   options:     ()            => GRT_rpc('grants_call_options'),
@@ -149,16 +151,105 @@ function GRT_CallCard({ sor, onNyit }) {
 }
 
 /* --- felhívás részletei --------------------------------------------------- */
+const GRT_DOK_TIPUS = {
+  urlap: 'pályázati űrlap', koltsegvetes: 'költségvetés', ertekelo: 'értékelőlap',
+  szerzodes: 'szerződésminta', munkaprogram: 'munkaprogram', utmutato: 'útmutató', egyeb: 'egyéb',
+};
+
+/* Beadandó dokumentumok és elvárt eredmények. A felhívás szövegéből gépi körben
+   készül; amíg nincs meg, ezt ki is írjuk — nem hagyjuk üresen a szakaszt. */
+function GRT_Reszletek({ r }) {
+  if (!r) return null;
+  const dok = r.dokumentumok || [];
+  const nincsSemmi = !r.elvart_eredmeny && !r.hatokor && dok.length === 0;
+  if (nincsSemmi) {
+    return (
+      <div className="bg-slate-50 rounded-2xl p-4">
+        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
+          Beadandó dokumentumok és elvárt eredmények
+        </p>
+        <p className="text-sm text-slate-500">
+          {r.hiba
+            ? `A kiíró oldaláról nem sikerült betölteni: ${r.hiba}`
+            : 'Még nem töltöttük le a kiíró oldaláról — a gépi kör hamarosan sorra veszi.'}
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-4">
+      {r.elvart_eredmeny && (
+        <div className="bg-emerald-50/60 border border-emerald-100 rounded-2xl p-4">
+          <p className="text-[10px] font-black text-emerald-700 uppercase tracking-widest mb-2">
+            Elvárt eredmények — ezen mérnek minket
+          </p>
+          <p className="text-sm text-slate-700 whitespace-pre-line">{r.elvart_eredmeny}</p>
+        </div>
+      )}
+      {r.hatokor && (
+        <div className="bg-slate-50 rounded-2xl p-4">
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Hatókör</p>
+          <p className="text-sm text-slate-600 whitespace-pre-line">{r.hatokor}</p>
+        </div>
+      )}
+      {dok.length > 0 && (
+        <div className="bg-slate-50 rounded-2xl p-4">
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
+            {`Beadandó és kapcsolódó dokumentumok (${dok.length})`}
+          </p>
+          <ul className="space-y-1.5">
+            {dok.map((x, i) => (
+              <li key={i} className="flex items-start gap-2">
+                <Lucide.FileText size={13} className="flex-none mt-1 text-slate-400" />
+                <span className="min-w-0">
+                  {x.url
+                    ? <a href={x.url} target="_blank" rel="noopener noreferrer"
+                        className="text-sm font-bold text-primary hover:underline break-words">{x.nev}</a>
+                    : <span className="text-sm font-bold text-slate-600">{x.nev}</span>}
+                  <span className="text-[11px] text-slate-400 ml-1.5">
+                    {`${GRT_DOK_TIPUS[x.tipus] || x.tipus}${x.fajl ? '' : ' · hivatkozás, nem fájl'}`}
+                  </span>
+                  {x.megjegyzes && <span className="block text-[11px] text-slate-400">{x.megjegyzes}</span>}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {(r.oldalkorlat || r.ertekeles) && (
+        <div className="grid gap-3 sm:grid-cols-2">
+          {r.oldalkorlat && (
+            <div className="bg-slate-50 rounded-2xl p-4">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Formai korlát</p>
+              <p className="text-[13px] text-slate-600">{r.oldalkorlat}</p>
+            </div>
+          )}
+          {r.ertekeles && (
+            <div className="bg-slate-50 rounded-2xl p-4">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Értékelés és küszöbök</p>
+              <p className="text-[13px] text-slate-600">{r.ertekeles}</p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function GRT_CallModal({ open, id, onClose, onValtozott }) {
   const [d, setD] = useState(null);
+  const [reszlet, setReszlet] = useState(null);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (!open || !id) { setD(null); setErr(''); return; }
+    if (!open || !id) { setD(null); setReszlet(null); setErr(''); return; }
     let el = true;
-    setD(null); setErr('');
+    setD(null); setReszlet(null); setErr('');
     GRT_api.callGet(id).then(x => { if (el) setD(x); }).catch(e => { if (el) setErr(GRT_msg(e)); });
+    // A részletek külön kérésben: ha nincs jogosultság hozzá, a felhívás
+    // adatlapja attól még megjelenik.
+    GRT_api.callDetails(id).then(x => { if (el) setReszlet(x); }).catch(() => {});
     return () => { el = false; };
   }, [open, id]);
 
@@ -240,6 +331,10 @@ function GRT_CallModal({ open, id, onClose, onValtozott }) {
               <p className="text-sm text-slate-600 leading-relaxed">{d.kivonat}</p>
             </div>
           )}
+
+          {/* Mit kell kitölteni és mit mérnek rajtunk — a kiíró oldaláról
+              betöltve. A részletes szövegeket idézzük, a teljes felhívást nem. */}
+          <GRT_Reszletek r={reszlet} />
 
           {/* A teljes felhívásszöveget nem közöljük újra — mindig az eredetire
               hivatkozunk, és ez jogi döntés, nem kényelmi. */}

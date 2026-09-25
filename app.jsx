@@ -12654,6 +12654,14 @@ Object.assign(HU_EN, {
   'Elfogadom': 'I accept',
   'Nem vállalom': 'I decline',
   'A felhívás oldala': 'The call\u2019s page',
+  // 99 — beadandó dokumentumok és elvárt eredmények
+  'Beadandó dokumentumok és elvárt eredmények': 'Documents to submit and expected outcomes',
+  'Elvárt eredmények — ezen mérnek minket': 'Expected outcomes — this is what we are measured on',
+  'Hatókör': 'Scope',
+  'Formai korlát': 'Format limit',
+  'Értékelés és küszöbök': 'Evaluation and thresholds',
+  'Még nem töltöttük le a kiíró oldaláról — a gépi kör hamarosan sorra veszi.':
+    'Not yet fetched from the funder\u2019s site — the automated round will get to it.',
   // 96 — nevek a listakártyán
   'Nyitott felhívások és a javasolt csapat': 'Open calls and the proposed team',
   'A javaslatok gépi körben készülnek, minden felhívásra — a kártyán látod a neveket, kattintásra a részleteket.':
