@@ -10,7 +10,8 @@
 //   mod: 'arculat'   — a nyitott felhívások 3–6 arculatra bontása (grants-ai),
 //                      és az arculatok beágyazása
 //   mod: 'illesztes' — a friss arculatú felhívások újrapárosítása
-//   mod: 'mind'      — mind az öt, időkeretre vágva
+//   mod: 'csapat'    — csapatjavaslat MINDEN felhívásra, nem csak a megnyitottra
+//   mod: 'mind'      — mind a hat, időkeretre vágva
 //
 // MIÉRT ITT ÉS NEM AZ ADATBÁZISBAN: a klaszterezés iteratív számítás, a
 // beágyazás külső szolgáltatás. Az adatbázis azt tartja, ami eldőlt: vektort,
@@ -516,6 +517,31 @@ async function illesztesLepes(sb: ReturnType<typeof createClient>, hatarido: num
            ures_arculatok: ures.slice(0, 10) };
 }
 
+/* 6) CSAPAT: minden felhívásra előáll a javaslat, nem csak arra, amelyiket
+   valaki megnyitotta. Így a listán is ott a név, mielőtt bárki belépne. */
+async function csapatLepes(sb: ReturnType<typeof createClient>, hatarido: number, limit: number) {
+  const { data: sor, error } = await sb.rpc('grants_team_queue', { p_limit: limit });
+  if (error) throw new Error('grants_team_queue: ' + error.message);
+  const varo = (sor ?? []) as Array<Record<string, unknown>>;
+  let felhivas = 0, csapat = 0, ures = 0, hiba = 0;
+  const hibak: string[] = [];
+
+  for (const c of varo) {
+    if (Date.now() > hatarido) break;
+    const { data: r, error: e2 } = await sb.rpc('grants_team_suggest_etl',
+      { p_call: c.call_id, p_csak_nyitott: false });
+    if (e2) { hiba++; if (hibak.length < 3) hibak.push(String(e2.message).slice(0, 160)); continue; }
+    const d = (r ?? {}) as Record<string, unknown>;
+    const lista = (d.csapatok ?? []) as unknown[];
+    felhivas++;
+    csapat += lista.length;
+    // „Senki nem emelkedik ki" — ez érdemi válasz, nem hiba: ezt a felhívást
+    // kívülről kell építeni.
+    if (!lista.length) ures++;
+  }
+  return { sorban: varo.length, felhivas, csapat, jelolt_nelkul: ures, hiba, hibak };
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   if (req.method !== 'POST') return json({ hiba: 'Csak POST.' }, 405);
@@ -565,9 +591,10 @@ Deno.serve(async (req) => {
       ki.arculat = await arculatLepes(sb, hatarido, Math.min(10, limit), idk);
     }
     if (mod === 'illesztes' || mod === 'mind') ki.illesztes = await illesztesLepes(sb, hatarido, Math.min(25, limit));
-    if (!['meta', 'beagyazas', 'klaszter', 'arculat', 'illesztes', 'mind'].includes(mod)) {
+    if (mod === 'csapat' || mod === 'mind') ki.csapat = await csapatLepes(sb, hatarido, Math.min(25, limit));
+    if (!['meta', 'beagyazas', 'klaszter', 'arculat', 'illesztes', 'csapat', 'mind'].includes(mod)) {
       return json({ hiba: 'Ismeretlen mód: ' + mod
-                          + '. Lehetséges: meta, beagyazas, klaszter, arculat, illesztes, mind.' }, 400);
+                          + '. Lehetséges: meta, beagyazas, klaszter, arculat, illesztes, csapat, mind.' }, 400);
     }
     // A szöveges ujjlenyomat és a társszerzőségi gráf az új absztraktokból
     // épül újra — e nélkül a token-út nem látná az új adatot.

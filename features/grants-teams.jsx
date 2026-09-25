@@ -55,6 +55,8 @@ const GRTT_api = {
                                      p_call: id, p_facet: null, p_limit: n || 8 }),
   resMatches: (id, n)           => GRTT_rpc('grants_researcher_matches', { p_researcher: id, p_limit: n || 5 }),
   teams:      (id)              => GRTT_rpc('grants_teams', { p_call: id }),
+  overview:   (q, n)            => GRTT_rpc('grants_team_overview', {
+                                     p_q: q || null, p_limit: n || 40, p_csak_javaslattal: false }),
   suggest:    (id, csak)        => GRTT_rpc('grants_team_suggest', {
                                      p_call: id, p_csak_nyitott: !!csak }),
   teamInvite: (id)              => GRTT_rpc('grants_team_invite', { p_id: id }),
@@ -588,6 +590,67 @@ function GRTT_CsapatKartya({ t, onFelker, onTorol, busy }) {
   );
 }
 
+/* A felhívás kártyája a listán: NEVEKKEL. A lényeg, hogy az iroda a listán
+   lássa, kit javaslunk — ne kelljen minden felhívást megnyitnia ahhoz, hogy
+   megtudja, van-e egyáltalán emberünk rá. */
+function GRTT_FelhivasKartya({ c, aktiv, onNyit }) {
+  const cs = c.csapat;
+  const tagok = (cs && cs.tagok) || [];
+  const ures = ((cs && cs.ures_arculat) || []).filter(u => !u.van_jelolt);
+  return (
+    <button type="button" onClick={onNyit}
+      className={'text-left rounded-xl p-3 border transition-all w-full '
+                 + (aktiv ? 'border-primary bg-primary/5' : 'border-slate-100 bg-slate-50 hover:border-slate-200')}>
+      <p className="text-xs font-bold text-slate-800 line-clamp-2">{c.cim}</p>
+      <p className="text-[11px] text-slate-400 mt-0.5">
+        {`${c.program || '—'}${c.hatarido ? ' · határidő: ' + String(c.hatarido).slice(0, 10) : ''}`
+         + `${c.arculat_db ? ' · ' + c.arculat_db + ' arculat' : ''}`
+         + `${c.felkert_db ? ' · ' + c.felkert_db + ' felkérve' : ''}`}
+      </p>
+
+      {!cs && (
+        <p className="text-[11px] text-slate-400 mt-2">
+          {c.arculat_db > 0
+            ? 'Még nincs csapatjavaslat — megnyitva egy kattintással elkészül.'
+            : 'Még nincs arculatokra bontva: a gépi kör hamarosan sorra veszi.'}
+        </p>
+      )}
+
+      {cs && tagok.length > 0 && (
+        <>
+          <div className="flex flex-wrap gap-1 mt-2">
+            {tagok.map(t => (
+              <span key={t.researcher_id}
+                className={'px-2 py-0.5 rounded-lg text-[11px] font-bold '
+                           + (t.szerep === 'vezeto'
+                              ? 'bg-primary/10 text-primary'
+                              : t.ujonnan ? 'bg-emerald-50 text-emerald-700' : 'bg-white text-slate-600 border border-slate-100')}>
+                {`${t.nev}${t.szerep === 'vezeto' ? ' · vezető' : ''}${t.felkerve ? ' ✓' : ''}`}
+              </span>
+            ))}
+          </div>
+          <p className="text-[11px] text-slate-400 mt-1.5">
+            {`${cs.lefedett}/${cs.arculat_db} arculat lefedve · ${cs.kar_db} kar`
+             + `${cs.ujonnan_db ? ' · ' + cs.ujonnan_db + ' első pályázata' : ''}`}
+          </p>
+        </>
+      )}
+
+      {cs && tagok.length === 0 && (
+        <p className="text-[11px] font-bold text-amber-600 mt-2">
+          {'Egyetlen kolléga sem emelkedik ki a mezőnyből — ezt a csapatot kívülről kell építeni.'}
+        </p>
+      )}
+
+      {ures.length > 0 && (
+        <p className="text-[11px] text-amber-600 mt-1">
+          {`Külső partner kell: ${ures.map(u => u.nev).join(', ')}`}
+        </p>
+      )}
+    </button>
+  );
+}
+
 function GRTT_CsapatView() {
   const [q, setQ] = useState('');
   const [calls, setCalls] = useState(null);
@@ -604,12 +667,13 @@ function GRTT_CsapatView() {
   const [toast, setToast] = useState('');
 
   useEffect(() => { GRTT_api.semantic().then(setSem).catch(() => {}); }, []);
+  const attekintoBetolt = (kereses) =>
+    GRTT_api.overview(kereses, 40).then(d => setCalls(Array.isArray(d) ? d : []))
+      .catch(e => setErr(GRT_msg(e)));
+
   useEffect(() => {
     let el = true;
-    const t = setTimeout(() => {
-      GRTT_api.calls(q).then(d => { if (el) setCalls((d && d.sorok) || d || []); })
-        .catch(e => { if (el) setErr(GRT_msg(e)); });
-    }, 300);
+    const t = setTimeout(() => { if (el) attekintoBetolt(q); }, 300);
     return () => { el = false; clearTimeout(t); };
   }, [q]);
 
@@ -638,7 +702,10 @@ function GRTT_CsapatView() {
     try {
       const r = await GRTT_api.suggest(call.id, csakNyitott);
       setTeams(r);
-      setToast(`${(r || []).length} csapatváltozat készült.`);
+      attekintoBetolt(q);
+      setToast((r || []).length
+        ? `${(r || []).length} csapatváltozat készült.`
+        : 'Erre a felhívásra egyetlen kolléga sem emelkedik ki a mezőnyből — a csapatot kívülről kell építeni.');
     } catch (e) { setErr(GRT_msg(e)); }
     finally { setBusy(''); }
   };
@@ -649,6 +716,7 @@ function GRTT_CsapatView() {
       const r = await GRTT_api.teamInvite(t.id);
       setToast(`${(r && r.uj) || 0} új javaslat, ${(r && r.meglevo) || 0} már bent volt.`);
       GRTT_api.teams(call.id).then(setTeams).catch(() => {});
+      attekintoBetolt(q);
       GRTT_api.matches(call.id, 8).then(setTalalat).catch(() => {});
     } catch (e) { setErr(GRT_msg(e)); }
     finally { setBusy(''); }
@@ -705,23 +773,23 @@ function GRTT_CsapatView() {
       )}
 
       <div className="bg-white border border-slate-100 rounded-2xl p-4 mb-4">
-        <div className="relative mb-3">
-          <Lucide.Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-300" />
-          <input className={U_input + ' pl-10'} value={q} onChange={e => setQ(e.target.value)}
-            placeholder="Nyitott felhívás keresése címre…" />
+        <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
+          <div>
+            <p className="text-sm font-black text-slate-800">Nyitott felhívások és a javasolt csapat</p>
+            <p className="text-[11px] text-slate-400">
+              {'A javaslatok gépi körben készülnek, minden felhívásra — a kártyán látod a neveket, '
+               + 'kattintásra a részleteket.'}
+            </p>
+          </div>
+          <div className="relative w-full sm:w-72">
+            <Lucide.Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-300" />
+            <input className={U_input + ' pl-10 !py-2 text-xs'} value={q} onChange={e => setQ(e.target.value)}
+              placeholder="Keresés a felhívás címére…" />
+          </div>
         </div>
-        <div className="grid gap-2 sm:grid-cols-2 max-h-56 overflow-auto">
-          {lista.map(c => (
-            <button key={c.id} onClick={() => callBetolt(c)}
-              className={'text-left rounded-xl p-3 border transition-all '
-                         + (call && call.id === c.id
-                            ? 'border-primary bg-primary/5' : 'border-slate-100 bg-slate-50 hover:border-slate-200')}>
-              <p className="text-xs font-bold text-slate-800 line-clamp-2">{c.cim}</p>
-              <p className="text-[11px] text-slate-400 mt-0.5">
-                {`${c.program || '—'}${c.hatarido ? ' · határidő: ' + String(c.hatarido).slice(0, 10) : ''}`}
-              </p>
-            </button>
-          ))}
+        <div className="grid gap-2 lg:grid-cols-2 max-h-[30rem] overflow-auto">
+          {lista.map(c => <GRTT_FelhivasKartya key={c.call_id} c={c} aktiv={call && call.id === c.call_id}
+                            onNyit={() => callBetolt({ id: c.call_id, cim: c.cim })} />)}
           {lista.length === 0 && <p className="text-sm text-slate-400">Nincs találat.</p>}
         </div>
       </div>

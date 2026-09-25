@@ -12654,6 +12654,19 @@ Object.assign(HU_EN, {
   'Elfogadom': 'I accept',
   'Nem vállalom': 'I decline',
   'A felhívás oldala': 'The call\u2019s page',
+  // 96 — nevek a listakártyán
+  'Nyitott felhívások és a javasolt csapat': 'Open calls and the proposed team',
+  'A javaslatok gépi körben készülnek, minden felhívásra — a kártyán látod a neveket, kattintásra a részleteket.':
+    'Proposals are generated automatically for every call — the names are on the card, details on click.',
+  'Keresés a felhívás címére…': 'Search calls by title…',
+  'Még nincs csapatjavaslat — megnyitva egy kattintással elkészül.':
+    'No team proposal yet — one click once opened.',
+  'Még nincs arculatokra bontva: a gépi kör hamarosan sorra veszi.':
+    'Not split into facets yet: the automated round will get to it.',
+  'Egyetlen kolléga sem emelkedik ki a mezőnyből — ezt a csapatot kívülről kell építeni.':
+    'No colleague stands out from the field — this team has to be built externally.',
+  'Erre a felhívásra egyetlen kolléga sem emelkedik ki a mezőnyből — a csapatot kívülről kell építeni.':
+    'For this call no colleague stands out from the field — the team has to be built externally.',
 });
 
 const HU_EN_PHRASES = [
