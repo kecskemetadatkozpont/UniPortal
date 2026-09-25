@@ -421,10 +421,27 @@ async function klaszterLepes(sb: ReturnType<typeof createClient>, hatarido: numb
 
 /* 4) ARCULAT: a nyitott felhívások 3–6 elvárásra bontva, majd az arculatok
    beágyazása. A felhívás oldalán KÉRDÉS-beágyazást kérünk (aszimmetrikus). */
-async function arculatLepes(sb: ReturnType<typeof createClient>, hatarido: number, limit: number) {
-  const { data: sor, error } = await sb.rpc('grants_facet_queue', { p_limit: limit });
-  if (error) throw new Error('grants_facet_queue: ' + error.message);
-  const varo = (sor ?? []) as Array<Record<string, unknown>>;
+async function arculatLepes(sb: ReturnType<typeof createClient>, hatarido: number, limit: number,
+                            callIds?: string[]) {
+  let varo: Array<Record<string, unknown>>;
+  if (callIds && callIds.length) {
+    // Újragenerálás megadott felhívásokra: a sor csak az arculat NÉLKÜLIEKET
+    // adja, ezért a javított kérdés nem érné el a meglévőket.
+    const { data, error } = await sb.rpc('grants_match_report_etl',
+      { p_limit: callIds.length, p_jelolt: 1, p_call: null });
+    if (error) throw new Error('grants_match_report_etl: ' + error.message);
+    const ismert = new Map<string, Record<string, unknown>>();
+    for (const c of ((data ?? []) as Array<Record<string, unknown>>)) ismert.set(String(c.call_id), c);
+    varo = callIds.map((id) => {
+      const c = ismert.get(id) ?? {};
+      return { call_id: id, cim: c.felhivas ?? null, program: c.program ?? null,
+               kivonat: null, payload: {} };
+    });
+  } else {
+    const { data: sor, error } = await sb.rpc('grants_facet_queue', { p_limit: limit });
+    if (error) throw new Error('grants_facet_queue: ' + error.message);
+    varo = (sor ?? []) as Array<Record<string, unknown>>;
+  }
   let felhivas = 0, arculat = 0, hiba = 0;
   const hibak: string[] = [];
 
@@ -447,8 +464,12 @@ async function arculatLepes(sb: ReturnType<typeof createClient>, hatarido: numbe
       const arcok = lista.filter((x) => x && x.nev).slice(0, 6);
       if (arcok.length < 2) { hiba++; hibak.push(String(c.cim).slice(0, 60) + ': kevesebb mint két arculat'); continue; }
 
+      // CSAK a felhívás saját (angol) szövegét ágyazzuk be. Az arculat magyar
+      // neve a felületnek szól; beágyazva a magyar nyelv felé húzná a vektort,
+      // és a magyar nyelvű, tárgyban távoli művek kerülnének közel.
       const be = await aiHivas({
-        beagyazas: { szovegek: arcok.map((a) => `${a.nev}\n\n${a.szoveg ?? ''}`.trim()), celra: 'kerdes' },
+        beagyazas: { szovegek: arcok.map((a) => (a.szoveg && a.szoveg.trim() ? a.szoveg : a.nev).trim()),
+                     celra: 'kerdes' },
       });
       const vektorok = (be.vektorok ?? []) as number[][];
       const tetelek = arcok.map((a, i) => ({
@@ -538,7 +559,11 @@ Deno.serve(async (req) => {
     if (mod === 'meta' || mod === 'mind') ki.meta = await metaLepes(sb, hatarido, limit);
     if (mod === 'beagyazas' || mod === 'mind') ki.beagyazas = await beagyazasLepes(sb, hatarido, limit);
     if (mod === 'klaszter' || mod === 'mind') ki.klaszter = await klaszterLepes(sb, hatarido, Math.min(50, limit));
-    if (mod === 'arculat' || mod === 'mind') ki.arculat = await arculatLepes(sb, hatarido, Math.min(10, limit));
+    if (mod === 'arculat' || mod === 'mind') {
+      const idk = Array.isArray((test as { call_ids?: unknown }).call_ids)
+        ? ((test as { call_ids: unknown[] }).call_ids).map((x) => String(x)) : undefined;
+      ki.arculat = await arculatLepes(sb, hatarido, Math.min(10, limit), idk);
+    }
     if (mod === 'illesztes' || mod === 'mind') ki.illesztes = await illesztesLepes(sb, hatarido, Math.min(25, limit));
     if (!['meta', 'beagyazas', 'klaszter', 'arculat', 'illesztes', 'mind'].includes(mod)) {
       return json({ hiba: 'Ismeretlen mód: ' + mod

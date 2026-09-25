@@ -89,9 +89,13 @@ const FELADATOK: Record<string, { utasitas: string; sema: unknown }> = {
       + 'Bontsd 3–6 KÜLÖNÁLLÓ szakmai elvárásra („arculat"), amelyeket egy nyertes konzorciumnak le kell '
       + 'fednie. Egy arculat egy önálló kompetencia: módszer, technológia, szakterület vagy tevékenység. '
       + 'Az arculat NEVE rövid, magyar, 2–5 szó. A SZÖVEG mezőbe a felhívás saját, ANGOL kifejezéseit '
-      + 'gyűjtsd ki erre az elvárásra (kulcsszavak, módszernevek, eszközök), mert ez lesz a gépi illesztés '
-      + 'alapja — ne fogalmazz újra, és ne találj ki olyat, ami nincs a szövegben. Az adminisztratív '
-      + 'elvárásokat (jogosultság, határidő, költségvetés, konzorciumi minimum) NE tedd arculatnak.',
+      + 'gyűjtsd ki erre az elvárásra (kulcsszavak, módszernevek, eszközök, alkalmazási terület), mert ez '
+      + 'lesz a gépi illesztés alapja — ne fogalmazz újra, és ne találj ki olyat, ami nincs a szövegben. '
+      + 'A SZÖVEG legyen LEGALÁBB 20 és legfeljebb 60 szó: egy-két szavas kifejezés túl általános ahhoz, '
+      + 'hogy gépileg meg lehessen különböztetni tőle egy kutatót a másiktól — MÉRVE, ezen bukott az első '
+      + 'éles kör. Ha a felhívás szövege szűkszavú, egészítsd ki a témakör szokásos angol szakkifejezéseivel, '
+      + 'de csak olyannal, ami a felhívás tárgyából következik. Az adminisztratív elvárásokat '
+      + '(jogosultság, határidő, költségvetés, konzorciumi minimum) NE tedd arculatnak.',
     sema: {
       type: 'object',
       properties: {
