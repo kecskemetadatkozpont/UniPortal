@@ -115,6 +115,9 @@ const AppView = {
   // A kutatói nézet ('grants') és a vezetői riport ('grants_reports') kulcsa a
   // 77-esben már létezik, de nézetet még nem kapott.
   GRANTS_OFFICE: 'grants_office',
+  // A kolléga saját pályázati felkérései (88_grants_invite.sql). Nem irodai
+  // nézet: bármely törzstag látja a sajátját, és itt válaszol a felkérésre.
+  GRANTS_INVITES: 'grants_invites',
   // Jogi: hozzájárulási napló (59_legal_consents.sql) — csak SUPERADMIN/ADMIN.
   CONSENTS: 'consents',
 };
@@ -139,6 +142,7 @@ const MENU_ITEMS = [
   { id: AppView.SHOP, label: 'Webshop', icon: <Lucide.ShoppingBag size={20} /> },
   { id: AppView.SHOP_ADMIN, label: 'Webshop kezelése', icon: <Lucide.Store size={20} /> },
   { id: AppView.GRANTS_OFFICE, label: 'Pályázatfigyelő', icon: <Lucide.Target size={20} /> },
+  { id: AppView.GRANTS_INVITES, label: 'Pályázati felkéréseim', icon: <Lucide.HeartHandshake size={20} /> },
   { id: AppView.REPORTS, label: 'Riportok', icon: <Lucide.BarChart2 size={20} /> },
   { id: AppView.INTELLIGENCE, label: 'Intelligence', icon: <Lucide.Zap size={20} /> },
   { id: AppView.SYSTEM_ADMIN, label: 'Rendszerkezelés', icon: <Lucide.Settings size={20} /> },
@@ -167,7 +171,7 @@ const MENU_GROUPS = [
   { key: 'kepzes',    label: 'Képzés és oktatás',         ids: [AppView.PROGRAMS, AppView.TRAININGS, AppView.COURSES, AppView.TEACHERS, AppView.STUDENTS] },
   // Kutatás és pályázatok: külön csoport, mert más a közönség (kutatók és a
   // pályázati iroda), más a jogosultság és más az életciklus, mint a képzésnél.
-  { key: 'kutatas',   label: 'Kutatás és pályázatok',   ids: [AppView.GRANTS_OFFICE] },
+  { key: 'kutatas',   label: 'Kutatás és pályázatok',   ids: [AppView.GRANTS_OFFICE, AppView.GRANTS_INVITES] },
   { key: 'felveteli', label: 'Felvételi',                 ids: [AppView.ADMISSIONS_CORE, AppView.EVALUATION, AppView.INTERVIEWS, AppView.IMMIGRATION, AppView.STUDENT_PORTAL] },
   { key: 'partner',   label: 'Partnerek és kommunikáció', ids: [AppView.AGENT_PORTAL, AppView.ENGAGEMENT_CRM, AppView.MARKETING_LEADS] },
   { key: 'penzugy',   label: 'Pénzügy és elemzés',        ids: [AppView.FINANCE, AppView.SHOP_ADMIN, AppView.REPORTS, AppView.INTELLIGENCE] },
@@ -12263,6 +12267,10 @@ const App: React.FC = () => {
     // ügynökség nem lakhat kollégiumban. Aki nem lakó, annak a nézet maga
     // mondja meg, hogy nincs elhelyezése — nem a menüből tűnik el.
     if (item.id === AppView.DORM_STUDENT) return currentUser.role !== 'AGENT';
+    // „Pályázati felkéréseim": a „Szállásom" mintájára mindenkinek jár az
+    // ügynök kivételével. Aki nincs a kutatói törzsben, annak a NÉZET mondja
+    // meg — nem a menüből tűnik el, mert akkor nem is tudná, hogy létezik.
+    if (item.id === AppView.GRANTS_INVITES) return currentUser.role !== 'AGENT';
     // A SZUPERADMIN mindent lát, és ezt SEMMILYEN tábla nem írhatja felül.
     // Ha elvehető lenne, ki lehetne zárni magát abból a képernyőből is,
     // amivel visszaállítaná — és nem maradna út vissza.
@@ -12361,6 +12369,10 @@ const App: React.FC = () => {
       // meg (a szerver minden RPC-ben újra ellenőrzi).
       case AppView.GRANTS_OFFICE:
         return <GRT_OfficeView user={currentUser} />;
+      // A saját felkérések: a jogosultságot a szerver dönti el (a kolléga csak
+      // a sajátját látja), ezért itt nincs szerepkör-szűrés.
+      case AppView.GRANTS_INVITES:
+        return <GRTT_SajatFelkeresek user={currentUser} />;
       case AppView.STUDENTS:
         return ['SUPERADMIN', 'ADMIN', 'ADMISSIONS', 'FINANCE'].includes(currentUser.role)
           ? <STU_View user={currentUser} />
@@ -12552,6 +12564,98 @@ const HU_EN = {
 /* A státuszmodell (C1/C2) saját szótárrésze — a nagy táblától külön él, hogy
    a két hely egymástól függetlenül legyen szerkeszthető. Lásd STATUS_I18N. */
 Object.assign(HU_EN, STATUS_I18N);
+/* ------------------------------------------------------------------
+   88+89+90 — bevonási dashboard, illesztés arculatokra, csapatajánlás.
+   A HU_EN a FORDÍTÓ szótára: az alkalmazás magyar forrásszövegű, az angol
+   nézet ebből készül. Ami itt nincs benne, az angol nézetben magyarul marad.
+   Az interpolált (értékkel összefűzött) mondatok egyetlen szövegcsomópontként
+   készülnek a felületen, de a fordító csak a TELJES egyezést találja meg —
+   ezért a számot tartalmazó sorok a PHRASES-be kerülnek, nem ide.
+   ------------------------------------------------------------------ */
+Object.assign(HU_EN, {
+  // menü és fülek
+  'Pályázati felkéréseim': 'My grant invitations',
+  'Bevonás': 'Involvement',
+  'Csapatajánló': 'Team builder',
+  // fejszámok
+  'Bevont kolléga': 'Colleagues involved',
+  'Érintett kar': 'Faculties involved',
+  'Első pályázatuk': 'First-time applicants',
+  'Átlagos felkérés / bevont fő': 'Average invitations per person',
+  'a túlterhelés korai jelzője': 'the early sign of overload',
+  'ebben az évben kérték fel először': 'invited for the first time this year',
+  'Bevonás kar szerint': 'Involvement by faculty',
+  'Az alacsony arány nem a kar hibája: azt jelenti, hogy onnan rendszeresen kimaradnak a kollégák.':
+    'A low share is not the faculty\u2019s fault: it means colleagues there are regularly left out.',
+  // „még soha nem kértük fel"
+  'Még soha nem kértük fel': 'Never invited yet',
+  'Aki még egyetlen pályázatban sem szerepelt. A bevonási pontszám nála a legmagasabb.':
+    'Colleagues who have never been part of a proposal. Their involvement score is the highest.',
+  'Név vagy intézet…': 'Name or institute…',
+  'Minden kar': 'All faculties',
+  'Minden állapot': 'All states',
+  'Mihez illik': 'What fits',
+  'Nincs publikációs adat — a kézi kompetencia viszi tovább.':
+    'No publication data — manual competences carry it instead.',
+  'Ebben a körben minden kollégát felkértünk már legalább egyszer.':
+    'In this selection every colleague has been invited at least once.',
+  // felkérések
+  'Felkérések': 'Invitations',
+  'Minden állapotváltás naplózva: ki léptette és mikor. A rendszer senkit nem kér fel automatikusan.':
+    'Every state change is logged: who moved it and when. The system never invites anyone automatically.',
+  'Lejáratás': 'Expire overdue',
+  'Ebben a szűrésben nincs felkérés.': 'No invitation in this selection.',
+  'Bekerült a javaslatok közé.': 'Added to the proposals.',
+  // állapotok
+  'Javasolt': 'Proposed', 'Felkérve': 'Invited', 'Elfogadta': 'Accepted',
+  'Visszalépett': 'Withdrew', 'Lejárt': 'Expired', 'Beadva': 'Submitted',
+  'Nyert': 'Won', 'Nem nyert': 'Not won', 'Visszavonva': 'Revoked',
+  'vezető': 'lead', 'már felkérve': 'already invited',
+  // illesztés
+  'Illeszkedő felhívások': 'Matching calls',
+  'Melyik nyitott felhívás melyik arculatához illeszkedik':
+    'Which facet of which open call it fits',
+  'Javaslatba': 'To proposals',
+  'Adatlefedettség': 'Data coverage',
+  'Profil és gráf újraépítése': 'Rebuild profile and graph',
+  'Nyitott felhívás keresése címre…': 'Search open calls by title…',
+  'Nincs találat.': 'No result.',
+  'Arculatok': 'Facets',
+  'A felhívás elvárásai, egy sor egy elvárás': 'The call\u2019s expectations, one per line',
+  'csak akik jelezték': 'only those who opted in',
+  'Illesztés': 'Match',
+  'Csapatjavaslat': 'Suggest teams',
+  'Miért ő': 'Why them',
+  'Kevesebb': 'Less',
+  'Mire alapozzuk': 'What this is based on',
+  'Nincs megnevezhető mű.': 'No work to name.',
+  'szóegyezés': 'word overlap',
+  'nincs angol kimenet': 'no English output',
+  'még nem jelezte, hogy kérhető': 'has not opted in yet',
+  'Erre az elvárásra házon belül nincs jelölt — ide külső partner kell.':
+    'No in-house candidate for this expectation — an external partner is needed here.',
+  // komponensek
+  'tartalom': 'content', 'frissesség': 'recency', 'súlypont': 'centrality',
+  'tekintély': 'standing', 'kapacitás': 'capacity', 'nyitottság': 'openness',
+  'bevonás': 'involvement',
+  // csapatváltozatok
+  'Széles lefedés': 'Broad coverage', 'Erős vezető': 'Strong lead', 'Két kar': 'Two faculties',
+  'Felkérés a javaslatból': 'Invite from proposal',
+  'Külső partner kell': 'External partner needed',
+  'első pályázata': 'first proposal',
+  'felkérve': 'invited',
+  // saját felkérések
+  'Itt látod, mely pályázatokba hívtak, milyen szerepre, és mit válaszoltál. A pályázati iroda ugyanezt látja.':
+    'Here you see which proposals you were invited to, in what role, and what you answered. The grants office sees the same.',
+  'Idei felkérés': 'Invitations this year',
+  'Futó részvétel': 'Running participations',
+  'Elfogadott': 'Accepted',
+  'Összes felkérés': 'All invitations',
+  'Elfogadom': 'I accept',
+  'Nem vállalom': 'I decline',
+  'A felhívás oldala': 'The call\u2019s page',
+});
+
 const HU_EN_PHRASES = [
   [/Aktív jelentkezések/g,'Active applications'],[/Akív jelentkezések/g,'Active applications'],[/Új jelentkező/g,'New applicant'],[/\bMód\b/g,'Mode'],[/Felvételi folyamat ·/g,'Admission process ·'],[/(\d+)\s*\/\s*(\d+)\s*lépés/g,'$1/$2 steps'],[/(\d+)\s*lépés/g,'$1 steps'],[/(\d+)\s*folyamat\b/g,'$1 process(es)'],[/(\d+)%\s*biztos/g,'$1% confidence'],[/(\d+)\s*lehetséges egyezés/g,'$1 possible match(es)'],[/TESZT — helyes válasz:/g,'TEST — correct answer:'],[/Helyes:/g,'Correct:'],[/(\d+)\s*\/\s*(\d+)\s*helyes/g,'$1 / $2 correct'],[/(\d+)\s*\/\s*(\d+)\s*kötelező hitelesítve/g,'$1 / $2 required verified'],[/(\d+)\s*hiányzik/g,'$1 missing'],[/(\d+)\s*új\b/g,'$1 new'],[/EUR \/ szemeszter/g,'EUR / semester'],[/szemeszter/g,'semester'],[/szem\./g,'sem.'],[/Egyszerűsítsd, majd értékeld ki, ha/g,'Simplify, then evaluate if'],[/Mennyi/g,'What is'],[/Értékeld ki a következő kifejezést!/g,'Evaluate the following expression!'],[/Érték =/g,'Value ='],[/(\d+)\s*folyamat\b/g,'$1 process(es)'],[/(\d+)\s*\/\s*(\d+)\s*kötelező/g,'$1 / $2 required'],
 ];

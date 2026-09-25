@@ -19,6 +19,10 @@
 //        kutatói portré a publikációs adatokból (PISZKOZAT, a kutató hagyja jóvá)
 //   { "feladat": "partner_level", "adat": {...} }       — angol partnerkereső
 //        levél piszkozata
+//   { "feladat": "felhivas_arculatok", "adat": {...} }   — a felhívás 3–6 külön
+//        elvárásra bontva, a felhívás saját kifejezéseivel (89 + 90 migráció)
+//   { "beagyazas": { "szovegek": [...], "celra": "dokumentum" | "kerdes" } }
+//        — vektorok a szemantikus illesztéshez (nem feladat, külön ág)
 //
 // MÉRŐMÓDOK (kulcs- és modellellenőrzéshez, tartalomgenerálás nélkül)
 //   { "probe": "modellek" } — mely modellek érhetők el a beállított kulccsal
@@ -73,6 +77,35 @@ const FELADATOK: Record<string, { utasitas: string; sema: unknown }> = {
         kockazat: { type: 'string' },
       },
       required: ['illeszkedes', 'indoklas', 'erossegek', 'hianyok', 'javasolt_szerep', 'kockazat'],
+    },
+  },
+  // A felhívás ARCULATOKRA bontása: 3–6 külön elvárás, mindegyik saját
+  // szövegrészlettel. A szövegrészlet a felhívás SAJÁT szavai — ezt mutatjuk a
+  // felületen, hogy az iroda ellenőrizhesse: valóban ezt kéri a felhívás. A
+  // csapatajánló ezekre az arculatokra keres embert (89 + 90 migráció).
+  felhivas_arculatok: {
+    utasitas:
+      'Te egy egyetemi pályázati iroda szakértő munkatársa vagy. Egy pályázati felhívás adatait kapod. '
+      + 'Bontsd 3–6 KÜLÖNÁLLÓ szakmai elvárásra („arculat"), amelyeket egy nyertes konzorciumnak le kell '
+      + 'fednie. Egy arculat egy önálló kompetencia: módszer, technológia, szakterület vagy tevékenység. '
+      + 'Az arculat NEVE rövid, magyar, 2–5 szó. A SZÖVEG mezőbe a felhívás saját, ANGOL kifejezéseit '
+      + 'gyűjtsd ki erre az elvárásra (kulcsszavak, módszernevek, eszközök), mert ez lesz a gépi illesztés '
+      + 'alapja — ne fogalmazz újra, és ne találj ki olyat, ami nincs a szövegben. Az adminisztratív '
+      + 'elvárásokat (jogosultság, határidő, költségvetés, konzorciumi minimum) NE tedd arculatnak.',
+    sema: {
+      type: 'object',
+      properties: {
+        arculatok: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: { nev: { type: 'string' }, szoveg: { type: 'string' } },
+            required: ['nev', 'szoveg'],
+          },
+        },
+        megjegyzes: { type: 'string' },
+      },
+      required: ['arculatok'],
     },
   },
   kutatoi_portre: {
@@ -135,6 +168,50 @@ async function geminiHivas(model: string, utasitas: string, prompt: string, sema
   return { szoveg, tokenek: { be: hasznalat.promptTokenCount ?? null, ki: hasznalat.candidatesTokenCount ?? null } };
 }
 
+/* ---------- Beágyazás ----------
+   MIÉRT ITT: a beágyazás ugyanúgy szolgáltatóhoz kötött, mint a szöveggenerálás.
+   Ha a hívó (grants-semantic) közvetlenül a Geminit hívná, a modellváltás két
+   helyen kellene. A vektorokat EGYSÉGHOSSZÚRA az adatbázis normálja
+   (grants.vek_norm), így itt nyers értékeket adunk vissza.
+   Modell: text-embedding-004 → 768 dimenzió. A dimenziónak minden tárolt
+   vektorban egyeznie kell, ezért a modell váltása újra-beágyazást igényel. */
+// MÉRVE 2026-09-25-én ezen a kulcson ({"probe":"beagyazo_modellek"}): a
+// text-embedding-004 már NEM elérhető (404), a beágyazó modellek ezek:
+// gemini-embedding-001, gemini-embedding-2, gemini-embedding-2-preview.
+// A stabilt választjuk; a beállításból felülírható.
+const EMBED_ALAP = Deno.env.get('GRANTS_EMBED_MODEL') ?? 'gemini-embedding-001';
+
+async function geminiBeagyazas(model: string, szovegek: string[], celra: string, dim = 768) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:batchEmbedContents`;
+  const valasz = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_KEY },
+    body: JSON.stringify({
+      requests: szovegek.map((t) => ({
+        model: `models/${model}`,
+        content: { parts: [{ text: t }] },
+        // A kérdés (felhívás) és a dokumentum (mű) KÜLÖN feladattípus: az
+        // aszimmetrikus beágyazás pontosabb keresést ad, mint ha mindkettőt
+        // dokumentumként ágyaznánk be.
+        taskType: celra === 'kerdes' ? 'RETRIEVAL_QUERY' : 'RETRIEVAL_DOCUMENT',
+        // Az újabb beágyazó modellek alapból 3072 dimenziót adnak. Nekünk 768
+        // is elég, és a tárolás negyede: 13 ezer műnél ez 110 MB helyett 28.
+        // A rövidítés után a vektor hossza változik — a normálást az
+        // adatbázis végzi (grants.vek_norm), tehát ez nem okoz hibát.
+        ...(dim ? { outputDimensionality: dim } : {}),
+      })),
+    }),
+  });
+  const nyers = await valasz.text();
+  if (!valasz.ok) throw new Error(`Gemini beágyazás ${valasz.status}: ${nyers.slice(0, 400)}`);
+  const d = JSON.parse(nyers);
+  const vektorok = (d.embeddings ?? []).map((e: { values?: number[] }) => e.values ?? []);
+  if (vektorok.length !== szovegek.length) {
+    throw new Error(`A beágyazó ${vektorok.length} vektort adott ${szovegek.length} szövegre.`);
+  }
+  return vektorok;
+}
+
 /* ---------- Anthropic (Claude) ---------- */
 async function anthropicHivas(model: string, utasitas: string, prompt: string, sema: unknown) {
   const valasz = await fetch('https://api.anthropic.com/v1/messages', {
@@ -160,6 +237,23 @@ async function anthropicHivas(model: string, utasitas: string, prompt: string, s
   return { szoveg, tokenek: { be: d?.usage?.input_tokens ?? null, ki: d?.usage?.output_tokens ?? null } };
 }
 
+/* A JWT középső szegmenséből a szerep. Csak OLVASSUK — az aláírást a platform
+   már ellenőrizte (verify_jwt), ezért ide csak érvényes token jut el. Erre
+   azért van szükség, mert a szolgáltatási hívónak (grants-semantic) nincs
+   auth.uid()-je, tehát a grants_context() jogosultság-ellenőrzés rá nem
+   alkalmazható. */
+function jwtSzerep(token: string): string | null {
+  try {
+    const resz = token.split('.');
+    if (resz.length !== 3) return null;
+    const b64 = resz[1].replace(/-/g, '+').replace(/_/g, '/');
+    const d = JSON.parse(atob(b64 + '='.repeat((4 - (b64.length % 4)) % 4)));
+    return typeof d?.role === 'string' ? d.role : null;
+  } catch {
+    return null;
+  }
+}
+
 /* A modell válasza néha kódkerítésben jön; ezt le kell hámozni, mielőtt
    JSON-ként értelmezzük. Ha mégsem értelmezhető, NEM tippelünk: hibát adunk,
    és a hívó a számított pontszámmal működik tovább. */
@@ -176,9 +270,10 @@ Deno.serve(async (req) => {
   try { test = await req.json(); } catch { /* üres törzs is jó */ }
 
   // --- ki hívhatja: pályázati irodai jog VAGY az ütemező titka ---
-  const token = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
+  const token = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '').trim();
   const utemezo = CRON_SECRET !== '' && (req.headers.get('x-grants-cron') ?? '') === CRON_SECRET;
-  if (!utemezo) {
+  const szolgaltatas = token !== '' && (token === SERVICE_KEY || jwtSzerep(token) === 'service_role');
+  if (!utemezo && !szolgaltatas) {
     if (!token) return json({ hiba: 'Hiányzó Authorization fejléc.' }, 401);
     const hivo = createClient(SUPABASE_URL, ANON_KEY, {
       global: { headers: { Authorization: `Bearer ${token}` } },
@@ -214,6 +309,53 @@ Deno.serve(async (req) => {
       }));
     return json({ ok: true, szolgaltato: 'gemini', kulcs_mukodik: true,
                   modell_db: modellek.length, alapertelmezett: GEMINI_ALAP, modellek });
+  }
+
+  // --- beágyazás: { beagyazas: { szovegek: [...], celra: 'dokumentum' | 'kerdes' } } ---
+  if (test.beagyazas && typeof test.beagyazas === 'object') {
+    const be = test.beagyazas as { szovegek?: unknown; celra?: unknown; model?: unknown };
+    const szovegek = Array.isArray(be.szovegek)
+      ? be.szovegek.map((x) => String(x ?? '')).filter((x) => x.trim() !== '')
+      : [];
+    if (!szovegek.length) return json({ ok: false, hiba: 'Nincs beágyazandó szöveg.' }, 400);
+    if (szovegek.length > 100) return json({ ok: false, hiba: 'Egy kérésben legfeljebb 100 szöveg.' }, 400);
+    if (!GEMINI_KEY) return json({ ok: false, hiba: 'Nincs beállítva GEMINI_API_KEY secret.' }, 500);
+    const emModell = String(be.model ?? EMBED_ALAP);
+    const kezdetE = Date.now();
+    try {
+      // A modell bemeneti korlátja véges: a hosszú absztraktot vágjuk, nem
+      // dobjuk el — az első pár ezer karakter hordozza a témát.
+      const vagott = szovegek.map((t) => t.length > 8000 ? t.slice(0, 8000) : t);
+      const dim = Number((be as { dim?: unknown }).dim ?? 768);
+      const vektorok = await geminiBeagyazas(emModell, vagott, String(be.celra ?? 'dokumentum'), dim);
+      return json({ ok: true, szolgaltato: 'gemini', model: emModell,
+                    db: vektorok.length, dim: (vektorok[0] ?? []).length, vektorok,
+                    masodperc: Math.round((Date.now() - kezdetE) / 1000) });
+    } catch (e) {
+      return json({ ok: false, model: emModell,
+                    hiba: e instanceof Error ? e.message : String(e),
+                    masodperc: Math.round((Date.now() - kezdetE) / 1000) }, 502);
+    }
+  }
+
+  // --- mérőmód: mely modellek tudnak beágyazni ezzel a kulccsal ---
+  if (test.probe === 'beagyazo_modellek') {
+    if (!GEMINI_KEY) return json({ ok: false, hiba: 'Nincs beállítva GEMINI_API_KEY secret.' }, 500);
+    const v = await fetch('https://generativelanguage.googleapis.com/v1beta/models', {
+      headers: { 'x-goog-api-key': GEMINI_KEY },
+    });
+    const nyers = await v.text();
+    if (!v.ok) return json({ ok: false, hiba: `Gemini ${v.status}: ${nyers.slice(0, 300)}` }, 502);
+    const d = JSON.parse(nyers);
+    const modellek = (d.models ?? [])
+      .filter((m: { supportedGenerationMethods?: string[] }) =>
+        (m.supportedGenerationMethods ?? []).some((x) => /embed/i.test(x)))
+      .map((m: { name: string; displayName?: string; supportedGenerationMethods?: string[] }) => ({
+        nev: String(m.name).replace(/^models\//, ''),
+        megnevezes: m.displayName ?? null,
+        modok: m.supportedGenerationMethods ?? [],
+      }));
+    return json({ ok: true, alapertelmezett: EMBED_ALAP, modell_db: modellek.length, modellek });
   }
 
   // --- tényleges feladat ---

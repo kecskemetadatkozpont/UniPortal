@@ -90,6 +90,9 @@ const FEATURE_FILES = [
   // Kutatói profil és felderítés (79 + 80). A grants.jsx UTÁN: annak GRT_rpc /
   // GRT_msg / GRT_dt elemeire épül.
   'features/grants-researchers.jsx',
+  // Bevonási dashboard, arculatokra bontott illesztés, csapatajánlás (88+89+90).
+  // A grants.jsx UTÁN: onnan veszi a GRT_msg-et és a közös U_* atomokat.
+  'features/grants-teams.jsx',
 ];
 
 // `motion` is only referenced by the shim at the top of app.jsx, which renders

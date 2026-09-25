@@ -98,3 +98,8 @@
 85_program_audience.sql
 86_grants_match_fast.sql
 87_grants_sync_queue.sql
+88_grants_invite.sql
+89_grants_semantic.sql
+90_grants_teams.sql
+91_grants_coauthor_fix.sql
+92_grants_match_speed.sql
