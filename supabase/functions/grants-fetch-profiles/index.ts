@@ -124,12 +124,19 @@ Deno.serve(async (req) => {
     const osszekotetlen = varo.filter((k) => !k.openalex_id && !k.mtmt_id).length;
     return json({ ok: true, feldolgozva: 0, kutato: 0, mu: 0, maradt: 0,
                   osszekotetlen,
+                  /* A 87-es migráció óta a sor CSAK összekötött kutatót ad vissza,
+                     tehát az „osszekotetlen" ág már csak akkor szólal meg, ha a
+                     87 valamiért nincs bent. Az üres eset normál üzenete ezért
+                     azt mondja meg, ami igaz: az összekötöttek adata friss —
+                     akinek nincs azonosítója, az a Törzs listán a „Nincs
+                     összekötött azonosító" szűrővel kereshető elő. */
                   uzenet: osszekotetlen > 0
                     ? `Nincs egyetlen ÖSSZEKÖTÖTT kutató sem: ${osszekotetlen} kutatónak nincs `
                       + 'OpenAlex- vagy MTMT-azonosítója. Metaadatot csak összekötött kutatóról lehet '
                       + 'letölteni — előbb futtasd a „Párosítás a felderítéssel", majd a '
                       + '„Névjavaslatok elfogadása" lépést.'
-                    : 'Nincs szinkronra váró kutató — mindenki friss.',
+                    : 'Minden összekötött kutató adata friss. Akinek nincs forrásazonosítója, azt a '
+                      + 'Törzs listán a „Nincs összekötött azonosító" szűrővel találod meg.',
                   masodperc: 0, dry });
   }
 
