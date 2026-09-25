@@ -104,3 +104,4 @@
 91_grants_coauthor_fix.sql
 92_grants_match_speed.sql
 93_grants_etl_cron.sql
+94_grants_report.sql
