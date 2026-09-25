@@ -114,20 +114,41 @@ async function mtmtKeres(url: string) {
   return await v.json();
 }
 
-/** Az intézményfa: a felső csomópont és minden alegysége. */
+/** Az intézményfa: a felső csomópont és MINDEN alegysége, tetszőleges mélyen.
+ *
+ *  MIÉRT REKURZÍV. A korábbi változat egy szintet járt be: az NJE csomópontot
+ *  és a 11 közvetlen gyerekét (karok, tudásközpontok). A valóságban a fa
+ *  háromszintű — kar alatt TANSZÉK —, és sok oktató a tanszékhez van kötve,
+ *  nem a karhoz. MÉRVE 2026-09-25: egy szinttel 12 egység, teljes bejárással
+ *  39; az egy szintes felderítés így például a GAMFK Anyagtechnológia és
+ *  Innovatív Járművek és Anyagok Tanszékének oktatóit kihagyta — köztük egy
+ *  77 publikációs kutatót. A mélységkorlát csak védőháló egy körkörös fa
+ *  ellen; a valódi fa három szintű.
+ */
 async function mtmtEgysegek() {
   const egysegek: { mtid: number; nev: string }[] = [];
-  const inst = (await mtmtKeres(`https://m2.mtmt.hu/api/institute/${NJE_MTMT}?labelLang=hun`)).content;
-  egysegek.push({ mtid: NJE_MTMT, nev: inst?.label ?? 'NJE' });
-  for (const ch of (inst?.children ?? [])) {
-    const link = String(ch.link ?? '');
-    const cid = link.split('/').filter(Boolean).pop();
-    if (!cid || !/^\d+$/.test(cid)) continue;
+  const latott = new Set<number>();
+  const sor: { mtid: number; szint: number }[] = [{ mtid: NJE_MTMT, szint: 0 }];
+  while (sor.length) {
+    const { mtid, szint } = sor.shift()!;
+    if (latott.has(mtid) || szint > 5) continue;
+    latott.add(mtid);
+    let inst: Record<string, unknown> | undefined;
     try {
-      const dc = (await mtmtKeres(`https://m2.mtmt.hu/api/divisioncontainment/${cid}?labelLang=hun`)).content;
-      const gyerek = dc?.child ?? dc?.institute;
-      if (gyerek?.mtid) egysegek.push({ mtid: Number(gyerek.mtid), nev: gyerek.label ?? String(gyerek.mtid) });
-    } catch (_e) { /* egy hibás alegység ne buktassa el a felderítést */ }
+      inst = (await mtmtKeres(`https://m2.mtmt.hu/api/institute/${mtid}?labelLang=hun`)).content;
+    } catch (_e) { continue; }   // egy hibás egység ne buktassa el a felderítést
+    egysegek.push({ mtid, nev: String(inst?.label ?? mtid) });
+    for (const ch of ((inst?.children ?? []) as Record<string, unknown>[])) {
+      const cid = String(ch.link ?? '').split('/').filter(Boolean).pop();
+      if (!cid || !/^\d+$/.test(cid)) continue;
+      try {
+        const dc = (await mtmtKeres(`https://m2.mtmt.hu/api/divisioncontainment/${cid}?labelLang=hun`)).content;
+        const gyerek = dc?.child ?? dc?.institute;
+        if (gyerek?.mtid && !latott.has(Number(gyerek.mtid))) {
+          sor.push({ mtid: Number(gyerek.mtid), szint: szint + 1 });
+        }
+      } catch (_e) { /* ugyanígy */ }
+    }
   }
   return egysegek;
 }

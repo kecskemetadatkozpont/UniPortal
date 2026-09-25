@@ -25,6 +25,35 @@
       }
     }
   </script>
+  <!-- SÖTÉT MÓD. A stíluslap a ténylegesen használt Tailwind-osztályokból
+       generált leképezés; a kapcsoló három állású (rendszer / világos / sötét).
+       A választást RAJZOLÁS ELŐTT alkalmazzuk, különben minden betöltéskor
+       felvillanna a világos felület. -->
+  <link rel="stylesheet" href="theme-dark.css?v=1" />
+  <script>
+    (function () {
+      var KULCS = 'nje_tema';
+      function olvas() { try { return localStorage.getItem(KULCS) || 'rendszer'; } catch (e) { return 'rendszer'; } }
+      function rendszerSotet() {
+        try { return window.matchMedia('(prefers-color-scheme: dark)').matches; } catch (e) { return false; }
+      }
+      function alkalmaz(t) {
+        var sotet = (t === 'sotet') || (t !== 'vilagos' && rendszerSotet());
+        document.documentElement.classList.toggle('sotet', sotet);
+      }
+      // A felület kapcsolója ezt hívja; a tárolás is itt történik, egy helyen.
+      window.njeTema = function (t) {
+        try { if (t) localStorage.setItem(KULCS, t); } catch (e) {}
+        alkalmaz(t || olvas());
+      };
+      alkalmaz(olvas());
+      // „Rendszer szerint” állásban kövessük az operációs rendszer váltását is.
+      try {
+        window.matchMedia('(prefers-color-scheme: dark)')
+          .addEventListener('change', function () { if (olvas() === 'rendszer') alkalmaz('rendszer'); });
+      } catch (e) {}
+    })();
+  </script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
   <style>
     body { font-family: 'Inter', sans-serif; }
@@ -193,7 +222,7 @@
     // modul-gyorsitotarabol pedig tovabb — a REGI kodot futtatta, es a
     // felhasznalo joggal hitte, hogy a javitas nem keszult el. Mert(ve): az elo
     // csomagban mar benne volt a javitas, a bongeszo megis a regit mutatta.
-    const BUNDLE_V = 'd90dd4076925';
+    const BUNDLE_V = '340828b976cd';
     const BUNDLE_URL = './app.bundle.js?v=' + BUNDLE_V;
 
     async function hasPrebuilt() {

@@ -20,6 +20,40 @@ const motion = new Proxy({}, {
 });
 const AnimatePresence = ({ children }) => React.createElement(React.Fragment, null, children);
 
+/* ============================================================
+   SÖTÉT MÓD KAPCSOLÓJA
+   ------------------------------------------------------------
+   Három állapot, mert a kettő kevés: aki rendszerszinten éjszakai módot
+   használ, az ne kényszerüljön külön beállításra — de aki egy adott gépen
+   mást akar, az felülírhassa. A választás a böngészőben marad (nje_tema),
+   nem a szerveren: gépenként más lehet, és nem személyes adat.
+
+   A tényleges osztályt az app.html fejlécében futó, RAJZOLÁS ELŐTTI szkript
+   teszi ki — így nincs világos villanás betöltéskor. Ez a komponens csak
+   átállítja és eltárolja; ugyanazt a segédfüggvényt hívja (window.njeTema).
+   ============================================================ */
+const TEMA_SORREND = ['rendszer', 'vilagos', 'sotet'];
+const TEMA_CIMKE = { rendszer: 'Rendszer szerint', vilagos: 'Világos', sotet: 'Sötét' };
+function TemaKapcsolo() {
+  const [tema, setTema] = useState(() => {
+    try { return localStorage.getItem('nje_tema') || 'rendszer'; } catch (e) { return 'rendszer'; }
+  });
+  const valt = () => {
+    const uj = TEMA_SORREND[(TEMA_SORREND.indexOf(tema) + 1) % TEMA_SORREND.length];
+    setTema(uj);
+    try { window.njeTema && window.njeTema(uj); } catch (e) {}
+  };
+  const I = tema === 'sotet' ? ICONS.Moon : tema === 'vilagos' ? ICONS.Sun : ICONS.MonitorSmartphone;
+  return (
+    <button onClick={valt} data-tema-kapcsolo={tema}
+      className="h-10 px-2.5 flex items-center gap-1.5 rounded-xl hover:bg-slate-50 transition-colors text-slate-500"
+      title={'Megjelenés: ' + (TEMA_CIMKE[tema] || tema)} aria-label={'Megjelenés: ' + (TEMA_CIMKE[tema] || tema)}>
+      <I size={19} />
+      <span className="hidden sm:inline text-[11px] font-black tracking-wide">{TEMA_CIMKE[tema]}</span>
+    </button>
+  );
+}
+
 /* ICONS: the constants module curated a subset of lucide-react; the full
    namespace is a superset, so it satisfies every component (incl. the ones
    that did `import * as ICONS from 'lucide-react'`). */
@@ -12427,6 +12461,7 @@ const App: React.FC = () => {
               <ICONS.Globe size={19} />
               <span className="text-[11px] font-black tracking-wide">{(typeof localStorage !== 'undefined' && localStorage.getItem('nje_lang') === 'en') ? 'EN' : 'HU'}</span>
             </button>
+            <TemaKapcsolo />
             {/* Üzenet-értesítő (features/messages.jsx): olvasatlan szám, felugró jelzés; kattintásra az üzenetekhez visz. */}
             <MSG_Csengo user={currentUser} onOpen={() => {
               const cel = currentUser.role === 'STUDENT' ? AppView.STUDENT_PORTAL
@@ -13385,6 +13420,13 @@ Object.entries({
   'Nem lett kitöltve — legalább egy célt adj meg (e nélkül a félév végén nincs mit értékelni).': 'Not filled in — add at least one goal (otherwise there is nothing to evaluate at the end of the term).',
   'A hiányzó válaszokat pirossal jelöltük a kérdéseknél.': 'Missing answers are marked in red at the questions.',
   'Célmeghatározás/Értékelés': 'Goal setting/Evaluation',
+  /* Megjelenés (sötét mód) */
+  'Rendszer szerint': 'System',
+  'Világos': 'Light',
+  'Sötét': 'Dark',
+  'Megjelenés: Rendszer szerint': 'Appearance: System',
+  'Megjelenés: Világos': 'Appearance: Light',
+  'Megjelenés: Sötét': 'Appearance: Dark',
   /* Kurzusok — az oktatás nyelve és ami ebből következik */
   'Minden nyelv': 'Any language',
   'magyar': 'Hungarian', 'angol': 'English', 'német': 'German', 'egyéb': 'other',

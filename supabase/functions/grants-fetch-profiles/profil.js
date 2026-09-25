@@ -34,6 +34,17 @@ const UA = env('GRANTS_USER_AGENT',
 export const MTMT_FEJ = { 'Accept': 'application/vnd.mtmt2-1.0+json', 'User-Agent': UA };
 export const OA_FEJ = { 'Accept': 'application/json', 'User-Agent': UA };
 export const MTMT_UTEM = 300;   // ms két MTMT-kérés között (nem a mi szerverünk)
+
+/* SZERZŐI POZÍCIÓ — a séma szótára magyar: 'elso' | 'utolso' | 'kozepso' |
+   'ismeretlen' (grants_work_pozicio_ck). A források angolul adják; ha a
+   forrás szavát írnánk be, a CHECK az EGÉSZ köteget visszautasítja.
+   MÉRVE 2026-09-25: emiatt egyetlen publikáció sem került be, miközben a
+   témák és a metrikák átmentek — a felületen úgy látszott, mintha „találunk
+   metaadatot, de publikációt nem". Ami nem ismerhető fel, az 'ismeretlen':
+   a null is megengedett, de a kifejezett „nem tudjuk" többet mond. */
+const POZICIO = { first: 'elso', last: 'utolso', middle: 'kozepso',
+                  elso: 'elso', utolso: 'utolso', kozepso: 'kozepso' };
+export const pozicioNev = (v) => POZICIO[String(v || '').toLowerCase()] || 'ismeretlen';
 const varj = (ms) => new Promise((r) => setTimeout(r, ms));
 export const MTMT_LAP = 50;   // mért: 100-as lapméret 2,1 MB/lap
 export const NJE_ROR = 'https://ror.org/03n9qzd79';
@@ -142,7 +153,7 @@ export async function oaProfil(oaId, maxMu) {
         tipus: w.type ?? null,
         forrasnev: w.primary_location?.source?.display_name ?? null,
         idezet: w.cited_by_count ?? null,
-        szerzoi_pozicio: sajat?.author_position ?? null,
+        szerzoi_pozicio: pozicioNev(sajat?.author_position),
         nyelv: w.language ?? null,
         nyilt_hozzaferes: w.open_access?.is_oa ?? null,
         // Szűk payload: a teljes OpenAlex-rekord ~7,6 kB, 273 kutatónál ez
@@ -235,8 +246,8 @@ export async function mtmtProfil(mtid, maxMu) {
         (i.source?.name ?? '') === 'DOI')?.idValue ?? null;
       const sajat = (p.authorships ?? []).find((s) =>
         String(s.author?.mtid ?? '') === String(mtid));
-      const pozicio = !sajat ? null
-        : sajat.first ? 'first' : sajat.last ? 'last' : 'middle';
+      const pozicio = !sajat ? 'ismeretlen'
+        : sajat.first ? 'elso' : sajat.last ? 'utolso' : 'kozepso';
       const sjr = (p.ratings ?? [])
         .map((r) => /sjr:(Q[1-4])/.exec(r.label ?? '')?.[1])
         .find((q) => !!q) ?? null;
