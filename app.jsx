@@ -12658,6 +12658,28 @@ Object.assign(HU_EN, {
   'Beadandó dokumentumok és elvárt eredmények': 'Documents to submit and expected outcomes',
   'Elvárt eredmények — ezen mérnek minket': 'Expected outcomes — this is what we are measured on',
   'Hatókör': 'Scope',
+  // 100 — a pontozás hangolása
+  'Pontozás és csapatösszeállítás': 'Scoring and team assembly',
+  'Ezek a számok döntik el, kit ajánl a rendszer egy felhívásra. A hangolás irodai döntés — a mentés után a találatok a következő gépi körben újraszámolnak.':
+    'These numbers decide who the system proposes for a call. Tuning is an office decision — after saving, matches are recomputed in the next automated round.',
+  'Mi dönt valójában': 'What actually decides',
+  'pont · egy szórásnyi témakülönbség': 'points · one standard deviation of topical difference',
+  'pont · a bevonás teljes kilengése': 'points · the full swing of the fairness component',
+  'A méltányosság jelenleg többet mozdít, mint a szakmai illeszkedés — a kevesebbet szerepelt kolléga megelőzi a témában erősebbet. Ha ezt nem akarod, csökkentsd a bevonás súlyát.':
+    'Fairness currently moves more than topical fit — a less-involved colleague outranks a stronger match. Lower the fairness weight if that is not what you want.',
+  'A téma dönt, a méltányosság döntetlennél billent. Ez a szándékolt arány.':
+    'Topic decides, fairness tips a tie. This is the intended balance.',
+  'Pontszám-súlyok': 'Score weights',
+  'A hét komponens aránya az összesített pontszámban.': 'The share of the seven components in the total score.',
+  'Küszöbök': 'Thresholds',
+  'Ki kerül listára, és mikor tekintünk egy elvárást lefedettnek.':
+    'Who makes the list, and when an expectation counts as covered.',
+  'Csapatösszeállítás': 'Team assembly',
+  'Méret, döntetlen-sáv, kapacitás alsó határa.': 'Size, tie band, capacity floor.',
+  'Bevonási méltányosság': 'Involvement fairness',
+  'Mennyivel hozza előre a kevesebbet szerepelt kollégát.':
+    'How far it moves a less-involved colleague up the list.',
+  'Elvetés': 'Discard',
   'Formai korlát': 'Format limit',
   'Értékelés és küszöbök': 'Evaluation and thresholds',
   'Még nem töltöttük le a kiíró oldaláról — a gépi kör hamarosan sorra veszi.':

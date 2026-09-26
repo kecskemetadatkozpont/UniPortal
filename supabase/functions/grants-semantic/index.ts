@@ -580,6 +580,35 @@ function dokTipus(nev: string) {
   return 'egyeb';
 }
 
+/* A portál válaszát a Deno futtatókörnyezet néha nem tudja végigolvasni
+   („error reading a body from connection") — ugyanaz az URL curl-lel hibátlan.
+   MÉRVE: a tömörítés kikapcsolása és a bájtszintű olvasás megoldja. Az
+   újrapróba azért van, mert a portál időnként lezárja a kapcsolatot. */
+async function euKer(url: string) {
+  let utolso = '';
+  for (let proba = 1; proba <= 3; proba++) {
+    try {
+      const v = await fetch(url, {
+        headers: {
+          'Accept': 'application/json',
+          // Tömörítetlen válasz: a csonkolt gzip-folyam okozta a hibát.
+          'Accept-Encoding': 'identity',
+          'User-Agent': UA,
+        },
+      });
+      if (!v.ok) throw new Error('HTTP ' + v.status);
+      // Bájtszinten olvassuk, és utána dekódolunk: így a folyam végét is
+      // megvárjuk, mielőtt JSON-ként értelmeznénk.
+      const buf = await v.arrayBuffer();
+      return JSON.parse(new TextDecoder('utf-8').decode(buf));
+    } catch (e) {
+      utolso = e instanceof Error ? e.message : String(e);
+      if (proba < 3) await varj(proba * 700);
+    }
+  }
+  throw new Error(utolso);
+}
+
 async function reszletekLepes(sb: ReturnType<typeof createClient>, hatarido: number, limit: number) {
   const { data: sor, error } = await sb.rpc('grants_call_details_queue', { p_limit: limit, p_napok: 30 });
   if (error) throw new Error('grants_call_details_queue: ' + error.message);
@@ -592,11 +621,8 @@ async function reszletekLepes(sb: ReturnType<typeof createClient>, hatarido: num
     const azon = String(c.azonosito ?? '').toLowerCase();
     if (!azon) continue;
     try {
-      const v = await fetch(
-        `https://ec.europa.eu/info/funding-tenders/opportunities/data/topicDetails/${encodeURIComponent(azon)}.json`,
-        { headers: { 'Accept': 'application/json', 'User-Agent': UA } });
-      if (!v.ok) throw new Error('HTTP ' + v.status);
-      const j = await v.json();
+      const j = await euKer(
+        `https://ec.europa.eu/info/funding-tenders/opportunities/data/topicDetails/${encodeURIComponent(azon)}.json`);
       const d = (j?.TopicDetails ?? {}) as Record<string, unknown>;
 
       // Az „Expected Outcome" és a „Scope" egy mezőben jön, egymás után.

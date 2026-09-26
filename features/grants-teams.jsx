@@ -64,6 +64,9 @@ const GRTT_api = {
   semantic:   ()                => GRTT_rpc('grants_semantic_stats'),
   rebuild:    (mit)             => GRTT_rpc('grants_semantic_rebuild', { p_mit: mit || 'mind' }),
   gaps:       (n)               => GRTT_rpc('grants_coauthor_gaps', { p_limit: n || 20 }),
+  scoringGet: ()                => GRTT_rpc('grants_scoring_get'),
+  scoringSave:(ertekek, ujra)   => GRTT_rpc('grants_scoring_save', {
+                                     p_ertekek: ertekek, p_ujraszamol: !!ujra }),
 };
 
 /* Az állapotsor. A 'visszalepett' és a 'lejart' KÜLÖN állapot: az első döntés,
@@ -206,6 +209,151 @@ function GRTT_IlleszkedesModal({ open, kutato, onClose, onFelkerve }) {
 /* ----------------------------------------------------------------------------
    A bevonási dashboard
    ------------------------------------------------------------------------- */
+
+/* ----------------------------------------------------------------------------
+   A pontozás hangolása (100_grants_pontozas_ui.sql)
+   ----------------------------------------------------------------------------
+   MIÉRT A FELÜLETEN: hogy a tekintély vagy a méltányosság mennyit nyomjon a
+   latban, az irodai döntés, nem fejlesztői. A két kiemelt szám azt mutatja meg,
+   amit a súlyokból önmagában nehéz kiolvasni: melyik komponens dönt valójában.
+   ------------------------------------------------------------------------- */
+const GRTT_CSOPORT = {
+  suly:    { cim: 'Pontszám-súlyok', leiras: 'A hét komponens aránya az összesített pontszámban.' },
+  kuszob:  { cim: 'Küszöbök', leiras: 'Ki kerül listára, és mikor tekintünk egy elvárást lefedettnek.' },
+  csapat:  { cim: 'Csapatösszeállítás', leiras: 'Méret, döntetlen-sáv, kapacitás alsó határa.' },
+  bevonas: { cim: 'Bevonási méltányosság', leiras: 'Mennyivel hozza előre a kevesebbet szerepelt kollégát.' },
+};
+
+function GRTT_PontozasBeallitas() {
+  const [d, setD] = useState(null);
+  const [mod, setMod] = useState({});
+  const [ujra, setUjra] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [toast, setToast] = useState('');
+
+  const betolt = () => GRTT_api.scoringGet().then(x => { setD(x); setMod({}); })
+    .catch(e => setErr(GRT_msg(e)));
+  useEffect(() => { betolt(); }, []);
+
+  if (err && !d) return <p className="text-xs text-rose-600 font-bold">{err}</p>;
+  if (!d) return <p className="text-sm text-slate-400">Betöltés…</p>;
+
+  const ertekek = d.ertekek || [];
+  const ertek = (k) => (mod[k] !== undefined ? mod[k] : String(
+    (ertekek.find(x => x.kulcs === k) || {}).ertek ?? ''));
+  const valtozott = Object.keys(mod).length > 0;
+
+  // A két arány élőben, a beírt értékekből — hogy ne mentés után derüljön ki,
+  // mit csinált a módosítás.
+  const suly = (k) => Number(ertek(k) || 0);
+  const sulyOssz = ertekek.filter(x => x.csoport === 'suly')
+    .reduce((a, x) => a + suly(x.kulcs), 0);
+  const egySzoras = sulyOssz > 0 ? Math.round(12.5 * suly('pont_suly_tartalom') / sulyOssz * 10) / 10 : 0;
+  const bevKileng = sulyOssz > 0 ? Math.round(92 * suly('pont_suly_bevonas') / sulyOssz * 10) / 10 : 0;
+
+  const ment = async () => {
+    setBusy(true); setErr('');
+    try {
+      const r = await GRTT_api.scoringSave(mod, ujra);
+      setToast(ujra
+        ? `${(r && r.mentve) || 0} beállítás mentve — a találatok a következő gépi körben újraszámolnak.`
+        : `${(r && r.mentve) || 0} beállítás mentve.`);
+      await betolt();
+    } catch (e) { setErr(GRT_msg(e)); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="bg-white border border-slate-100 rounded-2xl p-5 space-y-4">
+      {toast && <UToast msg={toast} onDone={() => setToast('')} />}
+      <div>
+        <h3 className="text-sm font-black text-slate-800">Pontozás és csapatösszeállítás</h3>
+        <p className="text-[11px] text-slate-400 font-medium mt-0.5 leading-relaxed">
+          {'Ezek a számok döntik el, kit ajánl a rendszer egy felhívásra. A hangolás irodai döntés — '
+           + 'a mentés után a találatok a következő gépi körben újraszámolnak.'}
+        </p>
+      </div>
+
+      <div className={'rounded-2xl p-4 ' + (bevKileng > egySzoras ? 'bg-amber-50 border border-amber-100' : 'bg-slate-50')}>
+        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
+          Mi dönt valójában
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <p className="text-xl font-black text-slate-800">{egySzoras}</p>
+            <p className="text-[11px] text-slate-500">
+              {'pont · egy szórásnyi témakülönbség'}
+            </p>
+          </div>
+          <div>
+            <p className={'text-xl font-black ' + (bevKileng > egySzoras ? 'text-amber-600' : 'text-slate-800')}>
+              {bevKileng}
+            </p>
+            <p className="text-[11px] text-slate-500">
+              {'pont · a bevonás teljes kilengése'}
+            </p>
+          </div>
+        </div>
+        <p className="text-[11px] text-slate-500 mt-2">
+          {bevKileng > egySzoras
+            ? 'A méltányosság jelenleg többet mozdít, mint a szakmai illeszkedés — a kevesebbet szerepelt kolléga megelőzi a témában erősebbet. Ha ezt nem akarod, csökkentsd a bevonás súlyát.'
+            : 'A téma dönt, a méltányosság döntetlennél billent. Ez a szándékolt arány.'}
+        </p>
+      </div>
+
+      {Object.keys(GRTT_CSOPORT).map(cs => (
+        <div key={cs}>
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">
+            {GRTT_CSOPORT[cs].cim}
+          </p>
+          <p className="text-[11px] text-slate-400 mb-2">{GRTT_CSOPORT[cs].leiras}</p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {ertekek.filter(x => x.csoport === cs).map(x => (
+              <label key={x.kulcs} className="flex items-center justify-between gap-3 bg-slate-50 rounded-xl px-3 py-2">
+                <span className="text-[12px] font-bold text-slate-600 min-w-0">
+                  {x.cimke}
+                  <span className="block text-[10px] font-medium text-slate-400">
+                    {`alap: ${x.alap} · ${x.min}–${x.max}`}
+                  </span>
+                </span>
+                <input type="number" min={x.min} max={x.max} step={x.tizedes ? 0.1 : 1}
+                  className={U_input + ' !w-24 !py-1.5 !px-2 text-sm text-right'}
+                  value={ertek(x.kulcs)}
+                  onChange={e => setMod({ ...mod, [x.kulcs]: e.target.value })} />
+              </label>
+            ))}
+          </div>
+        </div>
+      ))}
+
+      {err && <p className="text-xs text-rose-600 font-bold">{err}</p>}
+
+      <div className="flex items-center justify-between gap-3 flex-wrap border-t border-slate-100 pt-3">
+        <label className="inline-flex items-center gap-2 text-[11px] font-bold text-slate-500">
+          <input type="checkbox" checked={ujra} onChange={e => setUjra(e.target.checked)} />
+          {`a ${d.felhivas_db || 0} felhívás találatai számoljanak újra`}
+        </label>
+        <div className="flex items-center gap-2">
+          {valtozott && (
+            <button className={U_btnGhost + ' !px-3 !py-2 text-xs'} onClick={() => setMod({})}>
+              Elvetés
+            </button>
+          )}
+          <button className={U_btnPrimary + ' !px-4 !py-2 text-xs'} disabled={busy || !valtozott} onClick={ment}>
+            <Lucide.Save size={14} /> Mentés
+          </button>
+        </div>
+      </div>
+      {d.valtozott && (
+        <p className="text-[11px] text-slate-400">
+          {`A súlyokat utoljára ekkor állították át: ${String(d.valtozott).slice(0, 16).replace('T', ' ')}.`}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function GRTT_BevonasView() {
   const [stat, setStat] = useState(null);
   const [sosem, setSosem] = useState(null);

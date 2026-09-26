@@ -1116,6 +1116,10 @@ function GRT_OfficeView({ user }) {
 
       {ful === 'beallitas' && (
         <div className="space-y-4 max-w-2xl">
+          {/* A pontozás hangolása (100): irodai döntés, ezért itt van és nem
+              migrációban. A grants-teams.jsx viszi. */}
+          <GRTT_PontozasBeallitas />
+
           <div className="bg-white border border-slate-100 rounded-2xl p-5 space-y-4">
             <div>
               <h3 className="text-sm font-black text-slate-800">Modellszolgáltató</h3>
