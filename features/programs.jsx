@@ -161,6 +161,32 @@ const PROG_DEGREE_LEVELS = ['preparatory', 'bachelor', 'master', 'doctoral'];
 const PROG_PROGRAM_LEVELS = ['course', 'training', 'company_visit', 'excursion'];
 /* A kártyán megjelenő címke alapértéke típusonként — a szerkesztő ezt írja be,
    amíg az admin át nem írja a sajátjára. */
+/* KAROK. Az iroda eddig szabad szövegként írta be a kart, ezért ugyanaz a kar
+   többféle írásmóddal került a katalógusba (rövidítve, angolul, elgépelve), és
+   a szűrés sem tudott rá támaszkodni. A lista a Neumann János Egyetem karait
+   tartalmazza; a SZERKESZTŐ a meglévő, listán kívüli értéket megtartja külön
+   sorként, hogy egy régi képzés kara ne írodjon át némán. */
+const PROG_KAROK = ['GAMF', 'KVK', 'GTK', 'Doktori Iskola'];
+
+/* FOKOZATOK szintenként. Szintén legördülő: a „BSc" / „B.Sc." / „Bsc" változatok
+   ugyanazt jelentették, de három különböző címkeként jelentek meg a kártyákon. */
+const PROG_FOKOZATOK = {
+  preparatory:   ['Certificate', 'Foundation year'],
+  bachelor:      ['BSc', 'BA', 'BProf'],
+  master:        ['MSc', 'MA', 'MBA', 'LLM'],
+  doctoral:      ['PhD', 'DLA'],
+  course:        ['Short course', 'Workshop', 'Summer school'],
+  training:      ['Training', 'Professional training'],
+  company_visit: ['Company visit'],
+  excursion:     ['Excursion', 'Study trip'],
+};
+/* A listához hozzávesszük a MEGLÉVŐ értéket, ha nincs benne — különben a
+   szerkesztő megnyitása csendben átírná egy régi képzés fokozatát. */
+const PROG_opciok = (lista, ertek) => {
+  const v = String(ertek || '').trim();
+  return (v && !lista.includes(v)) ? [v, ...lista] : lista.slice();
+};
+
 const PROG_DEFAULT_DEGREE = { preparatory: 'Certificate', course: 'Short course', training: 'Training', company_visit: 'Company visit', excursion: 'Excursion', bachelor: 'BSc', master: 'MA', doctoral: 'PhD' };
 const PROG_kind = (p) => (p && p.kind) || (PROG_DEGREE_LEVELS.includes(p && p.level) ? 'degree' : 'program');
 
@@ -1131,6 +1157,19 @@ function PROG_StepBody({ stepKey, program, data, setData, mentData, user, cur, o
     const upload = async (id, e) => {
       const file = e.target.files && e.target.files[0];
       if (!file) return;
+      /* CSAK MEGJELENÍTHETŐ FORMÁTUM. Az input `accept`-je csak ajánlás: a
+         fájlválasztóban „minden fájl"-ra váltva bármi feltölthető volt, és az
+         ügyintéző előnézete üres maradt rajta. */
+      if (!DOC_tipusOk(file)) {
+        setDocErr(id + ': ' + DOC_tipusHiba(file));
+        e.target.value = '';
+        return;
+      }
+      if (file.size > DOC_MAX_BYTES) {
+        setDocErr(id + ': A fájl ' + DOC_fmtSize(file.size) + ', a megengedett legfeljebb ' + DOC_fmtSize(DOC_MAX_BYTES) + '.');
+        e.target.value = '';
+        return;
+      }
       setDocBusy(id);
       try {
         /* A TULAJDONOS A FELHASZNÁLÓ AZONOSÍTÓJA, NEM AZ E-MAIL-CÍME.
@@ -1174,6 +1213,7 @@ function PROG_StepBody({ stepKey, program, data, setData, mentData, user, cur, o
       <div className="space-y-5">
         <PROG_Head icon={Lucide.Upload} title="Dokumentumok feltöltése" sub={tobbKepzes ? 'A megjelölt képzések által kért összes dokumentum. Ami több képzéshez is kell, azt elég egyszer feltölteni.' : 'Ezek a fájlok kötelezőek ehhez a képzéshez.'} />
         <p className="text-[12px] font-bold text-slate-400" data-dok-osszesito="1">{`${feltoltveN}/${(program.required_docs || []).length} dokumentum feltöltve`}</p>
+        <p className="text-[12px] font-semibold text-slate-400" data-dok-formatum="1">{'Elfogadott formátum: ' + DOC_ENGEDETT_SZOVEG + ', legfeljebb ' + DOC_fmtSize(DOC_MAX_BYTES) + '.'}</p>
         <div className="space-y-3">
           {(program.required_docs || []).map(id => { const got = docs[id]; return (
             <div key={id} className={'flex items-center justify-between gap-4 p-4 rounded-2xl border ' + (got ? 'border-emerald-100 bg-emerald-50/40' : 'border-slate-100')}>
@@ -1183,7 +1223,7 @@ function PROG_StepBody({ stepKey, program, data, setData, mentData, user, cur, o
               </div>
               <label className={U_btnGhost + ' flex-none cursor-pointer text-[13px] py-2 px-4 ' + (docBusy === id ? 'opacity-50 pointer-events-none' : '')}>
                 {docBusy === id ? 'Feltöltés…' : got ? 'Csere' : 'Feltöltés'}
-                <input type="file" className="hidden" disabled={!!docBusy} onChange={e => upload(id, e)} />
+                <input type="file" accept={DOC_ACCEPT} className="hidden" disabled={!!docBusy} onChange={e => upload(id, e)} />
               </label>
             </div>
           ); })}
@@ -1864,9 +1904,19 @@ function PROG_Editor({ open, program, onClose, onSaved, scope }) {
       <div className="space-y-6">
         <div className="grid sm:grid-cols-2 gap-4">
           <UField label={isDeg ? 'Képzés neve' : 'Program neve'}><input className={U_input} value={f.name} onChange={e => set('name', e.target.value)} /></UField>
-          <UField label="Kar"><input className={U_input} value={f.faculty} onChange={e => set('faculty', e.target.value)} /></UField>
+          <UField label="Kar">
+            <select className={U_input} value={f.faculty} onChange={e => set('faculty', e.target.value)} data-mezo="kar">
+              <option value="">Válassz kart…</option>
+              {PROG_opciok(PROG_KAROK, f.faculty).map(k => <option key={k} value={k}>{k}</option>)}
+            </select>
+          </UField>
           <UField label={isDeg ? 'Szint' : 'Típus'}><select className={U_input} value={f.level} onChange={e => setLevel(e.target.value)}>{levelOpts.map(k => <option key={k} value={k}>{PROG_LEVELS[k]}</option>)}</select></UField>
-          <UField label={isDeg ? 'Fokozat megnevezése' : 'Címke a kártyán'}><input className={U_input} value={f.degree} onChange={e => set('degree', e.target.value)} placeholder={isDeg ? 'BSc / MA / MBA / PhD' : 'Short course / Training / Company visit'} /></UField>
+          <UField label={isDeg ? 'Fokozat' : 'Címke a kártyán'}>
+            <select className={U_input} value={f.degree} onChange={e => set('degree', e.target.value)} data-mezo="fokozat">
+              <option value="">Válassz…</option>
+              {PROG_opciok(PROG_FOKOZATOK[f.level] || [], f.degree).map(k => <option key={k} value={k}>{k}</option>)}
+            </select>
+          </UField>
           <UField label="Tandíj / szemeszter (EUR)"><input type="number" className={U_input} value={f.tuition} onChange={e => set('tuition', e.target.value)} /></UField>
           <UField label="Időtartam (szemeszter)"><input type="number" className={U_input} value={f.duration_semesters} onChange={e => set('duration_semesters', e.target.value)} /></UField>
           <UField label="ECTS"><input type="number" className={U_input} value={f.ects} onChange={e => set('ects', e.target.value)} /></UField>

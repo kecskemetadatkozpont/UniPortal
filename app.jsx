@@ -806,6 +806,45 @@ const DOC_MAX_BYTES = 20 * 1024 * 1024;          // hard limit shown to the user
 const DOC_INLINE_FALLBACK_BYTES = 4 * 1024 * 1024; // only if Storage is unavailable
 const DOC_BUCKET = 'documents';
 
+/* ============ MILYEN FÁJLT LEHET FELTÖLTENI ============
+   Csak olyat, amit az ÜGYINTÉZŐ MEG IS TUD NÉZNI a felületen: PDF, kép és
+   Word (.docx). MÉRVE 2026-09-29: az input eddig `accept="application/pdf,
+   image/*"` volt, de az accept csak AJÁNLÁS — a fájlválasztóban „minden fájl"-ra
+   váltva bármi feltölthető volt (.zip, .heic, .pages), és az előnézet ezeken
+   üres maradt: az iroda letöltötte, megnyitotta, és csak ott derült ki, hogy
+   nem tudja elolvasni. Ezért a kiterjesztést MENTÉS ELŐTT is ellenőrizzük.
+
+   A régi .doc (Word 97) szándékosan NINCS benne: böngészőben nem jeleníthető
+   meg, és a jelentkezőnek egy „mentés másként PDF-be" kevesebb bosszúság, mint
+   egy visszautasított jelentkezés.
+
+   A HEIC (iPhone alapértelmezett képformátuma) sem megy: a Chrome és a Firefox
+   nem rajzolja ki. A telefon „Legkompatibilisebb" beállítással JPEG-et ment. */
+const DOC_ENGEDETT = [
+  { kit: 'pdf',  mime: ['application/pdf'], cimke: 'PDF' },
+  { kit: 'jpg',  mime: ['image/jpeg'], cimke: 'JPG' },
+  { kit: 'jpeg', mime: ['image/jpeg'], cimke: 'JPG' },
+  { kit: 'png',  mime: ['image/png'], cimke: 'PNG' },
+  { kit: 'webp', mime: ['image/webp'], cimke: 'WEBP' },
+  { kit: 'docx', mime: ['application/vnd.openxmlformats-officedocument.wordprocessingml.document'], cimke: 'Word (.docx)' },
+];
+const DOC_ACCEPT = '.pdf,.jpg,.jpeg,.png,.webp,.docx,application/pdf,image/jpeg,image/png,image/webp,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const DOC_ENGEDETT_SZOVEG = 'PDF, JPG, PNG, WEBP vagy Word (.docx)';
+const DOC_kiterjesztes = (nev) => { const m = /\.([A-Za-z0-9]+)$/.exec(String(nev || '')); return m ? m[1].toLowerCase() : ''; };
+/* A KITERJESZTÉS dönt, nem a böngésző által adott MIME-típus: az utóbbi
+   rendszerenként eltér (.docx-re több böngésző üres típust küld). */
+const DOC_tipusOk = (file) => !!file && DOC_ENGEDETT.some(x => x.kit === DOC_kiterjesztes(file.name));
+const DOC_tipusHiba = (file) => {
+  const k = DOC_kiterjesztes(file && file.name);
+  return (k ? 'A .' + k + ' fájlt nem tudjuk fogadni' : 'Ezt a fájlt nem tudjuk fogadni')
+    + ' — csak ' + DOC_ENGEDETT_SZOVEG + ' tölthető fel.'
+    + (k === 'doc' ? ' A régi .doc helyett mentsd el .docx vagy PDF formátumban.' : '')
+    + (k === 'heic' ? ' A telefonod kamerabeállításában válaszd a „Legkompatibilisebb" (JPEG) formátumot, vagy oszd meg a képet JPG-ként.' : '');
+};
+const DOC_docx = (entry, fileName) =>
+  DOC_kiterjesztes(fileName) === 'docx'
+  || /wordprocessingml/.test((entry && entry.type) || '');
+
 function DOC_fmtSize(bytes) {
   if (!bytes && bytes !== 0) return '';
   return bytes >= 1024 * 1024
@@ -7972,6 +8011,16 @@ const DOC_OLV_CSS = `
 .dokolv-szoveg mark { background: rgba(250, 204, 21, .5); color: transparent; border-radius: 2px; }
 .dokolv-szoveg mark.aktiv { background: rgba(234, 88, 12, .65); }
 .dokolv-szoveg ::selection { background: rgba(37, 99, 235, .3); }
+.dokolv-word { background:#fff; color:#111827; padding:56px 64px; font-family:Georgia,'Times New Roman',serif; font-size:15px; line-height:1.65; }
+.dokolv-word p { margin:0 0 10px; }
+.dokolv-word h1,.dokolv-word h2,.dokolv-word h3,.dokolv-word h4 { font-weight:700; margin:18px 0 8px; line-height:1.3; }
+.dokolv-word h1 { font-size:24px } .dokolv-word h2 { font-size:20px } .dokolv-word h3 { font-size:17px }
+.dokolv-word ul,.dokolv-word ol { margin:0 0 10px 22px; } .dokolv-word li { margin:0 0 4px; }
+.dokolv-word table { border-collapse:collapse; margin:10px 0; } .dokolv-word td,.dokolv-word th { border:1px solid #cbd5e1; padding:5px 8px; }
+.dokolv-word img { max-width:100%; height:auto; }
+.dokolv-word a { color:#1d4ed8; text-decoration:underline; }
+.dokolv-word mark { background: rgba(250, 204, 21, .55); color: inherit; border-radius:2px; }
+.dokolv-word mark.aktiv { background: rgba(234, 88, 12, .55); }
 .dokolv-kez, .dokolv-kez * { cursor: grab !important; user-select: none !important; }
 .dokolv-kez.fog, .dokolv-kez.fog * { cursor: grabbing !important; }
 `;
@@ -7989,6 +8038,46 @@ function DOC_szovegSorban(f) {
   return kov;
 }
 
+/* WORD (.docx) MEGJELENÍTÉSE. A böngésző nem tud .docx-et megnyitni, ezért a
+   mammoth alakítja HTML-lé (bekezdés, címsor, lista, táblázat, kép). Ez nem
+   lapokra tördelt, oldalhű nyomtatási kép — az eredeti tördelést csak a Word
+   adja vissza —, de az iroda EL TUDJA OLVASNI a motivációs levelet és az
+   ajánlást anélkül, hogy letöltené és külön programban nyitná meg.
+
+   A kimenetet MEGTISZTÍTJUK: a fájlt a jelentkező tölti fel, és bár a mammoth
+   a dokumentummodellből épít HTML-t (nem enged át nyers HTML-t), a
+   megjelenítés előtti szűrés olcsó, és nem hagy kérdést. */
+let DOC_MAMMOTH = null;
+async function DOC_mammoth() {
+  if (DOC_MAMMOTH) return DOC_MAMMOTH;
+  if (!window.mammoth) {
+    await new Promise((ok, hiba) => {
+      const sc = document.createElement('script');
+      sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.9.0/mammoth.browser.min.js';
+      sc.onload = ok; sc.onerror = () => hiba(new Error('mammoth-betoltes'));
+      document.head.appendChild(sc);
+    });
+  }
+  DOC_MAMMOTH = window.mammoth;
+  return DOC_MAMMOTH;
+}
+function DOC_tisztit(html) {
+  try {
+    const doc = new DOMParser().parseFromString('<div id="gyoker">' + String(html || '') + '</div>', 'text/html');
+    const gy = doc.getElementById('gyoker');
+    gy.querySelectorAll('script,style,iframe,object,embed,link,meta,form,input,button').forEach(e => e.remove());
+    gy.querySelectorAll('*').forEach(e => {
+      [...e.attributes].forEach(a => {
+        const n = a.name.toLowerCase();
+        if (n.startsWith('on')) e.removeAttribute(a.name);
+        if ((n === 'href' || n === 'src') && /^\s*javascript:/i.test(a.value)) e.removeAttribute(a.name);
+      });
+    });
+    gy.querySelectorAll('a[href]').forEach(a => { a.setAttribute('target', '_blank'); a.setAttribute('rel', 'noreferrer noopener'); });
+    return gy.innerHTML;
+  } catch (e) { return ''; }
+}
+
 let DOC_PDFJS = null;
 async function DOC_pdfjs() {
   if (DOC_PDFJS) return DOC_PDFJS;
@@ -7996,6 +8085,45 @@ async function DOC_pdfjs() {
   m.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.worker.min.mjs';
   DOC_PDFJS = m;
   return m;
+}
+
+/* Kiemelés a megjelenített szövegben. Ugyanaz a PDF szövegrétegén és a Word
+   dokumentum HTML-jén: a korábbi kiemeléseket visszabontja, majd a keresett
+   szót <mark>-ba teszi. A `aktiv` sorszámú találatot külön jelöli és odagörget.
+   Visszaadja a találatok számát. */
+function DOC_kiemel(el, keres, aktiv) {
+  if (!el) return 0;
+  el.querySelectorAll('mark').forEach(m => { m.replaceWith(document.createTextNode(m.textContent || '')); });
+  el.normalize();
+  const k = String(keres || '').toLowerCase();
+  if (!k) return 0;
+  let sorszam = 0;
+  /* A szöveges csomópontokat gyűjtjük ki (a spanok belsejét is): így a Word
+     bekezdéseiben és a PDF szövegrétegében is ugyanúgy működik. */
+  const seta = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null);
+  const csomok = [];
+  for (let n = seta.nextNode(); n; n = seta.nextNode()) if (n.nodeValue && n.nodeValue.toLowerCase().includes(k)) csomok.push(n);
+  csomok.forEach(n => {
+    const szoveg = n.nodeValue, kis = szoveg.toLowerCase();
+    const darab = document.createDocumentFragment();
+    let utolso = 0, i = kis.indexOf(k);
+    while (i >= 0) {
+      if (i > utolso) darab.appendChild(document.createTextNode(szoveg.slice(utolso, i)));
+      const m = document.createElement('mark');
+      m.setAttribute('data-tal', String(sorszam++));
+      m.textContent = szoveg.substr(i, k.length);
+      darab.appendChild(m);
+      utolso = i + k.length;
+      i = kis.indexOf(k, utolso);
+    }
+    if (utolso < szoveg.length) darab.appendChild(document.createTextNode(szoveg.slice(utolso)));
+    n.parentNode.replaceChild(darab, n);
+  });
+  if (aktiv >= 0) {
+    const m = el.querySelector('mark[data-tal="' + aktiv + '"]');
+    if (m) { m.classList.add('aktiv'); try { m.scrollIntoView({ block: 'center' }); } catch (e) {} }
+  }
+  return sorszam;
 }
 
 /* Egy lap: a vászon és a szövegréteg. Csak akkor rajzol, ha a görgetősávban
@@ -8089,33 +8217,7 @@ function DocReaderLap({ pdf, n, skala, forgatas, keres, aktivSorszam }) {
   React.useEffect(() => {
     const el = szovegRef.current;
     if (!el) return;
-    const t = setTimeout(() => {
-      el.querySelectorAll('mark').forEach(m => { m.replaceWith(document.createTextNode(m.textContent || '')); });
-      el.querySelectorAll('span').forEach(s => { try { s.normalize(); } catch (e) {} });
-      const k = String(keres || '').toLowerCase();
-      if (!k) return;
-      let sorszam = 0;
-      el.querySelectorAll('span').forEach(s => {
-        const szoveg = s.textContent || '';
-        const kis = szoveg.toLowerCase();
-        const helyek = [];
-        let i = kis.indexOf(k);
-        while (i >= 0) { helyek.push(i); i = kis.indexOf(k, i + k.length); }
-        if (!helyek.length) return;
-        let html = '', utolso = 0;
-        helyek.forEach(p => {
-          html += DOC_OLV_esc(szoveg.slice(utolso, p))
-            + '<mark data-tal="' + (sorszam++) + '">' + DOC_OLV_esc(szoveg.substr(p, k.length)) + '</mark>';
-          utolso = p + k.length;
-        });
-        html += DOC_OLV_esc(szoveg.slice(utolso));
-        s.innerHTML = html;
-      });
-      if (aktivSorszam >= 0) {
-        const m = el.querySelector('mark[data-tal="' + aktivSorszam + '"]');
-        if (m) { m.classList.add('aktiv'); try { m.scrollIntoView({ block: 'center' }); } catch (e) {} }
-      }
-    }, 60);
+    const t = setTimeout(() => { DOC_kiemel(el, keres, aktivSorszam); }, 60);
     return () => clearTimeout(t);
   }, [keres, aktivSorszam, latszik, skala, forgatas]);
 
@@ -8137,6 +8239,9 @@ function DocReaderLap({ pdf, n, skala, forgatas, keres, aktivSorszam }) {
 function DocReader({ entry, fileName, label, Icon, onClose }) {
   const src = useDocSrc(entry);
   const pdfE = /pdf/i.test((entry && entry.type) || '') || /\.pdf$/i.test(String(fileName || ''));
+  const wordE = !pdfE && DOC_docx(entry, fileName);
+  const [wordHtml, setWordHtml] = React.useState('');
+  const wordRef = React.useRef(null);
   const [allapot, setAllapot] = React.useState('betolt');   // betolt | kesz | hiba
   const [pdf, setPdf] = React.useState(null);
   const [nagyitas, setNagyitas] = React.useState(0);        // 0 = szélességre igazítva
@@ -8158,6 +8263,18 @@ function DocReader({ entry, fileName, label, Icon, onClose }) {
     let dead = false;
     setAllapot('betolt');
     (async () => {
+      if (wordE) {
+        try {
+          const mammoth = await DOC_mammoth();
+          const bytes = await DOC_bytes(src);
+          if (dead || !bytes) return;
+          const ered = await mammoth.convertToHtml({ arrayBuffer: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) });
+          if (dead) return;
+          setWordHtml(DOC_tisztit((ered && ered.value) || ''));
+          setAllapot('kesz');
+        } catch (e) { if (!dead) setAllapot('hiba'); }
+        return;
+      }
       if (!pdfE) { if (!dead) setAllapot('kesz'); return; }
       try {
         const pdfjs = await DOC_pdfjs();
@@ -8169,7 +8286,7 @@ function DocReader({ entry, fileName, label, Icon, onClose }) {
       } catch (e) { if (!dead) setAllapot('hiba'); }
     })();
     return () => { dead = true; };
-  }, [src, pdfE]);
+  }, [src, pdfE, wordE]);
 
   // Szélességre igazítás: a görgető szélességéből és az első lap méretéből.
   React.useEffect(() => {
@@ -8188,6 +8305,21 @@ function DocReader({ entry, fileName, label, Icon, onClose }) {
     if (ro && gorgetoRef.current) ro.observe(gorgetoRef.current);
     return () => { dead = true; if (ro) ro.disconnect(); };
   }, [pdf, forgatas]);
+
+  /* A Word-nézet „szélességre igazítása": a lap 794 px széles (A4 96 dpi-n). */
+  React.useEffect(() => {
+    if (!wordE || !gorgetoRef.current) return;
+    const szamol = () => {
+      const w = (gorgetoRef.current ? gorgetoRef.current.clientWidth : 800) - 40;
+      setIlleszt(Math.max(0.3, Math.min(3, w / 794)));
+      setIlleszKesz(true);
+    };
+    szamol();
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(szamol) : null;
+    if (ro) ro.observe(gorgetoRef.current);
+    window.addEventListener('resize', szamol);
+    return () => { if (ro) ro.disconnect(); window.removeEventListener('resize', szamol); };
+  }, [wordE, allapot]);
 
   const skala = nagyitas || illeszt;
 
@@ -8223,6 +8355,20 @@ function DocReader({ entry, fileName, label, Icon, onClose }) {
      ilyenkor a FÖLÖTTE lévő lapra ugrott vissza. MÉRVE 2026-09-29: a 3. oldali
      találatnál „2 / 3" látszott. */
   const ugrasRef = React.useRef(0);
+  /* Keresés a Word-nézetben: nincsenek oldalak, ezért a találatok egy „oldalon"
+     vannak, és a kiemelő görget a soron következőre. */
+  React.useEffect(() => {
+    if (!wordE) return;
+    const t = setTimeout(() => {
+      const db = DOC_kiemel(wordRef.current, keres, talalatok.length ? (talalatok[tIdx] || {}).sorszam : -1);
+      setTalalatok(elozo => {
+        const kell = Array.from({ length: db }, (_, i) => ({ oldal: 1, sorszam: i }));
+        return (elozo.length === kell.length) ? elozo : kell;
+      });
+    }, 60);
+    return () => clearTimeout(t);
+  }, [wordE, keres, wordHtml, tIdx, skala]);
+
   const ugrasOldalra = (n) => {
     const g = gorgetoRef.current;
     if (!g) return;
@@ -8349,7 +8495,7 @@ function DocReader({ entry, fileName, label, Icon, onClose }) {
           </button>
           <button onClick={() => setForgatas(f => (f + 90) % 360)} title="Forgatás 90°-kal" className={IkonG}><Lucide.RotateCw size={16} /></button>
 
-          {pdfE && (
+          {(pdfE || wordE) && (
             <div className="flex items-center gap-1 ml-auto">
               <div className="relative">
                 <Lucide.Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -8380,10 +8526,10 @@ function DocReader({ entry, fileName, label, Icon, onClose }) {
           onMouseDown={panLe} onMouseMove={panMozog} onMouseUp={panFel} onMouseLeave={panFel}
           className={'flex-1 overflow-auto bg-slate-200 px-4 py-4 ' + (kez ? 'dokolv-kez' : '')}>
           {!src && <div className="text-center text-slate-400 text-sm py-16 font-bold">Dokumentum betöltése…</div>}
-          {src && allapot === 'betolt' && <div className="text-center text-slate-400 text-sm py-16 font-bold">PDF betöltése…</div>}
+          {src && allapot === 'betolt' && <div className="text-center text-slate-400 text-sm py-16 font-bold">{wordE ? 'Word dokumentum betöltése…' : 'PDF betöltése…'}</div>}
           {src && allapot === 'hiba' && (
             <div className="text-center text-sm py-16 font-bold text-red-500">
-              A PDF nem jeleníthető meg.{' '}
+              {wordE ? 'A Word dokumentum nem jeleníthető meg.' : 'A PDF nem jeleníthető meg.'}{' '}
               <a href={src} download={fileName} target="_blank" rel="noreferrer" className="text-primary underline">Letöltés</a>
             </div>
           )}
@@ -8392,7 +8538,13 @@ function DocReader({ entry, fileName, label, Icon, onClose }) {
             <DocReaderLap key={n} pdf={pdf} n={n} skala={skala} forgatas={forgatas} keres={keres}
               aktivSorszam={talalatok.length && talalatok[tIdx] && talalatok[tIdx].oldal === n ? talalatok[tIdx].sorszam : -1} />
           ))}
-          {src && allapot === 'kesz' && !pdfE && (
+          {src && allapot === 'kesz' && wordE && (
+            <div className="mx-auto shadow-md ring-1 ring-slate-300/60 rounded-sm overflow-hidden bg-white"
+                 style={{ width: 794, zoom: skala }} data-olv-word="1">
+              <div ref={wordRef} className="dokolv-word" dangerouslySetInnerHTML={{ __html: wordHtml }} />
+            </div>
+          )}
+          {src && allapot === 'kesz' && !pdfE && !wordE && (
             <div className="flex items-start justify-center">
               <img src={src} alt={fileName || ''} draggable={false}
                 style={{ width: (nagyitas ? nagyitas * 100 : 100) + '%', maxWidth: nagyitas ? 'none' : '100%', transform: 'rotate(' + forgatas + 'deg)' }}
@@ -8910,6 +9062,13 @@ const AdmissionsHub = (() => {
         const onUpload = async (d, file) => {
           if (!file) return;
 
+          // Csak megjeleníthető formátum (lásd DOC_ENGEDETT).
+          if (!DOC_tipusOk(file)) {
+            setUploadMsg({ tone: 'error', text: d.label + ' — ' + DOC_tipusHiba(file) });
+            setTimeout(() => setUploadMsg(''), 8000);
+            return;
+          }
+
           // Over the limit: say so and keep whatever was uploaded before.
           // Never report success for a document we did not store.
           if (file.size > DOC_MAX_BYTES) {
@@ -8984,7 +9143,7 @@ const AdmissionsHub = (() => {
                     </div>
                     <div className="flex items-center gap-1.5">
                       {up && <button onClick={() => setPreviewDoc({ d, fileName: docs[d.id].fileName, entry: docs[d.id] })} className="px-3 py-1.5 rounded-lg text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 inline-flex items-center gap-1.5"><Lucide.Eye size={13} /> Megtekintés</button>}
-                      {!readOnly && <label className={'px-3 py-1.5 rounded-lg text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer ' + (up ? 'text-slate-500 hover:bg-slate-100' : 'bg-primary/10 text-primary hover:bg-primary/20')}>{up ? <><Lucide.RefreshCw size={13} /> Csere</> : <><Lucide.Upload size={13} /> Feltöltés</>}<input type="file" accept="application/pdf,image/*" className="hidden" onChange={e => { onUpload(d, e.target.files && e.target.files[0]); e.target.value = ''; }} /></label>}
+                      {!readOnly && <label className={'px-3 py-1.5 rounded-lg text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer ' + (up ? 'text-slate-500 hover:bg-slate-100' : 'bg-primary/10 text-primary hover:bg-primary/20')}>{up ? <><Lucide.RefreshCw size={13} /> Csere</> : <><Lucide.Upload size={13} /> Feltöltés</>}<input type="file" accept={DOC_ACCEPT} className="hidden" onChange={e => { onUpload(d, e.target.files && e.target.files[0]); e.target.value = ''; }} /></label>}
                     </div>
                   </div>
                 );
@@ -13368,7 +13527,7 @@ Object.assign(HU_EN, {
 });
 
 const HU_EN_PHRASES = [
-  [/Aktív jelentkezések/g,'Active applications'],[/Akív jelentkezések/g,'Active applications'],[/Új jelentkező/g,'New applicant'],[/\bMód\b/g,'Mode'],[/Felvételi folyamat ·/g,'Admission process ·'],[/(\d+)\s*\/\s*(\d+)\s*lépés/g,'$1/$2 steps'],[/(\d+)\s*lépés/g,'$1 steps'],[/(\d+)\s*folyamat\b/g,'$1 process(es)'],[/(\d+)%\s*biztos/g,'$1% confidence'],[/(\d+)\s*lehetséges egyezés/g,'$1 possible match(es)'],[/TESZT — helyes válasz:/g,'TEST — correct answer:'],[/Helyes:/g,'Correct:'],[/(\d+)\s*\/\s*(\d+)\s*helyes/g,'$1 / $2 correct'],[/(\d+)\s*\/\s*(\d+)\s*kötelező hitelesítve/g,'$1 / $2 required verified'],[/(\d+)\s*hiányzik/g,'$1 missing'],[/(\d+)\s*új\b/g,'$1 new'],[/EUR \/ szemeszter/g,'EUR / semester'],[/szemeszter/g,'semester'],[/szem\./g,'sem.'],[/Egyszerűsítsd, majd értékeld ki, ha/g,'Simplify, then evaluate if'],[/Mennyi/g,'What is'],[/Értékeld ki a következő kifejezést!/g,'Evaluate the following expression!'],[/Érték =/g,'Value ='],[/(\d+)\s*folyamat\b/g,'$1 process(es)'],[/(\d+)\s*\/\s*(\d+)\s*kötelező/g,'$1 / $2 required'],[/(\d+)\s*napja lejárt/g,'expired $1 days ago'],[/Javasolt projektvezető:/g,'Proposed project lead:'],[/Erre alapozva:/g,'Based on:'],[/(\d+)\s*utolsó szerzős publikáció/g,'$1 last-author publication(s)'],[/(\d+)\s*pályázati előzmény/g,'$1 previous grant(s)'],[/(\d+)\s*pályázatot vezetett már/g,'has led $1 proposal(s)'],[/szabad kapacitás/g,'free capacity'],[/szűk kapacitás/g,'limited capacity'],[/vezetői előzmény nélkül/g,'no leadership track record'],[/már felkérve/g,'already invited'],[/(\d+)\s*oldal\b/g,'$1 page(s)'],
+  [/Aktív jelentkezések/g,'Active applications'],[/Akív jelentkezések/g,'Active applications'],[/Új jelentkező/g,'New applicant'],[/\bMód\b/g,'Mode'],[/Felvételi folyamat ·/g,'Admission process ·'],[/(\d+)\s*\/\s*(\d+)\s*lépés/g,'$1/$2 steps'],[/(\d+)\s*lépés/g,'$1 steps'],[/(\d+)\s*folyamat\b/g,'$1 process(es)'],[/(\d+)%\s*biztos/g,'$1% confidence'],[/(\d+)\s*lehetséges egyezés/g,'$1 possible match(es)'],[/TESZT — helyes válasz:/g,'TEST — correct answer:'],[/Helyes:/g,'Correct:'],[/(\d+)\s*\/\s*(\d+)\s*helyes/g,'$1 / $2 correct'],[/(\d+)\s*\/\s*(\d+)\s*kötelező hitelesítve/g,'$1 / $2 required verified'],[/(\d+)\s*hiányzik/g,'$1 missing'],[/(\d+)\s*új\b/g,'$1 new'],[/EUR \/ szemeszter/g,'EUR / semester'],[/szemeszter/g,'semester'],[/szem\./g,'sem.'],[/Egyszerűsítsd, majd értékeld ki, ha/g,'Simplify, then evaluate if'],[/Mennyi/g,'What is'],[/Értékeld ki a következő kifejezést!/g,'Evaluate the following expression!'],[/Érték =/g,'Value ='],[/(\d+)\s*folyamat\b/g,'$1 process(es)'],[/(\d+)\s*\/\s*(\d+)\s*kötelező/g,'$1 / $2 required'],[/(\d+)\s*napja lejárt/g,'expired $1 days ago'],[/Javasolt projektvezető:/g,'Proposed project lead:'],[/Erre alapozva:/g,'Based on:'],[/(\d+)\s*utolsó szerzős publikáció/g,'$1 last-author publication(s)'],[/(\d+)\s*pályázati előzmény/g,'$1 previous grant(s)'],[/(\d+)\s*pályázatot vezetett már/g,'has led $1 proposal(s)'],[/szabad kapacitás/g,'free capacity'],[/szűk kapacitás/g,'limited capacity'],[/vezetői előzmény nélkül/g,'no leadership track record'],[/már felkérve/g,'already invited'],[/(\d+)\s*oldal\b/g,'$1 page(s)'],[/A \.([a-z0-9]+) fájlt nem tudjuk fogadni/g,'We cannot accept .$1 files'],[/Ezt a fájlt nem tudjuk fogadni/g,'We cannot accept this file'],[/csak PDF, JPG, PNG, WEBP vagy Word \(\.docx\) tölthető fel\./g,'only PDF, JPG, PNG, WEBP or Word (.docx) can be uploaded.'],[/A régi \.doc helyett mentsd el \.docx vagy PDF formátumban\./g,'Please save it as .docx or PDF instead of the old .doc format.'],[/A telefonod kamerabeállításában válaszd a „Legkompatibilisebb" \(JPEG\) formátumot, vagy oszd meg a képet JPG-ként\./g,'In your phone\u2019s camera settings choose \u201cMost Compatible\u201d (JPEG), or share the photo as JPG.'],
 ];
 /* A dokumentum-olvasó feliratai (2026-09-29). A címkék (title) és az
    aria-label is fordul — a setupI18n mindhármat a HU_EN-ből veszi. */
@@ -13390,6 +13549,12 @@ Object.assign(HU_EN, {
   'A jelentkező megszakította ezt a folyamatot':'The applicant cancelled this process',
   'A felvételi iroda zárta le ezt a folyamatot':'The admissions office closed this process',
   'A jelentkezés nem folytatódik. A feltöltött dokumentumok és az üzenetváltás megmaradt.':'The application will not continue. The uploaded documents and the message thread have been kept.',
+  // Word-előnézet és fájltípus (2026-09-29)
+  'Word dokumentum betöltése…':'Loading Word document…',
+  'A Word dokumentum nem jeleníthető meg.':'This Word document cannot be displayed.',
+  'Elfogadott formátum: PDF, JPG, PNG, WEBP vagy Word (.docx), legfeljebb 20 MB.':'Accepted formats: PDF, JPG, PNG, WEBP or Word (.docx), up to 20 MB.',
+  'Válassz kart…':'Choose a faculty…','Válassz…':'Choose…','Fokozat':'Degree','Kar':'Faculty',
+  'Doktori Iskola':'Doctoral School',
   'Szélesség':'Fit width','Keres':'Find','nincs találat':'no match',
   'Keresés a dokumentumban…':'Search in the document…',
   'Oldalak rajzolása…':'Rendering pages…','PDF betöltése…':'Loading PDF…',
