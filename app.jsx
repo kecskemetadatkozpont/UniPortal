@@ -1438,6 +1438,20 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const myAgency = isAgent ? agencies.find(a => a.id === user.agencyId) : null;
+  /* Olvasatlan ügynökségi üzenetek a fül jelvényéhez. Ha a 108-as migráció
+     még nem futott le, a hívás csendben 0-t ad — a portál enélkül is működik. */
+  const [agnOlvasatlan, setAgnOlvasatlan] = useState(0);
+  useEffect(() => {
+    let el = false;
+    (async () => {
+      try {
+        if (!window.sb) return;
+        const lista = await AGN_api.messages();
+        if (!el) setAgnOlvasatlan((lista || []).filter(m => !m.olvasott).length);
+      } catch (e) { /* nincs telepítve vagy nincs jogosultság — nincs jelvény */ }
+    })();
+    return () => { el = true; };
+  }, [activeTab]);
   // Hany ugynokseg var elbiralasra? A ful jelvenye ebbol jon (1./7. tetel).
   const pendingAgencyCount = agencies.filter(a => (a.approval_status || 'approved') === 'pending').length;
 
@@ -1849,12 +1863,19 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
   // ténylegesen beiratkozott hallgatókból áll össze. A kalkulált egyenleg csak
   // tájékoztat — a kötelező érvényű összeg a kiküldött számlán van.
   const renderCommission = () => (
-    <AgencyBilling
-      user={user}
-      agencies={agencies}
-      myAgencyId={isAgent ? user.agencyId : ''}
-      onChanged={fetchData}
-    />
+    <div className="space-y-6">
+      {/* TÁJÉKOZTATÓ JUTALÉKKULCS (108). Az ügynök eddig sehol nem látta
+          egyetlen helyen, hány százalékot kap diákonként — csak a számlákból
+          lehetett visszafejteni. Módosítani innen NEM lehet: a kulcsot az
+          iroda állítja (agency_decide). */}
+      {isAgent && <AGN_JutalekInfo agency={myAgency} />}
+      <AgencyBilling
+        user={user}
+        agencies={agencies}
+        myAgencyId={isAgent ? user.agencyId : ''}
+        onChanged={fetchData}
+      />
+    </div>
   );
 
   const renderAgencies = () => (
@@ -2169,6 +2190,19 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
             </button>
           </>
         )}
+        {/* ÜZENETEK — koordinátori körlevél, hiánypótlási felszólítás, döntés
+            (108). Az olvasatlanok száma a jelvényen. */}
+        <button
+          onClick={() => setActiveTab('messages')}
+          className={`px-6 py-3 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'messages' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
+        >
+          Üzenetek
+          {agnOlvasatlan > 0 && (
+            <span className="ml-2 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-lg bg-primary text-white text-[10px] font-black">
+              {agnOlvasatlan}
+            </span>
+          )}
+        </button>
         <button 
           onClick={() => setActiveTab('resources')}
           className={`px-6 py-3 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'resources' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
@@ -2180,7 +2214,12 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
       {/* Dynamic Content Area */}
       <div className="mt-8">
         {activeTab === 'overview' && renderOverview()}
-        {activeTab === 'students' && renderStudentsList()}
+        {/* DIÁKOK — a VALÓDI jelentkezések (admission_processes), nem a demó
+            students tábla: állapot, hiányzó dokumentum, hol tart a folyamat.
+            Innen indítható jelentkezés is a diák nevében (108). */}
+        {activeTab === 'students' && (
+          <AGN_DiakokFul user={user} agencies={agencies} myAgencyId={isAgent ? user.agencyId : ''} />
+        )}
         {activeTab === 'commission' && renderCommission()}
         {activeTab === 'documents' && (
           <AgencyDocuments
@@ -2197,7 +2236,12 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
           />
         )}
         {activeTab === 'agencies' && renderAgencies()}
-        {activeTab === 'resources' && renderResources()}
+        {activeTab === 'messages' && (
+          <AGN_UzenetekFul user={user} agencies={agencies} myAgencyId={isAgent ? user.agencyId : ''} />
+        )}
+        {activeTab === 'resources' && (
+          <AGN_AnyagtarFul user={user} myAgencyId={isAgent ? user.agencyId : ''} />
+        )}
         {activeTab === 'hierarchy' && (
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
@@ -13536,6 +13580,51 @@ Object.assign(HU_EN, {
      teljesen el volt zárva; a feliratai innen fordulnak. Az épület-, szoba- és
      személynevek a felületen [data-echo-noi18n] alatt állnak, azokat a szótár
      nem érinti. */
+  /* ÜGYNÖKSÉGI PORTÁL (108, 2026-09-29). A partnerek jelentős része nem
+     magyar anyanyelvű, ezért a teljes felület fordul. */
+  'Üzenetek':'Messages','Anyagtár':'Marketing materials','Diákok':'Students',
+  'Új jelentkező':'New applicant','Jelentkezés indítása':'Start application','Indítás…':'Starting…',
+  'A jelentkező teljes neve':'Applicant\u2019s full name','E-mail-címe':'Email address',
+  'Állampolgárság (opcionális)':'Citizenship (optional)','Félév':'Term',
+  'Keresés név, e-mail vagy azonosító szerint…':'Search by name, email or reference…',
+  'Vissza a diákjaimhoz':'Back to my students',
+  'Még nincs jelentkeztetett diákod':'You have not registered any applicants yet',
+  'Jelentkező':'Applicant','Képzés':'Programme','Folyamat':'Process','Hiányzó dokumentum':'Missing document',
+  'Minden feltöltve':'All uploaded','Megnyitás':'Open','Nincs találat':'No match',
+  'Nincs nyitott képzés a kínálatban.':'There is no open programme in the catalogue.',
+  'Üzenet az ügynökségeknek':'Message to the agencies','Körlevél':'Circular',
+  'Hiánypótlási felszólítás':'Request for missing documents','Felvételi döntés':'Admission decision',
+  'Értesítés':'Notice','Hiánypótlás':'Missing documents','Döntés':'Decision',
+  'Minden ügynökségnek (körlevél)':'To every agency (circular)','Minden ügynökségnek':'To every agency',
+  'Címzett':'Recipient','Tárgy':'Subject','Üzenet':'Message','Küldés':'Send','Küldés…':'Sending…','Új':'New',
+  'Nincs üzenet':'No messages',
+  'Anyag feltöltése':'Upload material','Marketinganyag feltöltése':'Upload marketing material',
+  'Megnevezés':'Title','Rövid leírás (opcionális)':'Short description (optional)',
+  'Fájl kiválasztása':'Choose a file','Feltöltés…':'Uploading…','Archivált':'Archived',
+  'Brosúra':'Brochure','Logó és arculat':'Logo and brand assets','Fotó':'Photo','Prezentáció':'Presentation',
+  'Még nincs letölthető anyag':'No downloadable material yet',
+  'Jutalék':'Commission',
+  'Az „Új jelentkező\" gombbal indíthatsz jelentkezést a diák nevében. A jelentkezés a diákhoz és az ügynökségedhez is kötve marad.':'Use the New applicant button to start an application on the student’s behalf. The application stays linked both to the student and to your agency.',
+  'A jelentkezés az ügynökségedhez kötve jön létre — később is látszik, hogy te hoztad a diákot.':'The application is created linked to your agency — it stays visible later that you brought this student.',
+  'A jelentkezés ezután ugyanúgy folytatódik, mint az önálló jelentkezőknél: személyes adatok, dokumentumok, beadás. A diák a saját e-mail-címével be tud lépni, és maga is folytathatja.':'From there the application continues exactly as for direct applicants: personal data, documents, submission. The student can sign in with their own email address and continue it themselves.',
+  'Itt kapod meg a koordinátori körleveleket, a hiánypótlási felszólításokat és a felvételi döntésekről szóló értesítéseket.':'This is where you receive coordinator circulars, requests for missing documents and notices about admission decisions.',
+  'Itt küldhetsz körlevelet az ügynökségeknek, vagy címzett üzenetet egyetlen ügynökségnek.':'Here you can send a circular to all agencies, or a message addressed to a single agency.',
+  'Körlevél mindenkinek, vagy címzett üzenet egy ügynökségnek.':'A circular to everyone, or a message addressed to one agency.',
+  'Töltsd fel a brosúrákat, a logócsomagot és a kampuszfotókat — minden jóváhagyott ügynökség látni fogja.':'Upload brochures, the logo pack and campus photos — every approved agency will see them.',
+  'A koordinátor még nem töltött fel marketinganyagot. Szólj neki, ha szükséged van rá.':'The coordinator has not uploaded any marketing material yet. Let them know if you need some.',
+  'Minden jóváhagyott ügynökség látni és letölteni fogja.':'Every approved agency will be able to see and download it.',
+  'A fájl most nem érhető el. Próbáld újra, vagy szólj a koordinátornak.':'The file is not available right now. Try again, or ask the coordinator.',
+  'A jutalékkulcsot a felvételi iroda állítja be az ügynökséghez.':'The commission rate is set for the agency by the admissions office.',
+  'Ennyi jutalék jár beiratkozott diákonként. A kulcsot a felvételi iroda állítja — a portálon tájékoztatásul látszik, módosítani innen nem lehet.':'This is the commission per enrolled student. The rate is set by the admissions office — it is shown here for information only and cannot be changed from the portal.',
+  'A jutalék a BEIRATKOZÁS lezárása után számolható el, nem a jelentkezéskor.':'Commission can be settled after ENROLMENT is closed, not at application time.',
+  'Az elszámolást az iroda nyitja meg időszakonként; a számlát a „Jutalék és számlázás\" fülön csatolod.':'The office opens settlement periods; you attach your invoice on the Commission and invoicing tab.',
+  'Kérdés esetén a koordinátor az „Üzenetek\" fülön elérhető.':'If you have questions, the coordinator is available on the Messages tab.',
+  'Az ügynökségi modul adatbázis-része még nincs telepítve (108_agency_portal.sql). A lista addig üres marad.':'The database part of the agency module is not installed yet (108_agency_portal.sql). Until then the list stays empty.',
+  'Az ügynökségi modul adatbázis-része még nincs telepítve (108_agency_portal.sql).':'The database part of the agency module is not installed yet (108_agency_portal.sql).',
+  'Ehhez ügynökségi fiók kell. Ha ügynökként vagy belépve, szólj a koordinátornak, hogy kösse a fiókodat az ügynökséghez.':'This requires an agency account. If you are signed in as an agent, ask the coordinator to link your account to the agency.',
+  'Érvényes e-mail-cím kell a jelentkezőhöz.':'A valid email address is required for the applicant.',
+  'A jelentkező neve kötelező.':'The applicant’s name is required.',
+  'Üzenetet csak ügyintéző küldhet az ügynökségeknek.':'Only staff can send messages to the agencies.',
   'Kollégium':'Dormitory','Szállásom':'My accommodation',
   'A kaució nem díj, hanem':'The deposit is not a fee, it is',
   ': a kiköltözés és a kárelszámolás után visszajár.':': it is refunded after move-out and the damage settlement.',

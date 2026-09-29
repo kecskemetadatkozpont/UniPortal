@@ -61,6 +61,10 @@ const FEATURE_FILES = [
   // Ugynoksegi portal (29_agency.sql). Az AgentPortal a render-fuggvenyeibol
   // hivatkozik ra, tehat a modul-kiertekeles sorrendje nem szamit.
   'features/agency.jsx',
+  // Ügynökségi portál: jelentkeztetés, diáklista, marketinganyagok, üzenetek
+  // (108_agency_portal.sql). A programs.jsx és az agency.jsx UTÁN: azok
+  // PROG_folyamatAllapot / AGENCY_upload darabjaira épül.
+  'features/agency-students.jsx',
   'features/multiprogram.jsx',
   'features/groups.jsx',
   'features/roles.jsx',
