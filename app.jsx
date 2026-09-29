@@ -13527,11 +13527,81 @@ Object.assign(HU_EN, {
 });
 
 const HU_EN_PHRASES = [
-  [/Aktív jelentkezések/g,'Active applications'],[/Akív jelentkezések/g,'Active applications'],[/Új jelentkező/g,'New applicant'],[/\bMód\b/g,'Mode'],[/Felvételi folyamat ·/g,'Admission process ·'],[/(\d+)\s*\/\s*(\d+)\s*lépés/g,'$1/$2 steps'],[/(\d+)\s*lépés/g,'$1 steps'],[/(\d+)\s*folyamat\b/g,'$1 process(es)'],[/(\d+)%\s*biztos/g,'$1% confidence'],[/(\d+)\s*lehetséges egyezés/g,'$1 possible match(es)'],[/TESZT — helyes válasz:/g,'TEST — correct answer:'],[/Helyes:/g,'Correct:'],[/(\d+)\s*\/\s*(\d+)\s*helyes/g,'$1 / $2 correct'],[/(\d+)\s*\/\s*(\d+)\s*kötelező hitelesítve/g,'$1 / $2 required verified'],[/(\d+)\s*hiányzik/g,'$1 missing'],[/(\d+)\s*új\b/g,'$1 new'],[/EUR \/ szemeszter/g,'EUR / semester'],[/szemeszter/g,'semester'],[/szem\./g,'sem.'],[/Egyszerűsítsd, majd értékeld ki, ha/g,'Simplify, then evaluate if'],[/Mennyi/g,'What is'],[/Értékeld ki a következő kifejezést!/g,'Evaluate the following expression!'],[/Érték =/g,'Value ='],[/(\d+)\s*folyamat\b/g,'$1 process(es)'],[/(\d+)\s*\/\s*(\d+)\s*kötelező/g,'$1 / $2 required'],[/(\d+)\s*napja lejárt/g,'expired $1 days ago'],[/Javasolt projektvezető:/g,'Proposed project lead:'],[/Erre alapozva:/g,'Based on:'],[/(\d+)\s*utolsó szerzős publikáció/g,'$1 last-author publication(s)'],[/(\d+)\s*pályázati előzmény/g,'$1 previous grant(s)'],[/(\d+)\s*pályázatot vezetett már/g,'has led $1 proposal(s)'],[/szabad kapacitás/g,'free capacity'],[/szűk kapacitás/g,'limited capacity'],[/vezetői előzmény nélkül/g,'no leadership track record'],[/már felkérve/g,'already invited'],[/(\d+)\s*oldal\b/g,'$1 page(s)'],[/A \.([a-z0-9]+) fájlt nem tudjuk fogadni/g,'We cannot accept .$1 files'],[/Ezt a fájlt nem tudjuk fogadni/g,'We cannot accept this file'],[/csak PDF, JPG, PNG, WEBP vagy Word \(\.docx\) tölthető fel\./g,'only PDF, JPG, PNG, WEBP or Word (.docx) can be uploaded.'],[/A régi \.doc helyett mentsd el \.docx vagy PDF formátumban\./g,'Please save it as .docx or PDF instead of the old .doc format.'],[/A telefonod kamerabeállításában válaszd a „Legkompatibilisebb" \(JPEG\) formátumot, vagy oszd meg a képet JPG-ként\./g,'In your phone\u2019s camera settings choose \u201cMost Compatible\u201d (JPEG), or share the photo as JPG.'],
+  [/Aktív jelentkezések/g,'Active applications'],[/Akív jelentkezések/g,'Active applications'],[/Új jelentkező/g,'New applicant'],[/\bMód\b/g,'Mode'],[/Felvételi folyamat ·/g,'Admission process ·'],[/(\d+)\s*\/\s*(\d+)\s*lépés/g,'$1/$2 steps'],[/(\d+)\s*lépés/g,'$1 steps'],[/(\d+)\s*folyamat\b/g,'$1 process(es)'],[/(\d+)%\s*biztos/g,'$1% confidence'],[/(\d+)\s*lehetséges egyezés/g,'$1 possible match(es)'],[/TESZT — helyes válasz:/g,'TEST — correct answer:'],[/Helyes:/g,'Correct:'],[/(\d+)\s*\/\s*(\d+)\s*helyes/g,'$1 / $2 correct'],[/(\d+)\s*\/\s*(\d+)\s*kötelező hitelesítve/g,'$1 / $2 required verified'],[/(\d+)\s*hiányzik/g,'$1 missing'],[/(\d+)\s*új\b/g,'$1 new'],[/EUR \/ szemeszter/g,'EUR / semester'],[/szemeszter/g,'semester'],[/szem\./g,'sem.'],[/Egyszerűsítsd, majd értékeld ki, ha/g,'Simplify, then evaluate if'],[/Mennyi/g,'What is'],[/Értékeld ki a következő kifejezést!/g,'Evaluate the following expression!'],[/Érték =/g,'Value ='],[/(\d+)\s*folyamat\b/g,'$1 process(es)'],[/(\d+)\s*\/\s*(\d+)\s*kötelező/g,'$1 / $2 required'],[/(\d+)\s*napja lejárt/g,'expired $1 days ago'],[/Javasolt projektvezető:/g,'Proposed project lead:'],[/Erre alapozva:/g,'Based on:'],[/(\d+)\s*utolsó szerzős publikáció/g,'$1 last-author publication(s)'],[/(\d+)\s*pályázati előzmény/g,'$1 previous grant(s)'],[/(\d+)\s*pályázatot vezetett már/g,'has led $1 proposal(s)'],[/szabad kapacitás/g,'free capacity'],[/szűk kapacitás/g,'limited capacity'],[/vezetői előzmény nélkül/g,'no leadership track record'],[/már felkérve/g,'already invited'],[/(\d+)\s*oldal\b/g,'$1 page(s)'],[/^(\d+) nap$/g,'$1 days'],[/^(\d+) nyitott hiba a szobában$/g,'$1 open fault(s) in the room'],[/A \.([a-z0-9]+) fájlt nem tudjuk fogadni/g,'We cannot accept .$1 files'],[/Ezt a fájlt nem tudjuk fogadni/g,'We cannot accept this file'],[/csak PDF, JPG, PNG, WEBP vagy Word \(\.docx\) tölthető fel\./g,'only PDF, JPG, PNG, WEBP or Word (.docx) can be uploaded.'],[/A régi \.doc helyett mentsd el \.docx vagy PDF formátumban\./g,'Please save it as .docx or PDF instead of the old .doc format.'],[/A telefonod kamerabeállításában válaszd a „Legkompatibilisebb" \(JPEG\) formátumot, vagy oszd meg a képet JPG-ként\./g,'In your phone\u2019s camera settings choose \u201cMost Compatible\u201d (JPEG), or share the photo as JPG.'],
 ];
 /* A dokumentum-olvasó feliratai (2026-09-29). A címkék (title) és az
    aria-label is fordul — a setupI18n mindhármat a HU_EN-ből veszi. */
 Object.assign(HU_EN, {
+  /* KOLLÉGIUM — „Szállásom" (2026-09-29). A nézet korábban a fordítás elől
+     teljesen el volt zárva; a feliratai innen fordulnak. Az épület-, szoba- és
+     személynevek a felületen [data-echo-noi18n] alatt állnak, azokat a szótár
+     nem érinti. */
+  'Kollégium':'Dormitory','Szállásom':'My accommodation',
+  'A kaució nem díj, hanem':'The deposit is not a fee, it is',
+  ': a kiköltözés és a kárelszámolás után visszajár.':': it is refunded after move-out and the damage settlement.',
+  'visszajár:':'refundable on:','rejtve':'hidden','Adatvédelmi okból rejtett':'Hidden for data-protection reasons',
+  'A szobatársak neve':'Roommates\u2019 names are',
+  '. Ezt nem a felület dönti el: a szűrés az adatbázisban történik, és rád ugyanígy vonatkozik — a te nevedet sem látja más lakó.':'. This is not decided by the interface: the filtering happens in the database, and it applies to you the same way \u2014 no other resident sees your name either.',
+  'Szerződésem':'My contract','Szobám':'My room','Hibabejelentés':'Report a fault','Számláim':'My bills',
+  'Jelenleg nincs kollégiumi helyed':'You do not have a dormitory place at the moment',
+  'Ez nem hiba: a rendszer egyszerűen nem talált hozzád tartozó, élő elhelyezést.':'This is not an error: the system simply found no active placement for you.',
+  'Hol tudsz jelentkezni?':'Where can you apply?',
+  'A felvételi jelentkezés során jelezd, hogy kérsz kollégiumot. A jelzés a felvételi ügyintézőhöz fut be, és a felvételi döntéssel együtt kerül elbírálásra.':'State in your admission application that you would like a dormitory place. The request goes to the admissions officer and is decided together with the admission decision.',
+  'Ha már hallgató vagy, a kollégiumi ügyintézőnél tudsz kérelmet benyújtani. A helyek elbírálása pontozás és kvóta alapján történik.':'If you are already a student, you can submit a request to the dormitory administrator. Places are awarded based on scoring and quotas.',
+  'Ha úgy tudod, hogy már van helyed, de itt mégsem látszik, akkor a kollégiumi nyilvántartásban a fiókod még nincs összekötve a kollégista-ói törzsadatoddal. Szólj a kollégiumi ügyintézőnek — egy kattintással összekötik.':'If you believe you already have a place but it does not show here, your account is not yet linked to your resident record in the dormitory register. Tell the dormitory administrator \u2014 they can link it with one click.',
+  'felvételi jelentkezés':'admission application',
+  'kollégiumi ügyintézőnél':'the dormitory administrator',
+  'már van helyed':'you already have a place',
+  'Újra megnézem':'Check again',
+  'határozatlan ideig':'open-ended','határozatlan':'open-ended',
+  'nyitott hiba a szobában':'open fault(s) in the room',
+  'Bérlemény':'Leased','Saját':'Own',
+  // szerződés
+  'Szerződés betöltése…':'Loading contract…','Kollégiumi adatok betöltése…':'Loading dormitory data…',
+  'Betöltés…':'Loading…','Megnyitás…':'Opening…',
+  'Nincs rögzített szerződés':'No contract on record',
+  'Az elhelyezésed él, de szerződés még nincs hozzákötve. Ez tipikusan a beköltözés előtti napokban fordul elő — a kollégiumi ügyintéző tudja pótolni.':'Your placement is active, but no contract is linked to it yet. This typically happens in the days before move-in — the dormitory administrator can add it.',
+  'Havi díj':'Monthly fee','Kaució':'Deposit','a kiköltözés után visszajár':'refunded after move-out',
+  'Szerződés típusa':'Contract type','Hátralévő idő':'Time remaining',
+  'Iktatószám':'Reference number','Időszak':'Period','Szoba':'Room','Épület':'Building',
+  'Aláírva':'Signed','elektronikusan':'electronically','papíron, beszkennelve':'on paper, scanned',
+  'Házirend verziója':'House rules version',
+  'Szerződés letöltése':'Download contract',
+  'A szerződés elektronikus példánya még nincs feltöltve.':'The electronic copy of the contract has not been uploaded yet.',
+  'A szerződés fájlja most nem érhető el. Kérd a kollégiumi ügyintézőtől.':'The contract file is not available right now. Please ask the dormitory administrator.',
+  'letét':'a security deposit','Befizetve:':'Paid:','Levonás:':'Deduction:',
+  'A visszafizetés jelenleg akadályozott:':'The refund is currently blocked:',
+  'Korábbi elhelyezéseim':'My previous placements','Állapot':'Status',
+  // szoba
+  'Szint':'Floor','Férőhelyem':'My bed','Nyitott hiba':'Open faults','földszint':'ground floor',
+  'A szoba felszereltsége':'Room facilities',
+  'Típus':'Type','Alapterület':'Floor area','Fürdő':'Bathroom','Konyha':'Kitchen','Egyéb':'Other',
+  'nincs':'none','hűtő':'fridge','erkély':'balcony','klíma':'air conditioning',
+  'akadálymentes':'accessible','csendes szoba':'quiet room',
+  'Szobatársak':'Roommates',
+  'A „ki hol lakik” a modul legérzékenyebb adata: a szobatársak nevét az adatbázis nem adja ki más lakónak. Ha meg szeretnétek ismerni egymást, a gondnok tud segíteni.':'Who lives where is the most sensitive data in this module: the database does not disclose roommates\u2019 names to other residents. If you would like to get to know each other, the caretaker can help.',
+  'adatvédelmi okból rejtett':'hidden for data-protection reasons',
+  'Szobaleltár':'Room inventory','Megnevezés':'Item',
+  'A szoba leltárát az üzemeltetés vezeti, és a beköltözési jegyzőkönyv tartalmazza. Ha eltérést látsz a jegyzőkönyvhöz képest, jelezd a gondnoknak — a kiköltözéskori kárelszámolás alapja ez a lista.':'The room inventory is kept by the operations team and is part of the move-in record. If you see any difference from that record, tell the caretaker \u2014 this list is the basis of the damage settlement at move-out.',
+  'Házirend':'House rules',
+  'A rád vonatkozó házirend verziója a szerződésedhez van rögzítve — később sem változik visszamenőleg. A hatályos szöveget a kollégiumi ügyintézőnél és a faliújságon találod meg.':'The version of the house rules that applies to you is fixed to your contract \u2014 it never changes retroactively. You can find the text in force at the dormitory administrator and on the noticeboard.',
+  'Csendes idő és vendégfogadás rendje':'Quiet hours and rules for visitors',
+  'A közös helyiségek használata és takarítási rend':'Use of common areas and the cleaning schedule',
+  'Tűzvédelem: mit tilos a szobában használni':'Fire safety: what may not be used in the room',
+  'Kulcs, beléptetőkártya, elvesztés esetén a teendő':'Keys and access cards, and what to do if you lose them',
+  'Kárfelelősség és a kaució elszámolása':'Liability for damage and settlement of the deposit',
+  // állapotok és felszereltség (adatbázis-kódokból képzett címkék)
+  'Kiosztva':'Allocated','Beköltözve':'Moved in','Kiköltözve':'Moved out','Visszavonva':'Cancelled',
+  'Letétben':'Held','Részben elszámolva':'Partially settled','Elszámolva':'Settled',
+  'Visszafizetve':'Refunded','Elveszett':'Forfeited','Késedelmes':'Overdue',
+  'Teljes tanév':'Full academic year','Egy félév':'One semester','Rövid tartózkodás':'Short stay',
+  'Nyári':'Summer','Folyamatos':'Rolling',
+  'Saját fürdő':'Private bathroom','Saját konyha':'Private kitchen','Teakonyha':'Kitchenette',
+  'Lakóegységen belül közös':'Shared within the unit','Emeleti közös':'Shared on the floor','Nincs':'None',
+  'Új / kifogástalan':'New / flawless','Jó':'Good','Elfogadható':'Acceptable','Rossz':'Poor','Selejtezendő':'To be scrapped',
+  // a két még el nem készült fül
+  'Ez a felület még nem készült el. Addig a hibát a gondnoknak jelezd — a kollégiumi ügyintézők a Karbantartás menüpontban rögzítik és követik.':'This screen has not been built yet. Until then, report faults to the caretaker \u2014 the dormitory administrators record and track them under Maintenance.',
+  'Ez a felület még nem készült el. A díjaidról és a kaucióról a kollégiumi ügyintéző tud felvilágosítást adni.':'This screen has not been built yet. The dormitory administrator can tell you about your fees and deposit.',
   // Vízum (2026-09-29) — hallgatói és irodai bejegyzés
   'Vízum':'Visa','Kérelem beadva':'Application submitted','Megkapta':'Received',
   'Vízum megvan':'Visa granted','Vízum elutasítva':'Visa refused',

@@ -388,7 +388,9 @@ function DORM_Hidden(props) {
       title={reason}
       className="inline-flex items-center gap-1.5 text-[11px] font-bold text-slate-400 bg-slate-50 border border-slate-100 rounded-lg px-2 py-1 whitespace-nowrap">
       <DORM_Ic n="EyeOff" size={12} />
-      {label ? label + ': rejtve' : 'Adatvédelmi okból rejtett'}
+      {/* KÉT SZÖVEGCSOMÓPONT: összefűzve („Szobatársak: rejtve") a
+          nyelvváltó szótára nem talál rá, és angol módban magyar marad. */}
+      {label ? <><span>{label}</span><span>: </span><span>rejtve</span></> : <span>Adatvédelmi okból rejtett</span>}
     </span>
   );
 }

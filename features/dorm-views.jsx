@@ -120,7 +120,10 @@ function DORMV_Hidden({ label, reason }) {
       title={reason || 'Adatvédelmi okból rejtett'}
       className="inline-flex items-center gap-1.5 text-[11px] font-bold text-slate-400 bg-slate-50 border border-slate-100 rounded-lg px-2 py-1">
       <DORMV_Ic n="EyeOff" size={12} />
-      {label ? label + ': rejtve' : 'Adatvédelmi okból rejtett'}
+      {/* KÉT SZÖVEGCSOMÓPONT: az összefűzött „Szobatársak: rejtve" egyetlen
+          szövegként nem illeszkedett a fordítószótárra, ezért angol módban
+          magyar maradt. */}
+      {label ? <><span>{label}</span><span>: </span><span>rejtve</span></> : <span>Adatvédelmi okból rejtett</span>}
     </span>
   );
 }
@@ -258,16 +261,20 @@ const DORMV_OCC_STATE = {
 const DORMV_BATHROOM = { PRIVATE: 'Saját fürdő', SHARED_UNIT: 'Lakóegységen belül közös', SHARED_FLOOR: 'Emeleti közös', NONE: 'Nincs' };
 const DORMV_KITCHEN = { PRIVATE: 'Saját konyha', KITCHENETTE: 'Teakonyha', SHARED_UNIT: 'Lakóegységen belül közös', SHARED_FLOOR: 'Emeleti közös', NONE: 'Nincs' };
 
-/* --- formázók (magyar) --- */
+/* --- formázók ---
+   A DÁTUM A FELÜLET NYELVÉT KÖVETI. Korábban mindig magyar formátum jött
+   ('2027. 07. 15.'), ami angol nézetben idegenül hat — és a gépi fordító sem
+   tud vele mit kezdeni, mert ez adat, nem felirat. */
+const DORMV_lang = () => { try { return (localStorage.getItem('nje_lang') || 'hu') === 'en' ? 'en-GB' : 'hu-HU'; } catch (e) { return 'hu-HU'; } };
 const DORMV_d = (v) => {
   if (!v) return '—';
   const d = new Date(v); if (isNaN(d)) return String(v).slice(0, 10);
-  return d.toLocaleDateString('hu-HU', { year: 'numeric', month: '2-digit', day: '2-digit' });
+  return d.toLocaleDateString(DORMV_lang(), { year: 'numeric', month: '2-digit', day: '2-digit' });
 };
 const DORMV_dt = (v) => {
   if (!v) return '—';
   const d = new Date(v); if (isNaN(d)) return String(v).slice(0, 16);
-  return d.toLocaleString('hu-HU', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleString(DORMV_lang(), { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 };
 const DORMV_huf = (n, cur = 'HUF') => {
   if (n == null || n === '') return '—';
@@ -2133,15 +2140,21 @@ function DORM_StudentView({ user }) {
   const hasPlacement = !!(placement && placement.lako && current);
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 max-w-5xl 2xl:max-w-[1200px]" data-echo-noi18n>
+    /* A NÉZET FORDUL. Korábban az egész részfán rajta volt a
+       [data-echo-noi18n] jelölés (az ECHO kérdőív védelmére való), ezért a
+       „Szállásom" angol módban is végig magyar maradt — pedig épp a külföldi
+       hallgató használja. A jelölés mostantól csak ott van, ahol ADAT áll:
+       épület- és szobanév, szobatárs neve, leltári tétel — ezeket gépi szótár
+       nem írhatja át. */
+    <div className="p-4 sm:p-6 lg:p-8 max-w-5xl 2xl:max-w-[1200px]">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
           <p className="text-[11px] font-black text-primary uppercase tracking-widest">Kollégium</p>
           <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight mt-1">Szállásom</h1>
           {hasPlacement && (
             <p className="text-slate-500 mt-2 leading-relaxed text-sm sm:text-base">
-              <b className="text-slate-800">{current.epulet}</b> · {current.szoba}
-              {current.ferohely ? ' · ' + current.ferohely : ''} ·{' '}
+              <span data-echo-noi18n><b className="text-slate-800">{current.epulet}</b> · {current.szoba}
+              {current.ferohely ? ' · ' + current.ferohely : ''}</span> ·{' '}
               {DORMV_d(current.tol)} – {current.ig ? DORMV_d(current.ig) : 'határozatlan ideig'}
             </p>
           )}
@@ -2172,15 +2185,18 @@ function DORM_StudentView({ user }) {
             <ul className="mt-3 space-y-3 text-sm text-slate-600 leading-relaxed">
               <li className="flex items-start gap-3">
                 <span className="w-6 h-6 rounded-lg bg-primary/10 text-primary flex items-center justify-center flex-none text-[11px] font-black">1</span>
-                <span>A <b>felvételi jelentkezés</b> során jelezd, hogy kérsz kollégiumot. A jelzés a felvételi ügyintézőhöz fut be, és a felvételi döntéssel együtt kerül elbírálásra.</span>
+                {/* EGY SZÖVEGCSOMÓPONT pontonként. A korábbi <b> kiemelés három
+                    darabra vágta a mondatot, és a nyelvváltó szótára egyik
+                    darabra sem talált rá — angol módban magyar maradt. */}
+                <span>A felvételi jelentkezés során jelezd, hogy kérsz kollégiumot. A jelzés a felvételi ügyintézőhöz fut be, és a felvételi döntéssel együtt kerül elbírálásra.</span>
               </li>
               <li className="flex items-start gap-3">
                 <span className="w-6 h-6 rounded-lg bg-primary/10 text-primary flex items-center justify-center flex-none text-[11px] font-black">2</span>
-                <span>Ha már hallgató vagy, a <b>kollégiumi ügyintézőnél</b> tudsz kérelmet benyújtani. A helyek elbírálása pontozás és kvóta alapján történik.</span>
+                <span>Ha már hallgató vagy, a kollégiumi ügyintézőnél tudsz kérelmet benyújtani. A helyek elbírálása pontozás és kvóta alapján történik.</span>
               </li>
               <li className="flex items-start gap-3">
                 <span className="w-6 h-6 rounded-lg bg-primary/10 text-primary flex items-center justify-center flex-none text-[11px] font-black">3</span>
-                <span>Ha úgy tudod, hogy <b>már van helyed</b>, de itt mégsem látszik, akkor a kollégiumi nyilvántartásban a fiókod még nincs összekötve a kollégista-ói törzsadatoddal. Szólj a kollégiumi ügyintézőnek — egy kattintással összekötik.</span>
+                <span>Ha úgy tudod, hogy már van helyed, de itt mégsem látszik, akkor a kollégiumi nyilvántartásban a fiókod még nincs összekötve a kollégista-ói törzsadatoddal. Szólj a kollégiumi ügyintézőnek — egy kattintással összekötik.</span>
               </li>
             </ul>
             <button onClick={load} className={U_btnGhost + ' mt-5 min-h-[48px] w-full sm:w-auto'}>
@@ -2201,15 +2217,13 @@ function DORM_StudentView({ user }) {
           {tab === 'report' && (
             <DORMV_Keszul
               cim="Hibabejelentés"
-              szoveg="Ez a felület még nem készült el. Addig a hibát a gondnoknak jelezd — a
-                      kollégiumi ügyintézők a Karbantartás menüpontban rögzítik és követik."
+              szoveg="Ez a felület még nem készült el. Addig a hibát a gondnoknak jelezd — a kollégiumi ügyintézők a Karbantartás menüpontban rögzítik és követik."
               ikon="AlertTriangle" />
           )}
           {tab === 'bills' && (
             <DORMV_Keszul
               cim="Számláim"
-              szoveg="Ez a felület még nem készült el. A díjaidról és a kaucióról a kollégiumi
-                      ügyintéző tud felvilágosítást adni."
+              szoveg="Ez a felület még nem készült el. A díjaidról és a kaucióról a kollégiumi ügyintéző tud felvilágosítást adni."
               ikon="Wallet" />
           )}
         </div>
@@ -2271,10 +2285,10 @@ function DORMV_MyContract({ placement, current }) {
 
           <div className="mt-5 bg-white rounded-3xl border border-slate-100 p-5 sm:p-6">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-              <DORMV_KV label="Iktatószám">{active.iktatoszam}</DORMV_KV>
+              <DORMV_KV label="Iktatószám"><span data-echo-noi18n>{active.iktatoszam}</span></DORMV_KV>
               <DORMV_KV label="Időszak">{DORMV_d(active.starts_on)} – {active.ends_on ? DORMV_d(active.ends_on) : 'határozatlan'}</DORMV_KV>
-              <DORMV_KV label="Szoba">{current.szoba}{current.ferohely ? ' · ' + current.ferohely : ''}</DORMV_KV>
-              <DORMV_KV label="Épület">{current.epulet}</DORMV_KV>
+              <DORMV_KV label="Szoba"><span data-echo-noi18n>{current.szoba}{current.ferohely ? ' · ' + current.ferohely : ''}</span></DORMV_KV>
+              <DORMV_KV label="Épület"><span data-echo-noi18n>{current.epulet}</span></DORMV_KV>
               <DORMV_KV label="Aláírva">
                 {DORMV_dt(active.signed_at)}
                 {active.signature_mode && (
@@ -2283,7 +2297,7 @@ function DORMV_MyContract({ placement, current }) {
                   </span>
                 )}
               </DORMV_KV>
-              <DORMV_KV label="Házirend verziója">{active.house_rules_version}</DORMV_KV>
+              <DORMV_KV label="Házirend verziója"><span data-echo-noi18n>{active.house_rules_version}</span></DORMV_KV>
             </div>
 
             <div className="mt-6 flex flex-col sm:flex-row gap-3">
@@ -2303,7 +2317,7 @@ function DORMV_MyContract({ placement, current }) {
             <div className="mt-5 bg-white rounded-3xl border border-slate-100 p-5 sm:p-6">
               <h3 className="font-black text-slate-800">Kaució</h3>
               <p className="text-sm text-slate-500 mt-1 leading-relaxed">
-                A kaució nem díj, hanem <b>letét</b>: a kiköltözés és a kárelszámolás után visszajár.
+                <span>A kaució nem díj, hanem</span> <b>letét</b><span>: a kiköltözés és a kárelszámolás után visszajár.</span>
               </p>
               <div className="mt-4 space-y-3">
                 {deposits.map(d => (
@@ -2311,7 +2325,8 @@ function DORMV_MyContract({ placement, current }) {
                     <div className="min-w-0">
                       <div className="font-black text-slate-800">{DORMV_huf(d.amount, d.currency)}</div>
                       <div className="text-[12px] text-slate-400 font-bold">
-                        Befizetve: {DORMV_d(d.received_on)}{d.due_back_on ? ' · visszajár: ' + DORMV_d(d.due_back_on) : ''}
+                        <span>Befizetve:</span> {DORMV_d(d.received_on)}
+                        {d.due_back_on ? <> · <span>visszajár:</span> {DORMV_d(d.due_back_on)}</> : null}
                       </div>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
@@ -2327,7 +2342,8 @@ function DORMV_MyContract({ placement, current }) {
               </div>
               {deposits.some(d => d.settlement_blocked_reason) && (
                 <div className="mt-4 text-[13px] font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
-                  A visszafizetés jelenleg akadályozott: {deposits.filter(d => d.settlement_blocked_reason).map(d => d.settlement_blocked_reason).join(' · ')}
+                  <span>A visszafizetés jelenleg akadályozott:</span>{' '}
+                  <span data-echo-noi18n>{deposits.filter(d => d.settlement_blocked_reason).map(d => d.settlement_blocked_reason).join(' · ')}</span>
                 </div>
               )}
             </div>
@@ -2349,8 +2365,8 @@ function DORMV_MyContract({ placement, current }) {
                   <tbody>
                     {placement.elhelyezesek.map(p => (
                       <tr key={p.occupancy_id} className="border-b border-slate-50 last:border-0">
-                        <td className="px-5 py-3 text-[13px] font-bold text-slate-700">{p.epulet}</td>
-                        <td className="px-5 py-3 text-[13px] text-slate-600">{p.szoba}</td>
+                        <td className="px-5 py-3 text-[13px] font-bold text-slate-700" data-echo-noi18n>{p.epulet}</td>
+                        <td className="px-5 py-3 text-[13px] text-slate-600" data-echo-noi18n>{p.szoba}</td>
                         <td className="px-5 py-3 text-[13px] text-slate-500 whitespace-nowrap">
                           {DORMV_d(p.tol)} – {p.ig ? DORMV_d(p.ig) : '…'}
                         </td>
@@ -2399,9 +2415,9 @@ function DORMV_MyRoom({ placement, current, ctx }) {
   return (
     <div>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <DORMV_Stat label="Szoba" value={current.szoba} icon="DoorOpen" />
+        <DORMV_Stat label="Szoba" value={<span data-echo-noi18n>{current.szoba}</span>} icon="DoorOpen" />
         <DORMV_Stat label="Szint" value={current.szint == null ? '—' : (current.szint === 0 ? 'földszint' : current.szint + '.')} icon="Layers" />
-        <DORMV_Stat label="Férőhelyem" value={current.ferohely || '—'} icon="BedDouble" />
+        <DORMV_Stat label="Férőhelyem" value={<span data-echo-noi18n>{current.ferohely || '—'}</span>} icon="BedDouble" />
         <DORMV_Stat label="Nyitott hiba" value={current.nyitott_hibak || 0}
           tone={current.nyitott_hibak ? 'amber' : 'slate'} icon="AlertTriangle" />
       </div>
@@ -2410,15 +2426,21 @@ function DORMV_MyRoom({ placement, current, ctx }) {
         <div className="mt-5 bg-white rounded-3xl border border-slate-100 p-5 sm:p-6">
           <h3 className="font-black text-slate-800">A szoba felszereltsége</h3>
           <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-            <DORMV_KV label="Típus">{room.room_type}</DORMV_KV>
+            <DORMV_KV label="Típus"><span data-echo-noi18n>{room.room_type}</span></DORMV_KV>
             <DORMV_KV label="Alapterület">{room.area_sqm ? room.area_sqm + ' m²' : '—'}</DORMV_KV>
             <DORMV_KV label="Fürdő">{DORMV_BATHROOM[room.bathroom] || room.bathroom}</DORMV_KV>
             <DORMV_KV label="Konyha">{DORMV_KITCHEN[room.kitchen] || room.kitchen}</DORMV_KV>
-            <DORMV_KV label="Internet">{room.internet === 'NONE' ? 'nincs' : room.internet}</DORMV_KV>
+            <DORMV_KV label="Internet">{room.internet === 'NONE' ? 'nincs' : <span data-echo-noi18n>{room.internet}</span>}</DORMV_KV>
             <DORMV_KV label="Egyéb">
-              {[room.has_fridge && 'hűtő', room.has_balcony && 'erkély', room.has_aircon && 'klíma',
-                room.is_accessible && 'akadálymentes', room.quiet_room && 'csendes szoba']
-                .filter(Boolean).join(' · ') || '—'}
+              {/* TAGONKÉNT külön szövegcsomópont: összefűzve („hűtő · csendes
+                  szoba") a szótár nem talál rá, és angolul is magyar maradna. */}
+              {(() => {
+                const jegyek = [room.has_fridge && 'hűtő', room.has_balcony && 'erkély',
+                  room.has_aircon && 'klíma', room.is_accessible && 'akadálymentes',
+                  room.quiet_room && 'csendes szoba'].filter(Boolean);
+                if (!jegyek.length) return '—';
+                return jegyek.map((t, i) => <React.Fragment key={t}>{i ? ' · ' : ''}<span>{t}</span></React.Fragment>);
+              })()}
             </DORMV_KV>
           </div>
         </div>
@@ -2433,8 +2455,8 @@ function DORMV_MyRoom({ placement, current, ctx }) {
             {mates.map(m => (
               <li key={m.occupancy_id} className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-50 pt-3 first:border-0 first:pt-0">
                 <div className="min-w-0">
-                  <div className="font-bold text-slate-800 break-words">{m.display_name}</div>
-                  <div className="text-[12px] text-slate-400 font-bold">{m.bed_code}</div>
+                  <div className="font-bold text-slate-800 break-words" data-echo-noi18n>{m.display_name}</div>
+                  <div className="text-[12px] text-slate-400 font-bold" data-echo-noi18n>{m.bed_code}</div>
                 </div>
                 <DORMV_Chip>{DORMV_OCC_STATE[m.state] || m.state}</DORMV_Chip>
               </li>
@@ -2445,9 +2467,7 @@ function DORMV_MyRoom({ placement, current, ctx }) {
             <DORMV_Hidden label="Szobatársak"
               reason="A „ki hol lakik” a modul legérzékenyebb adata: a szobatársak nevét az adatbázis nem adja ki más lakónak. Ha meg szeretnétek ismerni egymást, a gondnok tud segíteni." />
             <p className="text-sm text-slate-500 mt-3 leading-relaxed">
-              A szobatársak neve <b>adatvédelmi okból rejtett</b>. Ezt nem a felület dönti el:
-              a szűrés az adatbázisban történik, és rád ugyanígy vonatkozik — a te nevedet
-              sem látja más lakó.
+              <span>A szobatársak neve</span> <b>adatvédelmi okból rejtett</b><span>. Ezt nem a felület dönti el: a szűrés az adatbázisban történik, és rád ugyanígy vonatkozik — a te nevedet sem látja más lakó.</span>
             </p>
           </div>
         )}
@@ -2468,8 +2488,8 @@ function DORMV_MyRoom({ placement, current, ctx }) {
               <tbody>
                 {assets.map(a => (
                   <tr key={a.id} className="border-b border-slate-50 last:border-0">
-                    <td className="px-0 py-2.5 text-[13px] font-bold text-slate-700">{a.name}</td>
-                    <td className="px-3 py-2.5 text-[13px] text-slate-500">{a.asset_type}</td>
+                    <td className="px-0 py-2.5 text-[13px] font-bold text-slate-700" data-echo-noi18n>{a.name}</td>
+                    <td className="px-3 py-2.5 text-[13px] text-slate-500" data-echo-noi18n>{a.asset_type}</td>
                     <td className="px-3 py-2.5 text-[13px] text-slate-500">{DORMV_COND[a.condition_grade] || '—'}</td>
                   </tr>
                 ))}
