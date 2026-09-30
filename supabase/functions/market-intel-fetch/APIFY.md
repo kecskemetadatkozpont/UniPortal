@@ -116,6 +116,60 @@ Webhook: `…&platform=facebook` · Ütemezés: hetente
 
 ---
 
+## Lépésről lépésre a konzolban (egy feladat ~5 perc)
+
+Mind a négy feladat ugyanígy készül; csak a bemenet, a webhook URL végén a
+`platform=` és az ütemezés különbözik.
+
+**1. Keresd meg az Actort.** [console.apify.com/store](https://console.apify.com/store)
+→ írd be a nevét (például `instagram-profile-scraper`) → nyisd meg.
+
+**2. Mentsd feladatként.** Jobbra fent: **Save as a new task**. Ez egy
+elmentett Actor+bemenet páros — így az ütemezés és a webhook is hozzá tapad,
+nem magához az Actorhoz.
+
+**3. Add meg a bemenetet.** Az **Input** fülön kapcsolj **JSON** nézetre, és
+másold be a fenti blokkot a feladathoz. (A vizuális szerkesztő is jó, csak
+lassabb.)
+
+**4. Nevezd el.** Kattints a feladat nevére a lap tetején, és írd át valami
+beszédesre: `piacfigyelo-instagram`.
+
+**5. Kösd rá a webhookot.** Az **Integrations** fülön adj hozzá webhookot:
+- esemény: **ACTOR.RUN.SUCCEEDED**
+- URL: a fenti webhook-cím, a `<MI_WEBHOOK_SECRET>` helyén a valódi titokkal
+  és a megfelelő `platform=` értékkel
+- payload sablon: **maradjon az alapértelmezett** — abban jön a `resource`,
+  amiből a `defaultDatasetId`-t olvassuk
+
+**6. Próbáld ki kézzel, MIELŐTT ütemezel.** Nyomd meg a **Start** gombot a
+feladaton. A futás végén a webhook is elsül, tehát rögtön látszik, megérkezik-e
+az adat. A választ az Apify a webhook részleteinél mutatja
+(Integrations → a webhook → a futásai), a mi oldalunkon pedig a Supabase →
+Edge Functions → market-intel-fetch → **Logs** alatt.
+
+**7. Ütemezd.** Bal oldali menü → **Schedules** → **Create new** → az **Add**
+legördülőből válaszd ki a feladatot → a **Schedule setup** kártyán add meg az
+időzítést.
+
+Cron-kifejezések a fentiekhez:
+
+| Feladat | Cron | Mit jelent |
+| --- | --- | --- |
+| Instagram | `0 3 * * *` | minden nap 03:00 |
+| TikTok | `0 3 * * 1,4` | hétfő és csütörtök 03:00 |
+| Hirdetéskönyvtár | `0 3 * * 1` | hétfőnként 03:00 |
+| Facebook posztok | `0 4 * * 1` | hétfőnként 04:00 |
+
+**8. KAPCSOLD BE.** Az új ütemezés alapból **letiltott** állapotban jön létre —
+ez a leggyakoribb hiba. A feladat lapján az **Enable** gombbal élesítsd.
+
+> Az időzítés alapértelmezésben UTC szerint fut. A 03:00 UTC nyáron 05:00-t
+> jelent nálunk — ez nekünk mindegy (hajnalban fut), de ha pontos időt akarsz,
+> az ütemezés beállításánál átállítható az időzóna.
+
+---
+
 ## Ellenőrzés az első futás után
 
 A webhook válasza megmondja, mi történt:
