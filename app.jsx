@@ -13667,6 +13667,11 @@ Object.assign(HU_EN, {
      angol módban magyarul maradtak. */
   'jelentkezés':'application','kötelező dokumentum feltöltve':'required documents uploaded',
   // Ügynökségi visszajelzés (2026-09-30)
+  'Mentés és frissítés…':'Saving and refreshing…',
+  'Kötelező — enélkül nem lehet továbblépni':'Required \u2014 you cannot continue without these',
+  'Nem kötelező — beadható, de nem feltétel':'Optional \u2014 you may submit these, but they are not a condition',
+  'Kötelező dokumentumok':'Required documents','Nem kötelező dokumentumok':'Optional documents',
+  'nem kötelező':'optional',
   'Ügynöki portál':'Agent portal','Üdvözöljük,':'Welcome,',
   'Várható jutalék diákonként':'Expected commission per student',
   'A felvett diákjaid. Az összeg TÁJÉKOZTATÓ, a képzés tandíja és a fenti kulcs alapján — a kötelező érvényű összeg a kiküldött számlán van.':'Your admitted students. The amount is INDICATIVE, based on the programme tuition and the rate above \u2014 the binding amount is on the invoice issued by the office.',

@@ -791,10 +791,31 @@ function PROG_Detail({ program, myApp, onClose, onApply }) {
           </div>
         </div>
         <div>
-          <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Szükséges dokumentumok</div>
-          <div className="grid sm:grid-cols-2 gap-2">
-            {(program.required_docs || []).map(d => <div key={d} className="flex items-center gap-2 text-sm text-slate-600"><Lucide.FileCheck size={15} className="text-emerald-500 flex-none" /> {PROG_docLabel(d)}</div>)}
-          </div>
+          {/* A JELENTKEZŐ MÁR ITT LÁSSA, MI KÖTELEZŐ ÉS MI NEM — még a
+              jelentkezés elindítása előtt (kérés: 2026-09-30). */}
+          {(() => {
+            const opc = PROG_optDocs(program);
+            const kell = (program.required_docs || []).filter(d => !opc.includes(d));
+            const nemKell = (program.required_docs || []).filter(d => opc.includes(d));
+            const blokk = (cim, lista, ikon, szin) => !lista.length ? null : (
+              <div className="mb-3 last:mb-0">
+                <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">{cim}</div>
+                <div className="grid sm:grid-cols-2 gap-2">
+                  {lista.map(d => (
+                    <div key={d} className="flex items-center gap-2 text-sm text-slate-600">
+                      {ikon}<span>{PROG_docLabel(d)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+            return (
+              <>
+                {blokk('Kötelező dokumentumok', kell, <Lucide.FileCheck size={15} className="text-emerald-500 flex-none" />)}
+                {blokk('Nem kötelező dokumentumok', nemKell, <Lucide.FilePlus size={15} className="text-slate-300 flex-none" />)}
+              </>
+            );
+          })()}
         </div>
         <div className="flex items-center justify-between gap-4 pt-2 border-t border-slate-100">
           <div className="text-sm">
@@ -1272,6 +1293,23 @@ function PROG_StepBody({ stepKey, program, data, setData, mentData, user, cur, o
         e.target.value = '';
       }
     };
+    /* EGY DOKUMENTUMSOR. Külön függvény, mert a kötelező és a nem kötelező
+       csoport is ugyanezt rajzolja. */
+    const dokSor = (id) => { const got = docs[id]; return (
+            <div key={id} className={'flex flex-wrap sm:flex-nowrap items-center justify-between gap-3 sm:gap-4 p-4 rounded-2xl border ' + (got ? 'border-emerald-100 bg-emerald-50/40' : 'border-slate-100')}>
+              <div className="flex items-center gap-3 min-w-0">
+                <div className={'w-9 h-9 rounded-xl flex items-center justify-center flex-none ' + (got ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-400')}>{got ? <Lucide.Check size={17} /> : <Lucide.FileText size={17} />}</div>
+                <div className="min-w-0"><div className="text-sm font-bold text-slate-700 flex flex-wrap items-center gap-1.5"><span className="break-words">{PROG_docLabel(id)}</span>{kotelezoIdk.includes(id)
+                    ? <span className="px-1.5 py-0.5 rounded bg-red-50 text-red-600 text-[10px] font-black uppercase tracking-wider" data-dok-kotelezo-jel={id}>kötelező</span>
+                    : <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px] font-black uppercase tracking-wider" data-dok-opcionalis={id}>nem kötelező</span>}</div>{got && <div className="text-[11px] text-emerald-600 font-semibold break-all">{got.fileName}</div>}{tobbKepzes && <div className="mt-1 flex flex-wrap items-center gap-1" data-keri={id}><span className="text-[10px] font-bold text-slate-400">Kéri:</span>{valasztottK.filter(x => (x.required_docs || []).includes(id)).map(x => <span key={x.id} title={x.name} className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px] font-bold">{x.code || x.name}</span>)}</div>}</div>
+              </div>
+              <label className={U_btnGhost + ' flex-none cursor-pointer text-[13px] py-2 px-4 ' + (docBusy === id ? 'opacity-50 pointer-events-none' : '')}>
+                {docBusy === id ? 'Feltöltés…' : got ? 'Csere' : 'Feltöltés'}
+                <input type="file" accept={DOC_ACCEPT} className="hidden" disabled={!!docBusy} onChange={e => upload(id, e)} />
+              </label>
+            </div>
+    ); };
+
     return (
       <div className="space-y-5">
         <PROG_Head icon={Lucide.Upload} title="Dokumentumok feltöltése" sub={tobbKepzes ? 'A megjelölt képzések által kért összes dokumentum. Ami több képzéshez is kell, azt elég egyszer feltölteni.' : 'A kötelező dokumentumok nélkül nem lehet továbblépni; az opcionálisak megadása nem feltétel.'} />
@@ -1282,20 +1320,35 @@ function PROG_StepBody({ stepKey, program, data, setData, mentData, user, cur, o
           <span>{feltoltveN + '/' + kotelezoIdk.length}</span>{' '}<span>kötelező dokumentum feltöltve</span>
         </p>
         <p className="text-[12px] font-semibold text-slate-400" data-dok-formatum="1">{'Elfogadott formátum: ' + DOC_ENGEDETT_SZOVEG + ', legfeljebb ' + DOC_fmtSize(DOC_MAX_BYTES) + '.'}</p>
-        <div className="space-y-3">
-          {(program.required_docs || []).map(id => { const got = docs[id]; return (
-            <div key={id} className={'flex flex-wrap sm:flex-nowrap items-center justify-between gap-3 sm:gap-4 p-4 rounded-2xl border ' + (got ? 'border-emerald-100 bg-emerald-50/40' : 'border-slate-100')}>
-              <div className="flex items-center gap-3 min-w-0">
-                <div className={'w-9 h-9 rounded-xl flex items-center justify-center flex-none ' + (got ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-400')}>{got ? <Lucide.Check size={17} /> : <Lucide.FileText size={17} />}</div>
-                <div className="min-w-0"><div className="text-sm font-bold text-slate-700 flex flex-wrap items-center gap-1.5"><span className="break-words">{PROG_docLabel(id)}</span>{!kotelezoIdk.includes(id) && <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px] font-black uppercase tracking-wider" data-dok-opcionalis={id}>opcionális</span>}</div>{got && <div className="text-[11px] text-emerald-600 font-semibold break-all">{got.fileName}</div>}{tobbKepzes && <div className="mt-1 flex flex-wrap items-center gap-1" data-keri={id}><span className="text-[10px] font-bold text-slate-400">Kéri:</span>{valasztottK.filter(x => (x.required_docs || []).includes(id)).map(x => <span key={x.id} title={x.name} className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px] font-bold">{x.code || x.name}</span>)}</div>}</div>
-              </div>
-              <label className={U_btnGhost + ' flex-none cursor-pointer text-[13px] py-2 px-4 ' + (docBusy === id ? 'opacity-50 pointer-events-none' : '')}>
-                {docBusy === id ? 'Feltöltés…' : got ? 'Csere' : 'Feltöltés'}
-                <input type="file" accept={DOC_ACCEPT} className="hidden" disabled={!!docBusy} onChange={e => upload(id, e)} />
-              </label>
+        {/* KÉT CSOPORT. A jelentkezőnek EGY PILLANTÁSBÓL látnia kell, mi az,
+            ami nélkül nem tud továbblépni, és mi az, ami csak hasznos
+            (kérés: 2026-09-30). A sorokon is ott a jelölés. */}
+        {(() => {
+          const opcIdk = (program.required_docs || []).filter(id => !kotelezoIdk.includes(id));
+          return (
+            <div className="space-y-5">
+              {kotelezoIdk.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <Lucide.AlertCircle size={14} className="text-red-500 flex-none" />
+                    <span className="text-[11px] font-black text-slate-500 uppercase tracking-widest">Kötelező — enélkül nem lehet továbblépni</span>
+                  </div>
+                  <div className="space-y-3" data-dok-csoport="kotelezo">{kotelezoIdk.map(dokSor)}</div>
+                </div>
+              )}
+              {opcIdk.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <Lucide.FilePlus size={14} className="text-slate-400 flex-none" />
+                    <span className="text-[11px] font-black text-slate-500 uppercase tracking-widest">Nem kötelező — beadható, de nem feltétel</span>
+                  </div>
+                  <div className="space-y-3" data-dok-csoport="opcionalis">{opcIdk.map(dokSor)}</div>
+                </div>
+              )}
             </div>
-          ); })}
-        </div>
+          );
+        })()}
+
           {docErr && (
           <div className="flex items-start gap-2 bg-red-50 border border-red-100 rounded-2xl px-4 py-3 text-sm font-bold text-red-600">
             <Lucide.AlertCircle size={16} className="flex-none mt-0.5" />
@@ -1986,14 +2039,36 @@ function PROG_Editor({ open, program, onClose, onSaved, scope }) {
     // 109: csak a ténylegesen kért dokumentumok közül jegyezzük fel az opcionálisakat.
     if (!PROG_OPT_DOC_COL) delete row.optional_docs;
     else row.optional_docs = (f.optional_docs || []).filter(k => (f.required_docs || []).includes(k));
-    if (program) { await dlUpdate(PROG_TABLE, program.id, row, PROG_LS); }
-    else { row.id = uid('prog'); row.created_at = todayStr(); await dlInsert(PROG_TABLE, row, PROG_LS); }
-    setBusy(false); onSaved && onSaved(); onClose();
+    /* A MENTÉS UTÁN MEGVÁRJUK A LISTA ÚJRATÖLTÉSÉT. Eddig az onSaved()
+       hívását nem vártuk meg, és az ablak azonnal bezárult: aki gyorsan
+       újranyitotta a szerkesztőt, még a RÉGI adatot látta, mert a lista
+       frissítése közben járt (mérve 2026-09-30, a T02 tesztesetnél).
+       A gomb és az ablak addig zárolva marad. */
+    try {
+      if (program) { await dlUpdate(PROG_TABLE, program.id, row, PROG_LS); }
+      else { row.id = uid('prog'); row.created_at = todayStr(); await dlInsert(PROG_TABLE, row, PROG_LS); }
+      if (onSaved) await onSaved();
+    } finally {
+      setBusy(false);
+    }
+    onClose();
   };
 
   return (
-    <UModal open={open} onClose={onClose} max="max-w-3xl" title={(program ? 'Szerkesztés — ' : 'Új ') + (isDeg ? 'képzés' : 'program')} subtitle={isDeg ? 'Az adatok és a képzés felvételi folyamatának beállítása' : 'Az adatok és a program jelentkezési folyamatának beállítása'} icon={<Lucide.GraduationCap size={20} />}>
-      <div className="space-y-6">
+    <UModal open={open} onClose={busy ? () => {} : onClose} max="max-w-3xl" title={(program ? 'Szerkesztés — ' : 'Új ') + (isDeg ? 'képzés' : 'program')} subtitle={isDeg ? 'Az adatok és a képzés felvételi folyamatának beállítása' : 'Az adatok és a program jelentkezési folyamatának beállítása'} icon={<Lucide.GraduationCap size={20} />}>
+      {/* TÖLTŐRÉTEG MENTÉS KÖZBEN. A mentés után megvárjuk a lista
+          újratöltését is — addig semmi nem kattintható, és látszik, hogy
+          dolgozunk. Enélkül a gyorsan újranyitott szerkesztő a RÉGI adatot
+          mutatta (T02, 2026-09-30). */}
+      <div className="relative space-y-6">
+        {busy && (
+          <div className="absolute inset-0 z-20 -m-2 rounded-2xl bg-white/75 backdrop-blur-[1px] flex items-center justify-center" data-szerkeszto-tolt="1">
+            <div className="flex items-center gap-2.5 rounded-2xl bg-white border border-slate-200 shadow-sm px-4 py-3">
+              <Lucide.Loader2 size={18} className="animate-spin text-primary" />
+              <span className="text-sm font-bold text-slate-700">Mentés és frissítés…</span>
+            </div>
+          </div>
+        )}
         <div className="grid sm:grid-cols-2 gap-4">
           <UField label={isDeg ? 'Képzés neve' : 'Program neve'}><input className={U_input} value={f.name} onChange={e => set('name', e.target.value)} /></UField>
           <UField label="Kar">
@@ -2146,7 +2221,7 @@ function PROG_Editor({ open, program, onClose, onSaved, scope }) {
 
         <div className="flex items-center justify-between gap-3 pt-2">
           <label className="flex items-center gap-2.5 text-sm font-bold text-slate-600 cursor-pointer"><input type="checkbox" checked={f.is_open} onChange={e => set('is_open', e.target.checked)} className="w-4 h-4 accent-primary" /> Jelentkezés nyitva</label>
-          <div className="flex gap-3"><button className={U_btnGhost} onClick={onClose}>Mégse</button><button className={U_btnPrimary} disabled={busy || !f.name.trim()} onClick={save}>{busy ? 'Mentés…' : (isDeg ? 'Képzés mentése' : 'Program mentése')}</button></div>
+          <div className="flex gap-3"><button className={U_btnGhost} disabled={busy} onClick={onClose}>Mégse</button><button className={U_btnPrimary} disabled={busy || !f.name.trim()} onClick={save}>{busy ? <><Lucide.Loader2 size={16} className="animate-spin" /> Mentés…</> : (isDeg ? 'Képzés mentése' : 'Program mentése')}</button></div>
         </div>
       </div>
     </UModal>
