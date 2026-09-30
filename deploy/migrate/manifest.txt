@@ -122,3 +122,4 @@
 109_program_optional_docs.sql
 110_agency_fixes.sql
 111_interview_notice.sql
+112_market_intel.sql

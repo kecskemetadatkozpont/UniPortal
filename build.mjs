@@ -97,6 +97,10 @@ const FEATURE_FILES = [
   // Bevonási dashboard, arculatokra bontott illesztés, csapatajánlás (88+89+90).
   // A grants.jsx UTÁN: onnan veszi a GRT_msg-et és a közös U_* atomokat.
   'features/grants-teams.jsx',
+  // Piacfigyelő: marketing- és versenytársfigyelés (112_market_intel.sql).
+  // A data-layer UTÁN: onnan veszi a UModal / UBadge / UField / U_input
+  // atomokat. Adat nélkül is használható — a Források fül a gyűjtés alapja.
+  'features/market-intel.jsx',
 ];
 
 // `motion` is only referenced by the shim at the top of app.jsx, which renders

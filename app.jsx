@@ -86,6 +86,10 @@ const AppView = {
   INTERVIEWS: 'interviews',
   STUDENT_PORTAL: 'student_portal',
   MARKETING_LEADS: 'marketing_leads',
+  // Piacfigyelő (112_market_intel.sql). A kulcs EGYBEN jogosultsági kulcs is:
+  // a menüszűrő ezt keresi a szerepkör/csoport/egyéni jogok között, és a
+  // szerveroldali mi.require_perm() ugyanerre a kulcsra ellenőriz.
+  MARKET_INTEL: 'market_intel',
   REPORTS: 'reports',
   INTELLIGENCE: 'intelligence',
   FEED: 'feed',
@@ -172,6 +176,7 @@ const MENU_ITEMS = [
   { id: AppView.IMMIGRATION, label: 'Vízum és Compliance', icon: <Lucide.ShieldCheck size={20} /> },
   { id: AppView.INTERVIEWS, label: 'Interjú Foglalás', icon: <Lucide.Calendar size={20} /> },
   { id: AppView.MARKETING_LEADS, label: 'Marketing és Lead kezelés', icon: <Lucide.Target size={20} /> },
+  { id: AppView.MARKET_INTEL, label: 'Piacfigyelő', icon: <Lucide.Radar size={20} /> },
   { id: AppView.STUDENT_PORTAL, label: 'Hallgatói Portál', icon: <Lucide.Users size={20} /> },
   { id: AppView.STUDENTS, label: 'Hallgatók', icon: <Lucide.Users size={20} /> },
   { id: AppView.SHOP, label: 'Webshop', icon: <Lucide.ShoppingBag size={20} /> },
@@ -208,7 +213,7 @@ const MENU_GROUPS = [
   // pályázati iroda), más a jogosultság és más az életciklus, mint a képzésnél.
   { key: 'kutatas',   label: 'Kutatás és pályázatok',   ids: [AppView.GRANTS_OFFICE, AppView.GRANTS_INVITES] },
   { key: 'felveteli', label: 'Felvételi',                 ids: [AppView.ADMISSIONS_CORE, AppView.INTERVIEWS, AppView.IMMIGRATION, AppView.STUDENT_PORTAL] },
-  { key: 'partner',   label: 'Partnerek és kommunikáció', ids: [AppView.AGENT_PORTAL, AppView.ENGAGEMENT_CRM, AppView.MARKETING_LEADS] },
+  { key: 'partner',   label: 'Partnerek és kommunikáció', ids: [AppView.AGENT_PORTAL, AppView.ENGAGEMENT_CRM, AppView.MARKETING_LEADS, AppView.MARKET_INTEL] },
   { key: 'penzugy',   label: 'Pénzügy és elemzés',        ids: [AppView.FINANCE, AppView.SHOP_ADMIN, AppView.REPORTS, AppView.INTELLIGENCE] },
   { key: 'echo',      label: 'Minőségbiztosítás (ECHO)',  ids: [AppView.ECHO_STUDENT, AppView.ECHO_ADMIN, AppView.ECHO_TEACHER] },
   { key: 'kollegium', label: 'Kollégium és szállás',      ids: [AppView.DORM_OPS, AppView.DORM_MAINTENANCE, AppView.DORM_STUDENT] },
@@ -13558,6 +13563,7 @@ const App: React.FC = () => {
       case AppView.INTERVIEWS: return <InterviewScheduler user={currentUser} />;
       case AppView.STUDENT_PORTAL: return <StudentPortal user={currentUser} />;
       case AppView.MARKETING_LEADS: return <MarketingLeads />;
+      case AppView.MARKET_INTEL: return <MarketIntelView user={currentUser} />;
       case AppView.REPORTS: return <Reports />;
       case AppView.INTELLIGENCE: return <Intelligence />;
       case AppView.FEED: return <FeedView user={currentUser} onNavigate={setActiveView} />;
@@ -14064,6 +14070,43 @@ Object.assign(HU_EN, {
   'Üdvözöljük a Global Study Ügynökség központi vezérlőpultján.':'Welcome to the Global Study Agency control panel.',
   'Ügynökség:':'Agency:','Ügynökségtől:':'Brought by:','Következő:':'Next:',
   'A feltöltés nem sikerült':'Upload failed','Feltöltés folyamatban':'Uploading',
+  /* Piacfigyelő (features/market-intel.jsx). */
+  'Piacfigyelő':'Market radar','Mit csinál a mezőny, és mi jön be nekünk — ugyanarra a hétre.':'What the field is doing, and what comes in to us — for the same week.',
+  'Áttekintés':'Overview','Versenytársak':'Competitors','Hirdetések':'Ads','Országok':'Countries','Riasztások':'Alerts','Források':'Sources',
+  'Minden ország':'All countries','Minden kör':'All circles','Szűk kör':'Inner circle','Bő kör':'Wider circle','Regionális':'Regional',
+  '14 nap':'14 days','28 nap':'28 days','90 nap':'90 days',
+  'Részesedés':'Share','a mezőny bevonásából':'of the field\u2019s engagement','Követő':'Followers','a saját csatornáinkon':'on our own channels',
+  'Aktív hirdetés':'Active ads','a figyelt mezőnyben':'in the tracked field','Jelentkezés':'Applications','ebben az időszakban':'in this period',
+  'Aktivitás és jelentkezés egy időtengelyen':'Activity and applications on one timeline',
+  'Versenytárs-posztok és új hirdetések hetente, mellettük a mi jelentkezéseink ugyanarra a hétre.':'Competitor posts and new ads per week, next to our own applications for the same week.',
+  'Versenytárs-poszt':'Competitor post','Új hirdetés':'New ad','A mi jelentkezéseink':'Our applications',
+  'Ehhez az időszakhoz még nincs adat.':'No data for this period yet.',
+  'Versenytárs-tábla':'Competitor table','Sorra kattintva megnyílik az intézmény lapja.':'Click a row to open the institution page.',
+  'Intézmény':'Institution','Kör':'Circle','Csatorna':'Channel','Poszt':'Posts','Átlagos bevonás':'Average engagement','Utolsó poszt':'Last post',
+  'Nincs figyelt intézmény':'No institution is being tracked','A Források fülön vedd fel őket.':'Add them on the Sources tab.',
+  'Hirdetés-fal':'Ad wall','Ami 30 napnál tovább fut, az náluk működik. Becsült költést szándékosan nem mutatunk.':'What runs longer than 30 days works for them. We deliberately show no estimated spend.',
+  'Nincs hirdetés ebben az időszakban':'No ads in this period',
+  'Országtábla':'Country table','Kereslet':'Demand','Versenytárs-célzás':'Competitor targeting','A mi jelentkezőink':'Our applicants','Nincs országadat':'No country data',
+  'Feladatok, nem értesítések: mindegyiket valaki lezárja.':'Tasks, not notifications: someone closes each one.',
+  'Nincs nyitott riasztás':'No open alerts','Ami keletkezik, itt jelenik meg.':'Whatever comes up shows here.',
+  'Elvállalom':'Take it','Lezárás':'Close','Nem érdekes':'Not relevant','Új':'New','Folyamatban':'In progress','Lezárva':'Closed',
+  'Amit figyelünk':'What we track',
+  'Egy sor = egy intézmény egy csatornája. A kulcs stabil azonosító: ezzel hivatkozik rá a betöltő.':'One row = one channel of one institution. The key is a stable identifier the collector refers to.',
+  'Új forrás':'New source','Még nincs figyelt forrás':'No source is being tracked yet',
+  'Vedd fel az intézményeket és a csatornáikat. Ehhez nem kell a gyűjtés — a lista a betöltés beállításának az alapja.':'Add the institutions and their channels. This needs no collection — the list is what the ingest is configured from.',
+  'Figyelt forrás':'Tracked source','A kulcs később nem változik — a betöltés erre hivatkozik.':'The key never changes — the ingest refers to it.',
+  'Kulcs':'Key','Kisbetű, kötőjel — például obuda-instagram':'Lowercase and hyphens — for example obuda-instagram',
+  'Cím':'Address','Az oldal vagy a figyelt aloldal teljes címe.':'The full address of the page or the tracked subpage.',
+  'Csak keresleti indexnél kell.':'Only needed for the demand index.','A mi csatornánk':'Our own channel','Aktív':'Active',
+  'Utolsó adat':'Last data','még nincs':'none yet','saját':'ours','szünetel':'paused','mi':'us',
+  'Weboldal':'Website','Hirdetéskönyvtár':'Ad library','Keresleti index':'Demand index',
+  'A piacfigyelő adatbázisa még nincs telepítve':'The market radar database is not installed yet',
+  'A 112_market_intel.sql migráció még nem futott le ezen a példányon. Amíg nem fut le, ez a képernyő nem tud adatot mutatni.':'The 112_market_intel.sql migration has not been run on this instance. Until it is, this screen has no data to show.',
+  'Még nincs begyűjtött adat':'Nothing has been collected yet',
+  'Biztosan törlöd ezt a forrást? A hozzá gyűjtött adat is törlődik.':'Delete this source? The data collected for it is deleted too.',
+  'Ehhez a képernyőhöz piacfigyelő jogosultság kell.':'This screen needs market radar permission.',
+  'Legjobban teljesítő posztok':'Best performing posts','Weboldal-változások':'Website changes','Nincs változás.':'No changes.',
+  'Csatornák':'Channels','Az elmúlt 90 nap':'The last 90 days','Nincs adat.':'No data.',
   'Ügynökség':'Agency','Önálló':'Direct','Önálló jelentkezők':'Direct applicants',
   'Minden ügynökség':'All agencies','Önálló jelentkező (nincs ügynökség)':'Direct applicant (no agency)',
   'Melyik ügynökség hozta ezt a jelentkezőt. Üresen hagyva önállóan jelentkezőnek számít.':'Which agency brought this applicant. Left empty, the applicant counts as a direct applicant.',
