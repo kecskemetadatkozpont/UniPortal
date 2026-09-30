@@ -89,6 +89,79 @@ function IV_outsideReason(cal, start, end) {
 /* ============================================================
    NAPTÁR
    ============================================================ */
+/* AZ INTERJÚZTATÓ ÉRTESÍTÉSEI (111).
+   Eddig, ha az iroda áthelyezte az interjút másik interjúztatóhoz, a régi
+   naptárából szó nélkül eltűnt, az újban szó nélkül megjelent. Ez a sáv
+   megmondja, mi változott — és meddig nem olvastad. */
+function IV_Ertesitesek({ onValtozott }) {
+  const [lista, setLista] = useState(null);
+  const [nyitva, setNyitva] = useState(false);
+
+  const tolt = React.useCallback(async () => {
+    const { data, error } = await IV_rpc('interview_notices');
+    if (error) { setLista([]); return; }   // migráció nélkül egyszerűen nincs sáv
+    setLista(Array.isArray(data) ? data : []);
+  }, []);
+  useEffect(() => { tolt(); }, [tolt]);
+
+  const olvasatlan = (lista || []).filter(x => !x.olvasott);
+  if (!lista || !lista.length) return null;
+
+  const mindOlvasott = async () => {
+    await IV_rpc('interview_notice_read', { p_id: null });
+    await tolt();
+    if (onValtozott) onValtozott();
+  };
+
+  return (
+    <div className={'rounded-2xl border p-4 ' + (olvasatlan.length ? 'border-primary/30 bg-primary/5' : 'border-slate-100 bg-white')}
+         data-iv-ertesitesek="1">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Lucide.BellRing size={16} className={olvasatlan.length ? 'text-primary' : 'text-slate-400'} />
+          <span className="text-sm font-black text-slate-800">Változások az interjúidban</span>
+          {olvasatlan.length > 0 && (
+            <span className="px-2 py-0.5 rounded-lg bg-primary text-white text-[10px] font-black" data-iv-ert-szam="1">
+              {olvasatlan.length}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          {olvasatlan.length > 0 && (
+            <button type="button" onClick={mindOlvasott} data-iv-ert-olvasott="1"
+              className="text-[12px] font-bold text-primary hover:underline">Mind olvasott</button>
+          )}
+          <button type="button" onClick={() => setNyitva(v => !v)}
+            className="text-[12px] font-bold text-slate-400 hover:text-slate-700">
+            {nyitva ? 'Összecsukás' : 'Mutasd'}
+          </button>
+        </div>
+      </div>
+      {(nyitva || olvasatlan.length > 0) && (
+        <ul className="mt-3 space-y-2">
+          {(nyitva ? lista : olvasatlan).slice(0, 8).map(n => (
+            <li key={n.id} data-iv-ertesites={n.id} data-olvasott={n.olvasott ? '1' : '0'}
+                className={'rounded-xl border px-3 py-2 ' + (n.olvasott ? 'border-slate-100' : 'border-primary/20 bg-white')}>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={'px-1.5 py-0.5 rounded text-[10px] font-black uppercase tracking-wider '
+                  + (n.kind === 'removed' ? 'bg-slate-100 text-slate-500'
+                    : n.kind === 'assigned' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700')}>
+                  {n.kind === 'removed' ? 'lekerült' : n.kind === 'assigned' ? 'hozzád került' : 'módosult'}
+                </span>
+                <span className="text-[13px] font-bold text-slate-800">{n.subject}</span>
+                <span className="ml-auto text-[11px] font-semibold text-slate-400">
+                  {String(n.created_at || '').slice(0, 10)}
+                </span>
+              </div>
+              <p className="text-[12px] text-slate-600 mt-0.5" data-echo-noi18n>{n.body}</p>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function IV_Calendar({ ctx, processes, programName, programCode, historyFor, onChanged }) {
   const roster = ((ctx && ctx.interviewers) || []).filter(i => i.active);
   const canManage = !!(ctx && (ctx.can_manage || ctx.admin));
@@ -323,6 +396,7 @@ function IV_Calendar({ ctx, processes, programName, programCode, historyFor, onC
 
   return (
     <div className="space-y-4" data-iv-naptar="1">
+      <IV_Ertesitesek onValtozott={onChanged} />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" aria-label="Előző hét" onClick={() => setWeekStart(w => IV_addDays(w, -7))} className={U_btnGhost + ' !px-3 !py-2'}><Lucide.ChevronLeft size={16} /></button>
@@ -1371,7 +1445,10 @@ function IV_AdminProcessInterview({ processId, canEdit, fallback, onChanged }) {
     setBusy(false);
     if (error) { setErr(IV_msg(error)); return; }
     setForm(null);
-    setOk(cur ? 'Az interjú új időpontja elmentve — a jelentkező értesítést kapott.' : 'Az interjút rögzítettük — a jelentkező értesítést kapott.');
+    setOk(!cur ? 'Az interjút rögzítettük — a jelentkező és az interjúztató is értesítést kapott.'
+      : (form.interviewer && form.interviewer !== cur.interviewer)
+        ? 'Elmentve — az interjúztató megváltozott. A jelentkező, a korábbi és az új interjúztató is értesítést kapott.'
+        : 'Az interjú új időpontja elmentve — a jelentkező és az interjúztató értesítést kapott.');
     await load();
     if (onChanged) onChanged();
   };
@@ -1412,25 +1489,34 @@ function IV_AdminProcessInterview({ processId, canEdit, fallback, onChanged }) {
       {canEdit && loaded && !form && (
         <div className="pt-1">
           <button type="button" className={U_btnGhost + ' !py-2 text-sm'} onClick={szerkeszt} data-iv-admin-szerkeszt="1">
-            <Lucide.CalendarClock size={15} /> {cur ? 'Időpont módosítása' : 'Interjú-időpont megadása'}
+            <Lucide.CalendarClock size={15} /> {cur ? 'Időpont vagy interjúztató módosítása' : 'Interjú-időpont megadása'}
           </button>
         </div>
       )}
       {form && (
         <div className="space-y-3 pt-3 border-t border-slate-100" data-iv-admin-urlap="1">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <UField label="Nap"><input type="date" className={U_input} value={form.date} onChange={e => set('date', e.target.value)} /></UField>
-            <UField label="Kezdés"><input type="time" step="300" className={U_input} value={form.start} onChange={e => set('start', e.target.value)} /></UField>
-            <UField label="Befejezés"><input type="time" step="300" className={U_input} value={form.end} onChange={e => set('end', e.target.value)} /></UField>
-          </div>
+          {/* AZ INTERJÚZTATÓ ELŐRE KERÜLT. A csere eddig is működött, de a
+              „Időpont módosítása" gomb mögé rejtve senki nem találta meg
+              (kérés: 2026-09-30). */}
           {roster.length > 0 && (
             <UField label="Interjúztató">
-              <select className={U_input} value={form.interviewer} onChange={e => set('interviewer', e.target.value)}>
+              <select className={U_input} value={form.interviewer} data-iv-interjuztato="1"
+                onChange={e => set('interviewer', e.target.value)}>
                 {!form.interviewer && <option value="">Válassz…</option>}
                 {roster.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
               </select>
             </UField>
           )}
+          {cur && form.interviewer && form.interviewer !== cur.interviewer && (
+            <p className="text-[12px] font-bold text-amber-700" data-iv-csere="1">
+              <span>Az interjúztató megváltozik. Értesítést kap róla a jelentkező, a korábbi és az új interjúztató is.</span>
+            </p>
+          )}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <UField label="Nap"><input type="date" className={U_input} value={form.date} onChange={e => set('date', e.target.value)} /></UField>
+            <UField label="Kezdés"><input type="time" step="300" className={U_input} value={form.start} onChange={e => set('start', e.target.value)} /></UField>
+            <UField label="Befejezés"><input type="time" step="300" className={U_input} value={form.end} onChange={e => set('end', e.target.value)} /></UField>
+          </div>
           <UField label="Belső megjegyzés (nem kötelező)"><input className={U_input} value={form.note} onChange={e => set('note', e.target.value)} /></UField>
           <p className="text-[12px] text-slate-400">Ha az időpont változik, a jelentkező üzenetet kap róla. Ügyintézőként munkaidőn kívülre is teheted, de más interjúval nem ütközhet.</p>
           <div className="flex justify-end gap-2">

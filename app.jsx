@@ -13668,6 +13668,18 @@ Object.assign(HU_EN, {
   'jelentkezés':'application','kötelező dokumentum feltöltve':'required documents uploaded',
   // Ügynökségi visszajelzés (2026-09-30)
   'Mentés és frissítés…':'Saving and refreshing…',
+  // Interjúztató-csere (111, 2026-09-30)
+  'Időpont vagy interjúztató módosítása':'Change the time or the interviewer',
+  'Az interjúztató megváltozik. Értesítést kap róla a jelentkező, a korábbi és az új interjúztató is.':'The interviewer will change. The applicant, the previous and the new interviewer will all be notified.',
+  'Elmentve — az interjúztató megváltozott. A jelentkező, a korábbi és az új interjúztató is értesítést kapott.':'Saved \u2014 the interviewer has changed. The applicant, the previous and the new interviewer have all been notified.',
+  'Az interjú új időpontja elmentve — a jelentkező és az interjúztató értesítést kapott.':'The new interview time has been saved \u2014 the applicant and the interviewer have been notified.',
+  'Az interjút rögzítettük — a jelentkező és az interjúztató is értesítést kapott.':'The interview has been recorded \u2014 the applicant and the interviewer have both been notified.',
+  'Változások az interjúidban':'Changes to your interviews',
+  'Mind olvasott':'Mark all as read','Összecsukás':'Collapse','Mutasd':'Show',
+  'lekerült':'removed','hozzád került':'assigned to you','módosult':'changed',
+  'Új interjú került hozzád':'A new interview has been assigned to you',
+  'Lekerült rólad egy interjú':'An interview has been removed from you',
+  'Módosult egy interjúd időpontja':'The time of one of your interviews has changed',
   'Kötelező — enélkül nem lehet továbblépni':'Required \u2014 you cannot continue without these',
   'Nem kötelező — beadható, de nem feltétel':'Optional \u2014 you may submit these, but they are not a condition',
   'Kötelező dokumentumok':'Required documents','Nem kötelező dokumentumok':'Optional documents',
