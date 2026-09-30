@@ -536,7 +536,11 @@ begin
           'utolso_adat', s.utolso_adat
         ) r
         from mi.source s
-        where s.aktiv and coalesce(s.utolso_adat, now() - interval '999 day') < now() - interval '2 day'
+        -- ELHALLGATOTT, nem ÚJ: csak az számít, ami MÁR hozott adatot, és
+        -- azóta elnémult. Egy frissen felvett forrás még nem hiba — a
+        -- Források fülön „még nincs" felirattal látszik.
+        where s.aktiv and s.utolso_adat is not null
+          and s.utolso_adat < now() - interval '2 day'
       ) t)
   ) into v;
 
@@ -799,11 +803,12 @@ begin
   -- Elhallgatott forrás: két napja nincs adat, pedig aktív.
   insert into mi.alert (tipus, cim, reszlet, sulyossag, intezmeny, source_id, ujjlenyomat)
   select 'nema_forras', s.intezmeny || ': a gyűjtés nem hoz adatot',
-         s.platform || ' — utoljára: ' || coalesce(s.utolso_adat::date::text, 'soha'),
+         s.platform || ' — utoljára: ' || s.utolso_adat::date::text,
          'figyelem', s.intezmeny, s.id,
          md5('nema' || s.kulcs || current_date::text)
     from mi.source s
-   where s.aktiv and coalesce(s.utolso_adat, now() - interval '999 day') < now() - interval '2 day'
+   where s.aktiv and s.utolso_adat is not null
+     and s.utolso_adat < now() - interval '2 day'
   on conflict (ujjlenyomat) do nothing;
 
   return jsonb_build_object('ok', true);

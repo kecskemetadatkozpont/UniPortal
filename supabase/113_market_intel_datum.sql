@@ -1,17 +1,24 @@
 -- ============================================================
 -- 113_market_intel_datum.sql — JAVÍTÁS a 112-höz
 -- ============================================================
--- A HIBA: a képernyő „operator does not exist: text >= date" hibával állt meg.
--- Az `admission_processes.created_at` oszlop SZÖVEG (04_admission_processes.sql),
--- nem időbélyeg — a 112-es mi_dashboard viszont dátumként hasonlította össze.
+-- KÉT HIBÁT JAVÍT. Idempotens, és akkor is lefuttatható, ha egyszer már futott.
 --
--- A JAVÍTÁS: mi.ts(text) alakítja át. Ami nem értelmezhető dátum (üres, null,
--- '2026-02-30', szöveg), az NULL lesz és kimarad a számlálásból — egyetlen
--- rossz sor nem döntheti el az egész képernyőt.
+-- 1. „operator does not exist: text >= date" — a képernyő meg sem jelent.
+--    Az `admission_processes.created_at` oszlop SZÖVEG
+--    (04_admission_processes.sql), nem időbélyeg; a 112-es mi_dashboard
+--    viszont dátumként hasonlította össze. Mostantól mi.ts(text) alakítja át,
+--    és ami nem értelmezhető dátum (üres, null, '2026-02-30', szöveg), az
+--    NULL lesz — egyetlen rossz sor nem döntheti el az egész képernyőt.
+--
+-- 2. „elhallgatott forrás” riasztás frissen felvett forrásra. A 112 mindent
+--    jelzett, amiről két napja nincs adat — beleértve azt is, amiről még
+--    SOHA nem volt. Egy új forrás nem üzemzavar; a Források fülön „még nincs”
+--    felirattal látszik. Mostantól csak az számít elnémultnak, ami MÁR hozott
+--    adatot, és azóta hallgat.
 --
 -- CSAK EZT KELL LEFUTTATNI, ha a 112 már lefutott. (A 112 maga is javítva van,
 -- friss telepítésnél elég az.)
--- IDEMPOTENS. FÜGG: 112.
+-- FÜGG: 112.
 -- ============================================================
 
 create or replace function mi.ts(p text)
@@ -196,14 +203,67 @@ begin
           'utolso_adat', s.utolso_adat
         ) r
         from mi.source s
-        where s.aktiv and coalesce(s.utolso_adat, now() - interval '999 day') < now() - interval '2 day'
+        -- ELHALLGATOTT, nem ÚJ: csak az számít, ami MÁR hozott adatot, és
+        -- azóta elnémult. Egy frissen felvett forrás még nem hiba — a
+        -- Források fülön „még nincs" felirattal látszik.
+        where s.aktiv and s.utolso_adat is not null
+          and s.utolso_adat < now() - interval '2 day'
       ) t)
   ) into v;
 
   return v;
 end $$;
 
--- A segédfüggvényt senki nem hívhatja kívülről.
+
+create or replace function public.mi_detect_alerts()
+returns jsonb
+language plpgsql security definer
+set search_path = mi, public, pg_temp
+as $$
+declare v_db integer := 0;
+begin
+  -- Új hirdetés-kampány: ma először látott hirdetés.
+  insert into mi.alert (tipus, cim, reszlet, sulyossag, intezmeny, ujjlenyomat)
+  select 'uj_kampany',
+         a.intezmeny || ': új hirdetés indult',
+         coalesce(a.tema, '') || case when a.orszagok <> '{}' then ' · ' || array_to_string(a.orszagok, ', ') else '' end,
+         'info', a.intezmeny,
+         md5('kampany' || a.platform || a.kulso_id)
+    from mi.ad a
+   where a.elso_latas >= current_date - 1
+  on conflict (ujjlenyomat) do nothing;
+  get diagnostics v_db = row_count;
+
+  -- Kiugró poszt: a forrás 30 napos mediánjának háromszorosa fölött.
+  insert into mi.alert (tipus, cim, reszlet, sulyossag, intezmeny, source_id, ujjlenyomat)
+  select 'kiugro_poszt',
+         s.intezmeny || ': kiugróan teljesítő poszt',
+         'bevonás ' || p.bevonas || ' (medián ' || m.med || ')',
+         'info', s.intezmeny, s.id,
+         md5('kiugro' || p.source_id::text || p.kulso_id)
+    from mi.post p
+    join mi.source s on s.id = p.source_id
+    join (select source_id, percentile_cont(0.5) within group (order by bevonas) med
+            from mi.post where kelt >= current_date - 30 and bevonas is not null
+           group by source_id) m on m.source_id = p.source_id
+   where p.kelt >= current_date - 2 and m.med > 0 and p.bevonas > 3 * m.med
+  on conflict (ujjlenyomat) do nothing;
+
+  -- Elhallgatott forrás: két napja nincs adat, pedig aktív.
+  insert into mi.alert (tipus, cim, reszlet, sulyossag, intezmeny, source_id, ujjlenyomat)
+  select 'nema_forras', s.intezmeny || ': a gyűjtés nem hoz adatot',
+         s.platform || ' — utoljára: ' || s.utolso_adat::date::text,
+         'figyelem', s.intezmeny, s.id,
+         md5('nema' || s.kulcs || current_date::text)
+    from mi.source s
+   where s.aktiv and s.utolso_adat is not null
+     and s.utolso_adat < now() - interval '2 day'
+  on conflict (ujjlenyomat) do nothing;
+
+  return jsonb_build_object('ok', true);
+end $$;
+
+-- A segédfüggvényt senki nem hívhatja kívülről; a felületi RPC joga maradjon.
 do $mi$
 begin
   execute 'revoke all on function mi.ts(text) from public';
@@ -213,14 +273,25 @@ begin
   if exists (select 1 from pg_roles where rolname = 'authenticated') then
     execute 'revoke all on function mi.ts(text) from authenticated';
   end if;
-  -- A felületi RPC joga maradjon meg (a create or replace megtartja, de
-  -- friss példányon biztosra megyünk).
+
   execute 'revoke all on function public.mi_dashboard(integer,text,text) from public';
   if exists (select 1 from pg_roles where rolname = 'anon') then
     execute 'revoke all on function public.mi_dashboard(integer,text,text) from anon';
   end if;
   if exists (select 1 from pg_roles where rolname = 'authenticated') then
     execute 'grant execute on function public.mi_dashboard(integer,text,text) to authenticated';
+  end if;
+
+  -- A riasztás-felismerő CSAK a service_role-é (Edge Function).
+  execute 'revoke all on function public.mi_detect_alerts() from public';
+  if exists (select 1 from pg_roles where rolname = 'anon') then
+    execute 'revoke all on function public.mi_detect_alerts() from anon';
+  end if;
+  if exists (select 1 from pg_roles where rolname = 'authenticated') then
+    execute 'revoke all on function public.mi_detect_alerts() from authenticated';
+  end if;
+  if exists (select 1 from pg_roles where rolname = 'service_role') then
+    execute 'grant execute on function public.mi_detect_alerts() to service_role';
   end if;
 end $mi$;
 
@@ -234,5 +305,9 @@ begin
   if mi.ts('2026-09-30') is null then
     raise exception 'MI: a dátum-átalakító a JÓ dátumot sem fogadta el.';
   end if;
-  raise notice 'MI 113 OK: a dátum-összehasonlítás javítva.';
+  if exists (select 1 from pg_roles where rolname = 'authenticated')
+     and has_function_privilege('authenticated', 'public.mi_detect_alerts()', 'execute') then
+    raise exception 'MI: a riasztás-felismerő hívható bejelentkezett felhasználóval.';
+  end if;
+  raise notice 'MI 113 OK: dátum-összehasonlítás és néma-forrás jelzés javítva.';
 end $chk$;
