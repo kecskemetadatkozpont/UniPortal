@@ -198,3 +198,87 @@ export function kotegKeszit(forras: Forras, tetelek: Record<string, unknown>[]) 
   koteg.ures = kovetok === null && posztok.length === 0;
   return koteg;
 }
+
+// ============================================================
+// TÖBB FORRÁS EGY FUTÁSBÓL
+// ============================================================
+// Egy Apify-futásba több profil is betehető, a webhook viszont egy URL. Ha
+// forrásonként külön futást kérnénk, 13 feladatot és 13 ütemezést kellene
+// kézzel karbantartani — és mindegyiket külön elrontani. Ezért a betöltő maga
+// osztja szét a tételeket: minden tételt ahhoz a forráshoz köt, amelyiknek a
+// CÍMÉBEN szereplő kezelőnevet hordozza.
+
+// A kezelőnév a figyelt címből: instagram.com/obudaiegyetem/ -> obudaiegyetem,
+// tiktok.com/@obudai.egyetem -> obudai.egyetem.
+export function kezelo(cim?: string | null): string | null {
+  if (!cim) return null;
+  const tiszta = String(cim).trim()
+    .replace(/^https?:\/\//i, '')
+    .replace(/^www\./i, '')
+    .replace(/\?.*$/, '');
+  const reszek = tiszta.split('/').filter(Boolean);
+  if (reszek.length < 2) return null;          // csak a domain — nincs kezelőnév
+  const nev = reszek[1].replace(/^@/, '').toLowerCase();
+  return nev || null;
+}
+
+// Egy tétel LEHETSÉGES kezelőnevei. Actoronként más mező hordozza.
+export function tetelKezeloi(it: Record<string, unknown>): string[] {
+  const jeloltek = [
+    it.username, it.ownerUsername, it.pageName, it.name,
+    ut(it, 'authorMeta.name'), ut(it, 'authorMeta.uniqueId'), ut(it, 'author.uniqueId'),
+  ].filter(Boolean).map(x => String(x).replace(/^@/, '').toLowerCase());
+
+  // A tételben lévő URL-ekből is kiolvassuk — sok Actor csak ott adja meg.
+  for (const u of [it.inputUrl, it.url, it.webVideoUrl, it.postUrl, it.facebookUrl, it.profileUrl]) {
+    const k = kezelo(u as string | null);
+    if (k) jeloltek.push(k);
+  }
+  return [...new Set(jeloltek)];
+}
+
+export interface Csoport { forras: Forras; tetelek: Record<string, unknown>[]; }
+
+/* Szétosztás. Az ÁRVA tételeket (amelyik egyik forráshoz sem köthető) NEM
+   dobjuk el némán: visszaadjuk, és a válasz kiírja. Egy elgépelt cím így
+   azonnal látszik, nem három hét múlva egy üres oszlopból. */
+export function csoportosit(forrasok: Forras[], tetelek: Record<string, unknown>[]) {
+  const terkep = new Map<string, Csoport>();
+  const kezeloRe = new Map<string, string>();   // kezelőnév -> forras.kulcs
+  // Az intézménynév a MÁSODIK esély: a hirdetéskönyvtár tételei nem
+  // kezelőnevet hordoznak, hanem a hirdető nevét (pageName). Csak akkor
+  // használjuk, ha a név EGYÉRTELMŰ a csoporton belül — Dunaújvárosnak például
+  // két Instagram-oldala van (magyar és angol), ott a cím dönt.
+  const nevRe = new Map<string, string | null>();
+  const norm = (x: unknown) => String(x ?? '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase().replace(/[^a-z0-9]/g, '');
+
+  for (const f of forrasok) {
+    terkep.set(f.kulcs, { forras: f, tetelek: [] });
+    const k = kezelo((f as Forras & { cim?: string }).cim);
+    if (k) kezeloRe.set(k, f.kulcs);
+    const n = norm(f.intezmeny);
+    if (n) nevRe.set(n, nevRe.has(n) ? null : f.kulcs);   // null = többértelmű
+  }
+
+  const arvak: Record<string, unknown>[] = [];
+  for (const it of tetelek) {
+    let talalt: string | undefined;
+    for (const k of tetelKezeloi(it)) {
+      const kulcs = kezeloRe.get(k);
+      if (kulcs) { talalt = kulcs; break; }
+    }
+    if (!talalt) {
+      for (const jelolt of [it.pageName, it.name, it.intezmeny, ut(it, 'snapshot.pageName')]) {
+        const kulcs = nevRe.get(norm(jelolt));
+        if (kulcs) { talalt = kulcs; break; }
+      }
+    }
+    // Egyetlen forrás esetén nincs mit eltéveszteni: oda tesszük.
+    if (!talalt && forrasok.length === 1) talalt = forrasok[0].kulcs;
+    if (talalt) terkep.get(talalt)!.tetelek.push(it);
+    else arvak.push(it);
+  }
+  return { csoportok: [...terkep.values()], arvak };
+}

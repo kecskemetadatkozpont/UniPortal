@@ -121,6 +121,66 @@ ell('a mezőtérkép felülírja az aliasokat', k6.pillanatkep?.kovetok === 777,
 const k7 = kotegKeszit({ kulcs: 'ures', platform: 'instagram', intezmeny: 'X' }, []);
 ell('üres kimenet -> ures:true (ebből lesz riasztás)', k7.ures === true, k7);
 
+// ---- 7. TÖBB FORRÁS EGY FUTÁSBÓL ----
+const { csoportosit, kezelo } = await import('file://' + ki);
+console.log('\n== Szétosztás: egy futás, több profil ==');
+ell('a kezelőnév kijön a címből', kezelo('https://www.instagram.com/obudaiegyetem/') === 'obudaiegyetem');
+ell('a TikTok @ jele lekerül', kezelo('https://www.tiktok.com/@obudai.egyetem') === 'obudai.egyetem');
+ell('puszta domain -> nincs kezelőnév', kezelo('https://nje.hu') === null);
+
+const forrasok = [
+  { kulcs: 'obuda-instagram', platform: 'instagram', intezmeny: 'Óbudai Egyetem', cim: 'https://www.instagram.com/obudaiegyetem/' },
+  { kulcs: 'nje-instagram', platform: 'instagram', intezmeny: 'NJE', cim: 'https://www.instagram.com/uni_neumann/' },
+];
+const vegyes = [
+  { username: 'obudaiegyetem', followersCount: 9100, latestPosts: [] },
+  { username: 'uni_neumann', followersCount: 1900, latestPosts: [] },
+  { username: 'valaki_mas', followersCount: 50, latestPosts: [] },
+];
+const cs = csoportosit(forrasok, vegyes);
+ell('mindkét profil a saját forrásához került',
+  cs.csoportok[0].tetelek[0].username === 'obudaiegyetem' && cs.csoportok[1].tetelek[0].username === 'uni_neumann',
+  cs.csoportok.map(c => [c.forras.kulcs, c.tetelek.length]));
+ell('az ODA NEM ILLŐ tétel árva lett, nem tűnt el némán',
+  cs.arvak.length === 1 && cs.arvak[0].username === 'valaki_mas', cs.arvak);
+
+// TikTok: a kezelőnév az authorMeta-ban
+const ttF = [{ kulcs: 'obuda-tiktok', platform: 'tiktok', intezmeny: 'Óbudai Egyetem', cim: 'https://www.tiktok.com/@obudai.egyetem' }];
+const cs2 = csoportosit(ttF, [{ id: '1', authorMeta: { name: 'obudai.egyetem', fans: 15400 } }]);
+ell('a TikTok tétel a beágyazott névvel talál forrást', cs2.csoportok[0].tetelek.length === 1 && cs2.arvak.length === 0, cs2.arvak);
+
+// Hirdetéskönyvtár: a tétel a HIRDETŐ nevét hordozza, nem kezelőnevet
+const adsF = [
+  { kulcs: 'ads-obuda', platform: 'ads', intezmeny: 'Óbudai Egyetem', cim: null },
+  { kulcs: 'ads-nje',   platform: 'ads', intezmeny: 'Neumann János Egyetem', cim: null },
+];
+const csAds = csoportosit(adsF, [
+  { adArchiveID: '1', pageName: 'Óbudai Egyetem' },
+  { adArchiveID: '2', pageName: 'Neumann János Egyetem' },
+]);
+ell('a hirdetés a hirdető NEVE alapján talál forrást',
+  csAds.csoportok[0].tetelek.length === 1 && csAds.csoportok[1].tetelek.length === 1 && csAds.arvak.length === 0,
+  csAds.csoportok.map(c => [c.forras.kulcs, c.tetelek.length]));
+
+// Többértelmű név: Dunaújvárosnak KÉT Instagram-oldala van -> a cím dönt
+const dufF = [
+  { kulcs: 'duf-instagram', platform: 'instagram', intezmeny: 'Dunaújvárosi Egyetem', cim: 'https://www.instagram.com/dunaujvarosiegyetem/' },
+  { kulcs: 'duf-instagram-intl', platform: 'instagram', intezmeny: 'Dunaújvárosi Egyetem', cim: 'https://www.instagram.com/universityofdunaujvaros/' },
+];
+const csDuf = csoportosit(dufF, [
+  { username: 'universityofdunaujvaros', followersCount: 3000, latestPosts: [] },
+  { pageName: 'Dunaújvárosi Egyetem' },
+]);
+ell('a két azonos nevű oldalt a CÍM választja szét',
+  csDuf.csoportok[1].tetelek.length === 1 && csDuf.csoportok[0].tetelek.length === 0,
+  csDuf.csoportok.map(c => [c.forras.kulcs, c.tetelek.length]));
+ell('a többértelmű nevű tétel árva marad, nem kerül rossz helyre',
+  csDuf.arvak.length === 1, csDuf.arvak);
+
+// Egyetlen forrásnál nincs mit eltéveszteni
+const cs3 = csoportosit([forrasok[0]], [{ valami: 'ismeretlen alak' }]);
+ell('egyetlen forrásnál a tétel oda kerül', cs3.csoportok[0].tetelek.length === 1, cs3);
+
 rmSync(ki, { force: true });
 console.log('\nEREDMÉNY: ' + (hibak ? hibak + ' hiba' : 'minden rendben'));
 process.exit(hibak ? 1 : 0);

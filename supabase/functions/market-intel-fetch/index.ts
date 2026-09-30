@@ -38,7 +38,7 @@
 //          a hívót a MI_WEBHOOK_SECRET azonosítja)
 // ============================================================
 import { createClient } from 'jsr:@supabase/supabase-js@2';
-import { kotegKeszit } from './terkep.ts';
+import { kotegKeszit, csoportosit } from './terkep.ts';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -113,9 +113,17 @@ Deno.serve(async (req) => {
     return json({ ok: true, mod: 'kesz-koteg', eredmeny: data });
   }
 
-  // 1. eset: Apify webhook.
+  // 1. eset: Apify webhook. Kétféleképp címezhető:
+  //   ?forras=obuda-instagram   — EGY forrás (egy profil egy futásban)
+  //   ?platform=instagram       — a platform MINDEN aktív forrása egy futásból;
+  //                               a tételeket a kezelőnevük alapján osztjuk szét.
+  // A második azért van, mert forrásonként külön futással 13 Apify-feladatot
+  // és 13 ütemezést kellene kézzel karbantartani.
   const forrasKulcs = String(torzs.forras ?? u.searchParams.get('forras') ?? '');
-  if (!forrasKulcs) return json({ error: 'hiányzik a forrás kulcsa (?forras=...)' }, 400);
+  const platform = String(u.searchParams.get('platform') ?? torzs.platform ?? '');
+  if (!forrasKulcs && !platform) {
+    return json({ error: 'hiányzik a cím: ?forras=<kulcs> vagy ?platform=<instagram|tiktok|facebook|ads|web|trends>' }, 400);
+  }
 
   const resource = (torzs.resource ?? {}) as Record<string, unknown>;
   const datasetId = String(resource.defaultDatasetId ?? torzs.datasetId ?? u.searchParams.get('dataset') ?? '');
@@ -123,19 +131,48 @@ Deno.serve(async (req) => {
 
   const { data: terv, error: tervHiba } = await sb.rpc('mi_ingest_plan');
   if (tervHiba) return json({ error: tervHiba.message }, 500);
-  const forras = (terv as Record<string, string>[] ?? []).find(x => x.kulcs === forrasKulcs);
-  if (!forras) return json({ error: `ismeretlen forrás: ${forrasKulcs}` }, 400);
+  const mind = (terv as Record<string, string>[]) ?? [];
+
+  const celok = forrasKulcs
+    ? mind.filter(x => x.kulcs === forrasKulcs)
+    : mind.filter(x => x.platform === platform);
+  if (celok.length === 0) {
+    return json({ error: forrasKulcs ? `ismeretlen forrás: ${forrasKulcs}` : `nincs aktív forrás erre: ${platform}` }, 400);
+  }
 
   try {
     const tetelek = await apifyTetelek(datasetId);
-    const koteg = kotegKeszit(forras as never, tetelek);
-    const { data, error } = await sb.rpc('mi_ingest', { p: koteg });
-    if (error) return json({ error: error.message, koteg }, 400);
+    const { csoportok, arvak } = csoportosit(celok as never, tetelek);
+
+    const eredmeny: Record<string, unknown>[] = [];
+    for (const cs of csoportok) {
+      // Amelyik forráshoz semmi nem jött, az ÜRES futást kap: így két nap
+      // után riasztás lesz belőle, nem néma nulla a grafikonon.
+      const koteg = kotegKeszit(cs.forras, cs.tetelek);
+      const { data, error } = await sb.rpc('mi_ingest', { p: koteg });
+      eredmeny.push({ forras: cs.forras.kulcs, tetel: cs.tetelek.length,
+                      ok: !error, hiba: error ? error.message : undefined,
+                      betoltve: data });
+    }
     await sb.rpc('mi_detect_alerts');
-    return json({ ok: true, mod: 'apify', tetel: tetelek.length, eredmeny: data });
+
+    // Az árva tételeket KIMONDJUK: egy elgépelt cím így azonnal látszik,
+    // nem három hét múlva egy üres oszlopból.
+    return json({
+      ok: eredmeny.every(x => x.ok), mod: 'apify', tetel: tetelek.length,
+      forrasok: eredmeny,
+      arva: arvak.length,
+      arva_minta: arvak.slice(0, 3).map(x => ({
+        username: (x as Record<string, unknown>).username ?? null,
+        url: (x as Record<string, unknown>).url ?? null,
+      })),
+    });
   } catch (e) {
-    // A hibát a mi_ingest naplózza, ha odáig eljutottunk; ez a fetch-hiba ága.
-    await sb.rpc('mi_ingest', { p: { forras: forrasKulcs, ures: true } }).catch(() => {});
+    // Ez a fetch-hiba ága: a gyűjtő nem ért el hozzánk adatot. Minden célzott
+    // forrást üres futással jelölünk, hogy a némaság látszódjon.
+    for (const cs of celok) {
+      await sb.rpc('mi_ingest', { p: { forras: cs.kulcs, ures: true } }).catch(() => {});
+    }
     return json({ error: String((e as Error).message ?? e) }, 502);
   }
 });

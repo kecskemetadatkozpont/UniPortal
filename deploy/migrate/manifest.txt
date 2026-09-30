@@ -125,3 +125,4 @@
 112_market_intel.sql
 113_market_intel_datum.sql
 114_market_intel_seed.sql
+115_market_intel_ads.sql
