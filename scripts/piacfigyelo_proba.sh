@@ -31,11 +31,45 @@ set -euo pipefail
 PROJEKT="${MI_PROJEKT:-mdccyastwhzwtyukxlpk}"
 URL="https://${PROJEKT}.supabase.co/functions/v1/market-intel-fetch"
 FORRAS="${1:-teszt-forras}"
+[ "${FORRAS}" = "--ellenoriz" ] && FORRAS="teszt-forras"
 
 if [ -z "${MI_SECRET:-}" ]; then
   echo "HIÁNYZIK a MI_SECRET. Így futtasd:" >&2
   echo "  MI_SECRET='<a Supabase-be felvett MI_WEBHOOK_SECRET>' $0" >&2
   exit 1
+fi
+
+# A titok végéről levágjuk a sortörést és a szóközt: bemásoláskor odaragad,
+# és a szigorú összehasonlítás miatt 403-at kapnánk minden magyarázat nélkül.
+MI_SECRET="$(printf '%s' "${MI_SECRET}" | tr -d '[:space:]')"
+
+# ELLENŐRZŐ MÓD: megmondja, hogy a nálad lévő titok EGYEZIK-E a Supabase-ben
+# tárolttal — anélkül, hogy bármelyiket kiírná. A `supabase secrets list` a
+# titkok SHA-256 lenyomatát adja vissza, nem az értéküket; ezt hasonlítjuk.
+if [ "${1:-}" = "--ellenoriz" ]; then
+  SAJAT=$(printf '%s' "${MI_SECRET}" | shasum -a 256 | cut -d' ' -f1)
+  TAROLT=$(supabase secrets list --output json 2>/dev/null \
+    | python3 -c 'import sys,json
+# A CLI hol listát, hol {"secrets":[...]} objektumot ad — mindkettőt kezeljük.
+try: v=json.load(sys.stdin)
+except Exception: v=[]
+sorok = v if isinstance(v, list) else (v.get("secrets") or [])
+for s in sorok:
+    if isinstance(s, dict) and s.get("name") == "MI_WEBHOOK_SECRET":
+        print(s.get("value","")); break')
+  if [ -z "${TAROLT}" ]; then
+    echo "Nem sikerült lekérni a tárolt lenyomatot (be vagy lépve a supabase CLI-be?)."
+    exit 1
+  fi
+  if [ "${SAJAT}" = "${TAROLT}" ]; then
+    echo "EGYEZIK — a nálad lévő titok ugyanaz, mint a Supabase-ben tárolt."
+  else
+    echo "NEM EGYEZIK — a nálad lévő titok más, mint a Supabase-ben tárolt."
+    echo "  (a titok hossza nálad: ${#MI_SECRET} karakter)"
+    echo "  Vedd fel újra a titkot a felületen, és ugyanazt használd itt is:"
+    echo "  https://supabase.com/dashboard/project/${PROJEKT}/functions/secrets"
+  fi
+  exit 0
 fi
 
 MA=$(date +%F)

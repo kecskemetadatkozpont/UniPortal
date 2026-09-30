@@ -218,8 +218,18 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
 
   const u = new URL(req.url);
-  const titok = req.headers.get('x-mi-secret') ?? u.searchParams.get('kulcs') ?? '';
-  if (!WEBHOOK_SECRET || titok !== WEBHOOK_SECRET) {
+  // A titkot kézzel másolják be a Supabase felületén és a webhook URL-jébe.
+  // Egy odaragadt sortörés vagy szóköz miatt a szigorú egyenlőség 403-at ad,
+  // és a hiba semmit nem árul el arról, hogy MIÉRT — ezért mindkét oldalt
+  // levágjuk. A titok így sem lesz gyengébb, csak a gépelés bocsánatosabb.
+  const titok = (req.headers.get('x-mi-secret') ?? u.searchParams.get('kulcs') ?? '').trim();
+  const vart = WEBHOOK_SECRET.trim();
+  if (!vart || titok !== vart) {
+    // A válasz szándékosan szűkszavú kívülről, de a naplóban látszik, melyik
+    // eset állt elő — enélkül a hibakeresés találgatás.
+    console.log(vart
+      ? `market-intel: rossz titok (kapott ${titok.length}, várt ${vart.length} karakter)`
+      : 'market-intel: NINCS beállítva MI_WEBHOOK_SECRET');
     return json({ error: 'forbidden' }, 403);
   }
   if (!SUPABASE_URL || !SERVICE_KEY) return json({ error: 'nincs service kulcs' }, 500);
