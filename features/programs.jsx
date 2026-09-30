@@ -1052,7 +1052,7 @@ function ProgramApply({ program, programs, app, user, onExit, onSaved, notice, b
               await persist({ student_step: lepes });
               if (!window.sb) return;
               const { error } = await window.sb.rpc('application_submit', { p_id: cur.id });
-              if (error) { alert(error.message || 'A beadás nem sikerült. Próbáld újra.'); return; }
+              if (error) { NY_alert(error.message || 'A beadás nem sikerült. Próbáld újra.'); return; }
               setCur(c => ({ ...c, status: 'submitted' }));
               onSaved && onSaved({ ...cur, status: 'submitted' });
             }} /> : <PROG_IrodaiLepes lepes={rail[lepes]} cur={cur} data={data} program={virt} />}
@@ -1387,7 +1387,7 @@ function PROG_StepBody({ stepKey, program, data, setData, mentData, user, cur, o
       <div className="space-y-4">
         <PROG_Head icon={Lucide.PenLine} title="Motivációs levél" sub="Miért ezt a képzést választod? Legalább ~40 karakter (egy rövid bekezdés ideális)." />
         <textarea className={U_input + ' min-h-[220px] resize-y'} value={val} onChange={e => setData({ motivation: e.target.value })} placeholder="Tisztelt Felvételi Bizottság! …" />
-        <div className="text-[11px] font-bold text-slate-400">{val.trim().length + ' karakter'}</div>
+        <div className="text-[11px] font-bold text-slate-400"><span>{val.trim().length}</span>{' '}<span>karakter</span></div>
       </div>
     );
   }
@@ -1484,7 +1484,11 @@ function PROG_StepBody({ stepKey, program, data, setData, mentData, user, cur, o
         {submitted ? (
           <div className="p-6 rounded-2xl bg-emerald-50 border border-emerald-100 text-center">
             <div className="w-14 h-14 rounded-2xl bg-emerald-500 text-white flex items-center justify-center mx-auto mb-3"><Lucide.CheckCircle2 size={28} /></div>
-            <div className="font-black text-emerald-800 text-lg">Köszönjük, {(data.personal && data.personal.name || '').split(' ')[0] || 'jelentkező'}!</div>
+            {/* A NÉV ADAT, a köszönés felirat — külön csomópontban, különben
+                angol módban a „Köszönjük," magyar marad. */}
+            <div className="font-black text-emerald-800 text-lg">
+              <span>Köszönjük,</span> <span data-echo-noi18n>{(data.personal && data.personal.name || '').split(' ')[0] || 'jelentkező'}</span><span>!</span>
+            </div>
             <p className="text-sm text-slate-500 mt-1 max-w-sm mx-auto">Megkaptuk a jelentkezésedet a(z) <b>{program.name}</b> képzésre. A következő lépésekről e-mailben és a Hírfolyamban értesítünk.</p>
             {utana.length > 0 && (
               <div className="mt-4 pt-4 border-t border-emerald-100 text-left">
@@ -1773,9 +1777,15 @@ function PROG_MathStep({ data, setData }) {
       <PROG_Head icon={Lucide.Calculator} title="Matematika szintfelmérő" sub="Három rövid feladat. A megfeleléshez legalább 2 helyes válasz kell." />
       <div className={'flex items-center gap-2 px-4 py-2.5 rounded-2xl text-[12px] font-bold ' + (kimerult ? 'bg-red-50 text-red-600' : 'bg-slate-50 text-slate-500')} data-matek-kiserlet={String(bekuldesek)}>
         <Lucide.Info size={14} className="flex-none" />
-        {kimerult
-          ? `Elhasználtad mind a ${PROG_MATH_MAX_BEKULDES} beküldési lehetőséget — új feladatsor már nem generálható. Az eredményt a felvételi iroda értékeli.`
-          : `${bekuldesek}/${PROG_MATH_MAX_BEKULDES} beküldés felhasználva — még ${maradt} próbálkozásod van.`}
+        {/* A SZÁMOK MIATT ez sem illeszkedhet a szótárra: a mondatot eleve a
+            felület nyelvén írjuk meg (ugyanúgy, mint a feladatszöveget). */}
+        {PROG_angol()
+          ? (kimerult
+              ? `You have used all ${PROG_MATH_MAX_BEKULDES} submissions — no new task set can be generated. The admissions office will evaluate your result.`
+              : `${bekuldesek}/${PROG_MATH_MAX_BEKULDES} submissions used — you have ${maradt} attempt(s) left.`)
+          : (kimerult
+              ? `Elhasználtad mind a ${PROG_MATH_MAX_BEKULDES} beküldési lehetőséget — új feladatsor már nem generálható. Az eredményt a felvételi iroda értékeli.`
+              : `${bekuldesek}/${PROG_MATH_MAX_BEKULDES} beküldés felhasználva — még ${maradt} próbálkozásod van.`)}
       </div>
       <div className="space-y-4">
         {tasks.map((t, i) => (
@@ -2243,7 +2253,7 @@ function PROG_Applicants({ programs, apps, onChange }) {
       const { error } = await window.sb.rpc('application_submit', { p_id: a.id });
       if (error) {
         // A szerver magyar mondata a legjobb üzenet — ha van, azt mutatjuk.
-        alert(error.message || error.details || 'A beadás nem sikerült. Próbáld újra.');
+        NY_alert(error.message || error.details || 'A beadás nem sikerült. Próbáld újra.');
         return;
       }
     } else {
@@ -2325,11 +2335,11 @@ const ProgramsView = ({ user, scope = 'programs', embedded = false }) => {
     const kerdes = 'Biztosan visszavonod ezt a jelentkezést?'
       + (nev ? '\n\n' + nev : '')
       + '\n\nA felvételi iroda látni fogja, hogy megszakítottad. A feltöltött dokumentumaid megmaradnak, és később új jelentkezést indíthatsz.';
-    if (typeof window !== 'undefined' && window.confirm && !window.confirm(kerdes)) return;
+    if (typeof window !== 'undefined' && window.confirm && !window.confirm(NY_t(kerdes))) return;
     const ujData = { ...(app.data || {}), _cancelled: true, _cancelledAt: todayStr(), _cancelledBy: 'hallgato' };
     const saved = await dlUpdate(APP_TABLE, app.id, { data: ujData, updated_at: new Date().toISOString() }, APP_LS);
     if (!saved) {
-      alert('A visszavonás nem sikerült. Töltsd újra az oldalt, és ha így sem megy, írj a felvételi irodának.');
+      NY_alert('A visszavonás nem sikerült. Töltsd újra az oldalt, és ha így sem megy, írj a felvételi irodának.');
       return;
     }
     if (applying && applying.app && applying.app.id === app.id) setApplying(null);

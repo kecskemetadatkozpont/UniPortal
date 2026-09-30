@@ -8056,6 +8056,33 @@ function DocViewer({ entry, fileName }) {
     : <img src={src} alt={fileName || ''} className="max-h-[60vh] mx-auto rounded-xl border border-slate-200" />;
 }
 
+/* ============ ÜZENET A FELÜLET NYELVÉN ============
+   A nyelvváltó a KIRAJZOLT szövegcsomópontokat fordítja (setupI18n). Ami a
+   JS-ben áll össze és nem a DOM-ban jelenik meg — alert(), felugró hiba,
+   szerverről jött üzenet —, azon a fordító nem tud átmenni.
+
+   Ez a segéd ugyanabból a szótárból dolgozik: pontos egyezés, majd a
+   kifejezés-minták. Magyar felületen érintetlenül adja vissza a szöveget.
+   A HU_EN a fájl végén áll, de ez a függvény csak FUTÁSIDŐBEN olvassa —
+   addigra megvan. */
+function NY_angol() { try { return (localStorage.getItem('nje_lang') || 'hu') === 'en'; } catch (e) { return false; } }
+function NY_t(szoveg) {
+  const sz = String(szoveg == null ? '' : szoveg);
+  if (!sz || !NY_angol()) return sz;
+  try {
+    const trim = sz.trim();
+    if (typeof HU_EN !== 'undefined' && HU_EN[trim]) return sz.replace(trim, HU_EN[trim]);
+    if (typeof HU_EN_PHRASES !== 'undefined') {
+      let ki = sz, valtozott = false;
+      for (const [re, rep] of HU_EN_PHRASES) { const uj = ki.replace(re, rep); if (uj !== ki) { ki = uj; valtozott = true; } }
+      if (valtozott) return ki;
+    }
+  } catch (e) {}
+  return sz;
+}
+/* Figyelmeztető ablak a felület nyelvén. */
+function NY_alert(szoveg) { try { window.alert(NY_t(szoveg)); } catch (e) {} }
+
 /* ============ DOKUMENTUM-OLVASÓ — oldalról nyíló ablak ============
    AZ ÜGYINTÉZŐ EDDIG NEM TUDTA ELOLVASNI, AMIT ELLENŐRIZNIE KELL. Az előnézet
    egy max-w-lg (512 px) ablakban jelent meg, fix 1,4-es nagyítással, legfeljebb
@@ -13667,7 +13694,33 @@ Object.assign(HU_EN, {
      angol módban magyarul maradtak. */
   'jelentkezés':'application','kötelező dokumentum feltöltve':'required documents uploaded',
   // Ügynökségi visszajelzés (2026-09-30)
+  /* AZ ADATBÁZIS HIBAÜZENETEI. Ezeket a szerver magyarul küldi, és a felület
+     változatlanul írja ki — angol módban idegen szövegként. A leggyakoribb,
+     JELENTKEZŐT és INTERJÚZTATÓT érintő mondatok itt fordulnak. (2026-09-30) */
+  'Az interjú-időpont a dokumentumok ellenőrzése után foglalható.':'An interview slot can be booked once your documents have been checked.',
+  'Csak a saját felvételi folyamatodhoz foglalhatsz interjút.':'You can only book an interview for your own application.',
+  'Erről a jelentkezésről már döntés született — interjú-időpont nem foglalható.':'A decision has already been made on this application \u2014 an interview slot cannot be booked.',
+  'Ez a felvételi folyamat meg lett szakítva.':'This application has been cancelled.',
+  'A jelentkező megszakította ezt a felvételi folyamatot.':'The applicant has cancelled this application.',
+  'Ez az interjú-időpont már nem él.':'This interview slot is no longer available.',
+  'Ez az időpont-javaslat már nem él.':'This proposed slot is no longer available.',
+  'Erre az időpont-javaslatra nem válaszolhatsz.':'You cannot respond to this proposed slot.',
+  'Ezt az interjút nem mondhatod le.':'You cannot cancel this interview.',
+  'Már van élő interjú-foglalásod a Hallgatói portál Interjúk fülén. Előbb azt mondd le.':'You already have an active interview booking on the Interviews tab of the Student portal. Please cancel that one first.',
+  'Jóváhagyásra váró fiókkal nem lehet interjút foglalni.':'An account awaiting approval cannot book an interview.',
+  'Ehhez a felvételi folyamathoz nincs hozzáférésed.':'You do not have access to this application.',
+  'Nincs ilyen interjú-időpont.':'There is no such interview slot.',
+  'Nincs jogosultság ennek a naptárnak a megtekintéséhez.':'You are not allowed to view this calendar.',
+  'Az interjút csak a felvételi iroda munkatársa vagy az interjúztató helyezheti át.':'Only an admissions officer or the interviewer can move this interview.',
+  'Másik interjúztatóhoz csak a felvételi iroda munkatársa teheti át az interjút.':'Only an admissions officer can move the interview to another interviewer.',
+  'Interjút jelentkezőhöz csak a felvételi iroda munkatársa rendelhet.':'Only an admissions officer can assign an interview to an applicant.',
+  'Csak élő (foglalt vagy javasolt) interjú helyezhető át.':'Only an active (booked or proposed) interview can be moved.',
+  'Hiányzó időpont.':'Missing time.','Hiányzó interjúztató vagy időpont.':'Missing interviewer or time.',
+  'Hiányzó jelentkező, interjúztató vagy időpont.':'Missing applicant, interviewer or time.',
   'Mentés és frissítés…':'Saving and refreshing…',
+  'Köszönjük,':'Thank you,','karakter':'characters','Új feladatsor':'New task set',
+  'A beadás nem sikerült. Próbáld újra.':'Submission failed. Please try again.',
+  'A visszavonás nem sikerült. Töltsd újra az oldalt, és ha így sem megy, írj a felvételi irodának.':'The withdrawal failed. Reload the page, and if it still does not work, write to the admissions office.',
   // Interjúztató-csere (111, 2026-09-30)
   'Időpont vagy interjúztató módosítása':'Change the time or the interviewer',
   'Az interjúztató megváltozik. Értesítést kap róla a jelentkező, a korábbi és az új interjúztató is.':'The interviewer will change. The applicant, the previous and the new interviewer will all be notified.',
