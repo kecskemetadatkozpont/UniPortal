@@ -50,8 +50,16 @@ const json = (body: unknown, status = 200) =>
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
   ?? Deno.env.get('SUPABASE_SECRET_KEY') ?? '';
-const APIFY_TOKEN = Deno.env.get('APIFY_TOKEN') ?? '';
-const WEBHOOK_SECRET = Deno.env.get('MI_WEBHOOK_SECRET') ?? '';
+// A titok nevét kézzel veszik fel a felületen, és a Deno env KIS-NAGYBETŰ-
+// ÉRZÉKENY: az 'APIFY_Token' néven felvett titkot az 'APIFY_TOKEN' olvasás
+// csendben undefined-ként kapná, és a betöltés „hiányzik a token" hibával
+// állna meg. Ezért több írásmódot is elfogadunk — élesben pont ez történt.
+const APIFY_TOKEN = Deno.env.get('APIFY_TOKEN')
+  ?? Deno.env.get('APIFY_Token')
+  ?? Deno.env.get('APIFY_API_TOKEN')
+  ?? Deno.env.get('apify_token') ?? '';
+const WEBHOOK_SECRET = Deno.env.get('MI_WEBHOOK_SECRET')
+  ?? Deno.env.get('MI_Webhook_Secret') ?? '';
 
 // ---- mezőnév-aliasok. Csak akkor játszanak, ha nincs mezo_terkep. ----
 const ALIAS: Record<string, string[]> = {
