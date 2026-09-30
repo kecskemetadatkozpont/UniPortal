@@ -118,8 +118,27 @@ function MI_Doboz({ cim, alcim, jobb, children }) {
 /* ---- Források: a gyűjtés listája. A betöltő EBBŐL dolgozik. ---- */
 function MI_Forrasok({ sorok, onMent, onTorol, busy }) {
   const [szerk, setSzerk] = React.useState(null);   // null | {} | sor
-  const ures = { kulcs: '', intezmeny: '', platform: 'instagram', kor: 'szuk', cim: '', orszag: '', sajat: false, aktiv: true, megjegyzes: '' };
+  const ures = { kulcs: '', intezmeny: '', platform: 'instagram', kor: 'szuk', cim: '', orszag: '', sajat: false, aktiv: true, megjegyzes: '', mezo_terkep: {} };
   const mezo = (k, v) => setSzerk(s => ({ ...s, [k]: v }));
+  // A mezőtérkép JSON. Szövegként szerkesztjük, mert a gyűjtő mezőnevei
+  // Actoronként mások — és a hibás JSON-t KIMONDJUK, nem csendben eldobjuk.
+  const [terkepSzoveg, setTerkepSzoveg] = React.useState('');
+  const [terkepHiba, setTerkepHiba] = React.useState('');
+  React.useEffect(() => {
+    if (!szerk) return;
+    const t = szerk.mezo_terkep;
+    setTerkepSzoveg(t && Object.keys(t).length ? JSON.stringify(t, null, 2) : '');
+    setTerkepHiba('');
+  }, [szerk && szerk.kulcs, szerk && szerk.id]);
+  const terkepOlvas = () => {
+    const sz = (terkepSzoveg || '').trim();
+    if (!sz) return {};
+    try {
+      const j = JSON.parse(sz);
+      if (!j || typeof j !== 'object' || Array.isArray(j)) throw new Error('nem objektum');
+      return j;
+    } catch (e) { return null; }
+  };
 
   return (
     <MI_Doboz cim="Amit figyelünk" alcim="Egy sor = egy intézmény egy csatornája. A kulcs stabil azonosító: ezzel hivatkozik rá a betöltő."
@@ -211,10 +230,23 @@ function MI_Forrasok({ sorok, onMent, onTorol, busy }) {
                 </label>
               </div>
             </div>
+            <UField label="Mezőtérkép (nem kötelező)"
+              hint="Melyik gyűjtő-mező melyik a miénk. Példa: {&quot;kovetok&quot;: &quot;followersCount&quot;, &quot;bevonas&quot;: &quot;likesCount&quot;}. Üresen hagyva a betöltő a szokásos mezőneveket próbálja.">
+              <textarea className={U_input + ' font-mono text-xs h-24'} data-mi-terkep="1"
+                value={terkepSzoveg} onChange={e => { setTerkepSzoveg(e.target.value); setTerkepHiba(''); }}
+                placeholder={'{\n  "kovetok": "followersCount"\n}'} />
+            </UField>
+            {terkepHiba && <p className="text-xs font-bold text-red-600" data-mi-terkep-hiba="1">{terkepHiba}</p>}
+
             <div className="flex justify-end gap-2 pt-2">
               <button onClick={() => setSzerk(null)} className="px-5 py-3 rounded-xl font-bold text-sm text-slate-500 hover:bg-slate-50">Mégse</button>
               <button disabled={busy} data-mi-forras-ment="1" className={U_btnPrimary + ' disabled:opacity-50'}
-                onClick={async () => { const ok = await onMent(szerk); if (ok) setSzerk(null); }}>
+                onClick={async () => {
+                  const t = terkepOlvas();
+                  if (t === null) { setTerkepHiba(NY_t('A mezőtérkép nem érvényes JSON — javítsd, vagy hagyd üresen.')); return; }
+                  const ok = await onMent({ ...szerk, mezo_terkep: t });
+                  if (ok) setSzerk(null);
+                }}>
                 {busy ? 'Mentés…' : 'Mentés'}
               </button>
             </div>

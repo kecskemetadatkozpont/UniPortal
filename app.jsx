@@ -14098,6 +14098,8 @@ Object.assign(HU_EN, {
   'Kulcs':'Key','Kisbetű, kötőjel — például obuda-instagram':'Lowercase and hyphens — for example obuda-instagram',
   'Cím':'Address','Az oldal vagy a figyelt aloldal teljes címe.':'The full address of the page or the tracked subpage.',
   'Csak keresleti indexnél kell.':'Only needed for the demand index.','A mi csatornánk':'Our own channel','Aktív':'Active',
+  'Mezőtérkép (nem kötelező)':'Field map (optional)',
+  'A mezőtérkép nem érvényes JSON — javítsd, vagy hagyd üresen.':'The field map is not valid JSON — fix it or leave it empty.',
   'Utolsó adat':'Last data','még nincs':'none yet','saját':'ours','szünetel':'paused','mi':'us',
   'Weboldal':'Website','Hirdetéskönyvtár':'Ad library','Keresleti index':'Demand index',
   'A piacfigyelő adatbázisa még nincs telepítve':'The market radar database is not installed yet',
