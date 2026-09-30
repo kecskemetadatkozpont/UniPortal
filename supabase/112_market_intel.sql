@@ -63,6 +63,22 @@ as $$
   false)
 $$;
 
+-- Az admission_processes.created_at SZÖVEG (04_admission_processes.sql), nem
+-- időbélyeg: a demó fázisban így készült, és azóta is így hordozza az adatot.
+-- Dátumként összehasonlítani csak átalakítás után lehet — enélkül a lekérdezés
+-- „operator does not exist: text >= date" hibával áll meg. Ami nem értelmezhető
+-- dátum, az null lesz: egyetlen rossz sor nem döntheti el az egész képernyőt.
+create or replace function mi.ts(p text)
+returns timestamptz
+language plpgsql immutable
+as $$
+begin
+  if p is null or p = '' then return null; end if;
+  return p::timestamptz;
+exception when others then
+  return null;
+end $$;
+
 create or replace function mi.require_perm()
 returns void
 language plpgsql stable security definer
@@ -397,7 +413,7 @@ begin
            and (p_orszag is null or p_orszag = any (a.orszagok))),
       'jelentkezes', (
         select count(*) from public.admission_processes ap
-         where ap.created_at >= v_tol
+         where mi.ts(ap.created_at) >= v_tol
            and (p_orszag is null
                 or lower(coalesce(ap.data->'personal'->>'country','')) = lower(p_orszag)))
     ),
@@ -415,7 +431,8 @@ begin
                         where a.elso_latas >= h::date and a.elso_latas < (h + interval '7 day')::date
                           and (p_orszag is null or p_orszag = any (a.orszagok))),
           'jelentkezes', (select count(*) from public.admission_processes ap
-                           where ap.created_at >= h and ap.created_at < h + interval '7 day'
+                           where mi.ts(ap.created_at) >= h
+                             and mi.ts(ap.created_at) < h + interval '7 day'
                              and (p_orszag is null
                                   or lower(coalesce(ap.data->'personal'->>'country','')) = lower(p_orszag)))
         ) r
@@ -481,7 +498,7 @@ begin
           'celzas', (select count(*) from mi.ad a where o.orszag = any (a.orszagok)
                        and a.utolso_latas >= v_tol),
           'jelentkezes', (select count(*) from public.admission_processes ap
-                           where ap.created_at >= v_tol
+                           where mi.ts(ap.created_at) >= v_tol
                              and lower(coalesce(ap.data->'personal'->>'country','')) = lower(o.orszag))
         ) r
         from (
@@ -491,7 +508,8 @@ begin
           union
           select distinct ap.data->'personal'->>'country'
             from public.admission_processes ap
-           where ap.created_at >= v_tol and coalesce(ap.data->'personal'->>'country','') <> ''
+           where mi.ts(ap.created_at) >= v_tol
+             and coalesce(ap.data->'personal'->>'country','') <> ''
         ) o(orszag)
         where o.orszag is not null and o.orszag <> ''
       ) t),
@@ -805,7 +823,7 @@ declare
   has_auth boolean := exists (select 1 from pg_roles where rolname = 'authenticated');
   has_srv  boolean := exists (select 1 from pg_roles where rolname = 'service_role');
 begin
-  foreach f in array array['mi.has_perm(text)', 'mi.require_perm()'] loop
+  foreach f in array array['mi.has_perm(text)', 'mi.require_perm()', 'mi.ts(text)'] loop
     execute format('revoke all on function %s from public', f);
     if has_anon then execute format('revoke all on function %s from anon', f); end if;
     if has_auth then execute format('revoke all on function %s from authenticated', f); end if;
