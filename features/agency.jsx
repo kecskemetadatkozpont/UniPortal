@@ -1097,6 +1097,7 @@ const AgencyDocuments = ({ user, agencies, myAgencyId }) => {
   const [open, setOpen]         = useState(false);
   const [form, setForm]         = useState({ kind: 'contract', title: '', validFrom: '', validUntil: '', note: '' });
   const [file, setFile]         = useState(null);
+  const [elonezet, setElonezet] = useState(null);   // oldalról nyíló olvasó
 
   const target = isAgent ? (myAgencyId || '') : agencyId;
 
@@ -1115,6 +1116,10 @@ const AgencyDocuments = ({ user, agencies, myAgencyId }) => {
     if (!target)             { setError('Válasszon ügynökséget.'); return; }
     if (!form.title.trim())  { setError('A megnevezés kötelező.'); return; }
     if (!file)               { setError('Válasszon fájlt.'); return; }
+    /* CSAK MEGJELENÍTHETŐ FORMÁTUM — ugyanaz a lista, mint a jelentkezői
+       feltöltésnél. Eddig bármi feltölthető volt, és az előnézet néma maradt
+       rajta (tesztmérnöki jegyzőkönyv, 2026-09-30). */
+    if (typeof DOC_tipusOk === 'function' && !DOC_tipusOk(file)) { setError(DOC_tipusHiba(file)); return; }
     setBusy(true); setError('');
     try {
       const path = await AGENCY_upload(file, user.id, target);
@@ -1233,8 +1238,12 @@ const AgencyDocuments = ({ user, agencies, myAgencyId }) => {
           </div>
           <div>
             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 block">Fájl (max. 20 MB)</label>
+            <p className="text-[11px] font-semibold text-slate-400 mb-1.5">
+              {typeof DOC_ENGEDETT_SZOVEG !== 'undefined' ? 'Elfogadott formátum: ' + DOC_ENGEDETT_SZOVEG + '.' : ''}
+            </p>
             <input
               type="file"
+              accept={typeof DOC_ACCEPT !== 'undefined' ? DOC_ACCEPT : undefined}
               onChange={e => setFile(e.target.files && e.target.files[0])}
               className="w-full text-sm text-slate-600 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-slate-900 file:text-white hover:file:bg-slate-800"
             />
@@ -1286,6 +1295,16 @@ const AgencyDocuments = ({ user, agencies, myAgencyId }) => {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
+                  {/* MEGTEKINTÉS letöltés nélkül (tesztmérnöki kérés, 2026-09-30):
+                      ugyanaz az oldalról nyíló olvasó, mint a jelentkezői
+                      dokumentumoknál — nagyítás, keresés, Word és kép is. */}
+                  {d.path && typeof DocReader === 'function' && (
+                    <button onClick={() => setElonezet({ entry: { path: d.path, type: '' }, fileName: d.file_name || d.title, label: d.title })}
+                      data-agency-elonezet={d.id} title="Megtekintés"
+                      className="p-2.5 rounded-xl text-slate-400 hover:text-primary hover:bg-slate-50 transition-colors">
+                      <ICONS.Eye size={16} />
+                    </button>
+                  )}
                   <AgencyDocLink path={d.path} label="Letöltés" />
                   <button
                     disabled={busy}
@@ -1301,6 +1320,10 @@ const AgencyDocuments = ({ user, agencies, myAgencyId }) => {
           </div>
         )}
       </div>
+      {elonezet && typeof DocReader === 'function' && (
+        <DocReader entry={elonezet.entry} fileName={elonezet.fileName} label={elonezet.label}
+          Icon={ICONS.FileText} onClose={() => setElonezet(null)} />
+      )}
     </div>
   );
 };

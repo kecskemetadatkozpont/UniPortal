@@ -26,6 +26,10 @@ const AGN_hibaSzoveg = (e) => {
   if (/EMAIL_INVALID/.test(m)) return 'Érvényes e-mail-cím kell a jelentkezőhöz.';
   if (/NAME_REQUIRED/.test(m)) return 'A jelentkező neve kötelező.';
   if (/STAFF_ONLY/.test(m)) return 'Üzenetet csak ügyintéző küldhet az ügynökségeknek.';
+  /* A 110-es migráció szigorúbb hibái: a tesztelésen kiderült, hogy ezek
+     nélkül a felület szó nélkül továbblépett egy másik ügynökség sorára. */
+  if (/EMAIL_TAKEN_BY_OTHER_AGENCY/.test(m)) return 'Erre az e-mail-címre már van jelentkezés, amelyet egy másik ügynökség indított. Egyeztess a felvételi irodával.';
+  if (/EMAIL_NOT_ASCII/.test(m)) return 'Az e-mail-cím nem tartalmazhat ékezetes betűt — ellenőrizd az elgépelést.';
   if (AGN_HIANYZIK.test(m)) return 'Az ügynökségi modul adatbázis-része még nincs telepítve (108_agency_portal.sql).';
   if (/row-level security|permission denied|42501/i.test(m)) return 'Ehhez nincs jogosultságod.';
   return m || 'Ismeretlen hiba.';
@@ -81,6 +85,23 @@ const AGN_api = {
     if (error) throw error;
   },
 };
+
+/* Marketinganyag feltöltése a documents tárolóba, a 'marketing/' előtag alá.
+   A típusokat ugyanaz a lista korlátozza, mint a jelentkezői feltöltésnél. */
+async function AGN_marketingUpload(file, ownerId) {
+  if (!window.sb) throw new Error('Nincs adatbázis-kapcsolat.');
+  if (!ownerId) throw new Error('Ismeretlen feltöltő — jelentkezz be újra.');
+  if (typeof DOC_tipusOk === 'function' && !DOC_tipusOk(file)) throw new Error(DOC_tipusHiba(file));
+  if (file.size > 20 * 1024 * 1024) throw new Error('A fájl nagyobb 20 MB-nál.');
+  const safe = (typeof DOC_safeName === 'function') ? DOC_safeName(file.name)
+    : String(file.name || 'file').replace(/[^a-zA-Z0-9._-]/g, '_').slice(-80);
+  const path = 'marketing/' + Date.now().toString(36) + '-' + safe;
+  const { error } = await window.sb.storage.from('documents').upload(path, file, {
+    upsert: true, contentType: file.type || 'application/octet-stream',
+  });
+  if (error) throw error;
+  return path;
+}
 
 const AGN_MSG_CIMKE = {
   circular:     { cimke: 'Körlevél',    szin: 'bg-sky-50 text-sky-700 border-sky-200' },
@@ -143,9 +164,13 @@ function AGN_DiakokFul({ user, agencies, myAgencyId }) {
   const tolt = React.useCallback(async () => {
     setHiba('');
     try {
+      /* A DOKUMENTUMTÍPUSOKAT IS BE KELL TÖLTENI: enélkül az egyedi típus a
+         nyers kulcsával jelent meg a hiányzók között („c_teszt_dokumentum_ybtv"),
+         nem a nevével — külügyi iroda, 2026-09-30. */
       const [lista, programok] = await Promise.all([
         AGN_api.list(isAgent ? (myAgencyId || user.agencyId) : ''),
         (typeof PROG_loadPrograms === 'function' ? PROG_loadPrograms() : Promise.resolve([])),
+        (typeof PROG_loadDocTypes === 'function' ? PROG_loadDocTypes() : Promise.resolve(null)),
       ]);
       setKat(programok || []);
       setSorok(lista);
@@ -256,7 +281,9 @@ function AGN_DiakokFul({ user, agencies, myAgencyId }) {
                       <td className="px-5 py-3 text-[12px] font-bold text-slate-600" data-echo-noi18n>{progNev}</td>
                       <td className="px-5 py-3">
                         <div className="text-[12px] font-bold text-slate-600">{fa ? `${fa.kesz}/${fa.osszes} lépés kész` : '—'}</div>
-                        <div className="text-[11px] text-slate-400 font-semibold">{'Következő: ' + kovetkezo}</div>
+                        {/* KÉT CSOMÓPONT: összefűzve a lépés neve magyar maradt
+                            angol módban („Következő: Dokumentumok"). */}
+                        <div className="text-[11px] text-slate-400 font-semibold"><span>Következő:</span> <span>{kovetkezo}</span></div>
                       </td>
                       <td className="px-5 py-3">
                         {hianyzo.length === 0
@@ -506,6 +533,7 @@ function AGN_AnyagtarFul({ user, myAgencyId }) {
   const [telepitve, setTelepitve] = useState(true);
   const [busy, setBusy] = useState(false);
   const [uj, setUj] = useState(null);   // { title, kind, description, link }
+  const [elonezet, setElonezet] = useState(null);   // az oldalról nyíló olvasó
 
   const tolt = React.useCallback(async () => {
     setHiba('');
@@ -523,7 +551,11 @@ function AGN_AnyagtarFul({ user, myAgencyId }) {
     if (!file || !uj) return;
     setBusy(true); setHiba('');
     try {
-      const path = await AGENCY_upload(file, user && user.id, 'marketing');
+      /* A 'marketing/' ELŐTAG KÖTÖTT (110). A documents tároló alapszabálya
+         csak a SAJÁT mappát engedi olvasni (első szegmens = auth.uid()),
+         ezért az iroda feltöltését az ügynök nem tudta letölteni — mérve:
+         „A fájl most nem érhető el." A marketing előtagra külön szabály van. */
+      const path = await AGN_marketingUpload(file, user && user.id);
       await AGN_api.addAsset({
         id: 'AST-' + Date.now().toString(36), title: uj.title || file.name,
         description: uj.description || null, kind: uj.kind || 'other',
@@ -581,6 +613,13 @@ function AGN_AnyagtarFul({ user, myAgencyId }) {
                 {[a.file_name, a.file_size ? AGENCY_kb(a.file_size) : ''].filter(Boolean).join(' · ')}
               </div>
               <div className="flex items-center gap-2 mt-4">
+                {!a.link && (
+                  <button onClick={() => setElonezet({ entry: { path: a.path, type: '' }, fileName: a.file_name || a.title, label: a.title })}
+                    data-agn-elonezet={a.id} title="Előnézet"
+                    className="w-9 h-9 flex-none rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 flex items-center justify-center">
+                    <Lucide.Eye size={15} />
+                  </button>
+                )}
                 <button onClick={() => letolt(a)} data-agn-letoltes={a.id}
                   className="flex-1 bg-slate-900 text-white px-4 py-2 rounded-xl text-[13px] font-bold inline-flex items-center justify-center gap-1.5">
                   <Lucide.Download size={14} /> Letöltés
@@ -598,6 +637,10 @@ function AGN_AnyagtarFul({ user, myAgencyId }) {
         </div>
       )}
 
+      {elonezet && typeof DocReader === 'function' && (
+        <DocReader entry={elonezet.entry} fileName={elonezet.fileName} label={elonezet.label}
+          Icon={Lucide.FileText} onClose={() => setElonezet(null)} />
+      )}
       {uj && (
         <UModal open onClose={() => setUj(null)} max="max-w-lg" title="Marketinganyag feltöltése"
           subtitle="Minden jóváhagyott ügynökség látni és letölteni fogja." icon={<Lucide.Upload size={20} />}>
@@ -614,7 +657,7 @@ function AGN_AnyagtarFul({ user, myAgencyId }) {
               <button onClick={() => setUj(null)} className={U_btnGhost}>Mégse</button>
               <label className={U_btnPrimary + ' cursor-pointer ' + (busy ? 'opacity-50 pointer-events-none' : '')}>
                 <Lucide.Upload size={16} /> {busy ? 'Feltöltés…' : 'Fájl kiválasztása'}
-                <input type="file" className="hidden" onChange={feltolt} />
+                <input type="file" accept={typeof DOC_ACCEPT !== 'undefined' ? DOC_ACCEPT : undefined} className="hidden" onChange={feltolt} />
               </label>
             </div>
           </div>
@@ -628,29 +671,106 @@ function AGN_AnyagtarFul({ user, myAgencyId }) {
    4. JUTALÉK — CSAK TÁJÉKOZTATÁS
    Az ügynök NEM írhatja át; a százalékot az iroda állítja (agency_decide).
    ============================================================ */
-function AGN_JutalekInfo({ agency }) {
+function AGN_JutalekInfo({ agency, myAgencyId, user }) {
   const rate = agency ? Number(agency.commissionRate || 0) : null;
+  const [sorok, setSorok] = React.useState(null);
+  const [kat, setKat] = React.useState([]);
+
+  /* A TÉTELES LISTA. A tesztmérnök jelezte (2026-09-30), hogy a kulcs önmagában
+     kevés: az ügynök azt akarja látni, MELYIK diákja után mennyi jutalék jár.
+     A lista a saját jelentkezéseiből áll össze; az összeg TÁJÉKOZTATÓ — a
+     kötelező érvényű összeg a kiküldött számlán van, és a jutalék csak a
+     BEIRATKOZÁS lezárása után számolható el. */
+  React.useEffect(() => {
+    let el = false;
+    (async () => {
+      try {
+        const [lista, programok] = await Promise.all([
+          AGN_api.list(myAgencyId || (user && user.agencyId) || ''),
+          (typeof PROG_loadPrograms === 'function' ? PROG_loadPrograms() : Promise.resolve([])),
+        ]);
+        if (el) return;
+        setKat(programok || []); setSorok(lista || []);
+      } catch (e) { if (!el) setSorok([]); }
+    })();
+    return () => { el = true; };
+  }, [myAgencyId, user && user.agencyId]);
+
+  const tetelek = (sorok || []).map(s => {
+    const d = (s.data && s.data.decision) || null;
+    const felvett = !!(d && d.outcome === 'admitted');
+    const pid = (d && d.programId) || (Array.isArray(s.data && s.data.program_ids) ? s.data.program_ids[0] : s.program_id);
+    const pg = (kat || []).find(x => x.id === pid) || null;
+    const tandij = pg ? Number(pg.tuition || 0) : 0;
+    return { id: s.id, nev: s.applicant_name || s.owner_email, program: pg ? (pg.code || pg.name) : (pid || '—'),
+             felvett, tandij, osszeg: (rate && tandij) ? Math.round(tandij * rate / 100) : 0 };
+  }).filter(x => x.felvett);
+
   return (
-    <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6" data-agn-jutalek="1">
-      <div className="flex items-center gap-2 mb-1">
-        <Lucide.Percent size={16} className="text-primary" />
-        <span className="text-xs font-black text-slate-400 uppercase tracking-wide">Jutalék</span>
+    <div className="space-y-6">
+      <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6" data-agn-jutalek="1">
+        <div className="flex items-center gap-2 mb-1">
+          <Lucide.Percent size={16} className="text-primary" />
+          <span className="text-xs font-black text-slate-400 uppercase tracking-wide">Jutalék</span>
+        </div>
+        {rate == null ? (
+          <p className="text-sm text-slate-500 mt-2">A jutalékkulcsot a felvételi iroda állítja be az ügynökséghez.</p>
+        ) : (
+          <>
+            <div className="text-4xl font-black text-slate-900 mt-2" data-agn-kulcs="1">{rate + '%'}</div>
+            <p className="text-sm text-slate-500 mt-2 leading-relaxed">
+              Ennyi jutalék jár beiratkozott diákonként. A kulcsot a felvételi iroda állítja — a portálon tájékoztatásul látszik, módosítani innen nem lehet.
+            </p>
+            <ul className="mt-4 space-y-2 text-[13px] text-slate-600">
+              <li className="flex items-start gap-2"><Lucide.Dot size={16} className="text-primary flex-none mt-0.5" /><span>A jutalék a BEIRATKOZÁS lezárása után számolható el, nem a jelentkezéskor.</span></li>
+              <li className="flex items-start gap-2"><Lucide.Dot size={16} className="text-primary flex-none mt-0.5" /><span>Az elszámolást az iroda nyitja meg időszakonként; a számlát a „Jutalék és számlázás" fülön csatolod.</span></li>
+              <li className="flex items-start gap-2"><Lucide.Dot size={16} className="text-primary flex-none mt-0.5" /><span>Kérdés esetén a koordinátor az „Üzenetek" fülön elérhető.</span></li>
+            </ul>
+          </>
+        )}
       </div>
-      {rate == null ? (
-        <p className="text-sm text-slate-500 mt-2">A jutalékkulcsot a felvételi iroda állítja be az ügynökséghez.</p>
-      ) : (
-        <>
-          <div className="text-4xl font-black text-slate-900 mt-2" data-agn-kulcs="1">{rate + '%'}</div>
-          <p className="text-sm text-slate-500 mt-2 leading-relaxed">
-            Ennyi jutalék jár beiratkozott diákonként. A kulcsot a felvételi iroda állítja — a portálon tájékoztatásul látszik, módosítani innen nem lehet.
+
+      {/* TÉTELES VÁRHATÓ JUTALÉK */}
+      <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden" data-agn-jutalek-tetelek="1">
+        <div className="px-6 py-4 border-b border-slate-50">
+          <h3 className="font-black text-slate-800">Várható jutalék diákonként</h3>
+          <p className="text-[12px] font-semibold text-slate-400 mt-0.5">
+            A felvett diákjaid. Az összeg TÁJÉKOZTATÓ, a képzés tandíja és a fenti kulcs alapján — a kötelező érvényű összeg a kiküldött számlán van.
           </p>
-          <ul className="mt-4 space-y-2 text-[13px] text-slate-600">
-            <li className="flex items-start gap-2"><Lucide.Dot size={16} className="text-primary flex-none mt-0.5" /><span>A jutalék a BEIRATKOZÁS lezárása után számolható el, nem a jelentkezéskor.</span></li>
-            <li className="flex items-start gap-2"><Lucide.Dot size={16} className="text-primary flex-none mt-0.5" /><span>Az elszámolást az iroda nyitja meg időszakonként; a számlát a „Jutalék és számlázás" fülön csatolod.</span></li>
-            <li className="flex items-start gap-2"><Lucide.Dot size={16} className="text-primary flex-none mt-0.5" /><span>Kérdés esetén a koordinátor az „Üzenetek" fülön elérhető.</span></li>
-          </ul>
-        </>
-      )}
+        </div>
+        {sorok === null ? (
+          <div className="h-24 animate-pulse bg-slate-50" />
+        ) : tetelek.length === 0 ? (
+          <div className="px-6 py-8 text-center text-[13px] font-semibold text-slate-400">
+            Még nincs felvett diákod. A jutalék a felvételi döntés és a beiratkozás után számolható el.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left min-w-[520px]">
+              <thead className="bg-slate-50 text-slate-400 text-[10px] font-black uppercase tracking-wider">
+                <tr>
+                  <th className="px-6 py-3">Diák</th>
+                  <th className="px-6 py-3">Képzés</th>
+                  <th className="px-6 py-3 text-right">Tandíj / félév</th>
+                  <th className="px-6 py-3 text-right">Kulcs</th>
+                  <th className="px-6 py-3 text-right">Várható jutalék</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tetelek.map(t => (
+                  <tr key={t.id} className="border-t border-slate-50" data-agn-tetel={t.id}>
+                    <td className="px-6 py-3 text-[13px] font-bold text-slate-700" data-echo-noi18n>{t.nev}</td>
+                    <td className="px-6 py-3 text-[13px] text-slate-500" data-echo-noi18n>{t.program}</td>
+                    <td className="px-6 py-3 text-[13px] text-slate-500 text-right tabular-nums">{t.tandij ? AGENCY_eur(t.tandij) : '—'}</td>
+                    <td className="px-6 py-3 text-[13px] text-slate-500 text-right tabular-nums">{rate + '%'}</td>
+                    <td className="px-6 py-3 text-[13px] font-black text-slate-800 text-right tabular-nums">{t.osszeg ? AGENCY_eur(t.osszeg) : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

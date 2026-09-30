@@ -1284,10 +1284,10 @@ function PROG_StepBody({ stepKey, program, data, setData, mentData, user, cur, o
         <p className="text-[12px] font-semibold text-slate-400" data-dok-formatum="1">{'Elfogadott formátum: ' + DOC_ENGEDETT_SZOVEG + ', legfeljebb ' + DOC_fmtSize(DOC_MAX_BYTES) + '.'}</p>
         <div className="space-y-3">
           {(program.required_docs || []).map(id => { const got = docs[id]; return (
-            <div key={id} className={'flex items-center justify-between gap-4 p-4 rounded-2xl border ' + (got ? 'border-emerald-100 bg-emerald-50/40' : 'border-slate-100')}>
+            <div key={id} className={'flex flex-wrap sm:flex-nowrap items-center justify-between gap-3 sm:gap-4 p-4 rounded-2xl border ' + (got ? 'border-emerald-100 bg-emerald-50/40' : 'border-slate-100')}>
               <div className="flex items-center gap-3 min-w-0">
                 <div className={'w-9 h-9 rounded-xl flex items-center justify-center flex-none ' + (got ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-400')}>{got ? <Lucide.Check size={17} /> : <Lucide.FileText size={17} />}</div>
-                <div className="min-w-0"><div className="text-sm font-bold text-slate-700 flex flex-wrap items-center gap-1.5"><span className="truncate">{PROG_docLabel(id)}</span>{!kotelezoIdk.includes(id) && <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px] font-black uppercase tracking-wider" data-dok-opcionalis={id}>opcionális</span>}</div>{got && <div className="text-[11px] text-emerald-600 font-semibold truncate">{got.fileName}</div>}{tobbKepzes && <div className="mt-1 flex flex-wrap items-center gap-1" data-keri={id}><span className="text-[10px] font-bold text-slate-400">Kéri:</span>{valasztottK.filter(x => (x.required_docs || []).includes(id)).map(x => <span key={x.id} title={x.name} className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px] font-bold">{x.code || x.name}</span>)}</div>}</div>
+                <div className="min-w-0"><div className="text-sm font-bold text-slate-700 flex flex-wrap items-center gap-1.5"><span className="break-words">{PROG_docLabel(id)}</span>{!kotelezoIdk.includes(id) && <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px] font-black uppercase tracking-wider" data-dok-opcionalis={id}>opcionális</span>}</div>{got && <div className="text-[11px] text-emerald-600 font-semibold break-all">{got.fileName}</div>}{tobbKepzes && <div className="mt-1 flex flex-wrap items-center gap-1" data-keri={id}><span className="text-[10px] font-bold text-slate-400">Kéri:</span>{valasztottK.filter(x => (x.required_docs || []).includes(id)).map(x => <span key={x.id} title={x.name} className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px] font-bold">{x.code || x.name}</span>)}</div>}</div>
               </div>
               <label className={U_btnGhost + ' flex-none cursor-pointer text-[13px] py-2 px-4 ' + (docBusy === id ? 'opacity-50 pointer-events-none' : '')}>
                 {docBusy === id ? 'Feltöltés…' : got ? 'Csere' : 'Feltöltés'}
@@ -1511,14 +1511,14 @@ function PROG_IrodaiLepes({ lepes, cur, data, program }) {
       <div className="space-y-5" data-iroda-lepes="check">
         <PROG_Head icon={Lucide.ShieldCheck} title="Dokumentum-ellenőrzés" sub="A felvételi iroda átnézi és jóváhagyja a feltöltött dokumentumokat." />
         {elotte}
-        <p className="text-[12px] font-bold text-slate-400">{`${dok.hitelesitve}/${dok.osszes} dokumentum jóváhagyva`}</p>
+        <p className="text-[12px] font-bold text-slate-400"><span>{dok.hitelesitve + '/' + dok.osszes}</span>{' '}<span>dokumentum jóváhagyva</span></p>
         <div className="space-y-2">
           {dok.items.map(d => (
-            <div key={d.id} className="flex items-center gap-3 p-3 rounded-xl border border-slate-100">
+            <div key={d.id} className="flex flex-wrap items-center gap-2 sm:gap-3 p-3 rounded-xl border border-slate-100">
               <span className={'w-8 h-8 rounded-lg flex items-center justify-center flex-none ' + (d.hitelesitve ? 'bg-emerald-500 text-white' : d.feltoltve ? 'bg-amber-100 text-amber-700' : 'bg-red-50 text-red-500')}>
                 {d.hitelesitve ? <Lucide.ShieldCheck size={16} /> : d.feltoltve ? <Lucide.Clock size={16} /> : <Lucide.AlertCircle size={16} />}
               </span>
-              <span className="flex-1 min-w-0 text-sm font-bold text-slate-700 truncate">{d.label}</span>
+              <span className="flex-1 min-w-0 text-sm font-bold text-slate-700 break-words">{d.label}</span>
               <span className={'text-[10px] font-black uppercase tracking-wider px-2 py-1 rounded-full ' + (d.hitelesitve ? 'bg-emerald-50 text-emerald-700' : d.feltoltve ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-600')}>{d.hitelesitve ? 'Jóváhagyva' : d.feltoltve ? 'Ellenőrzésre vár' : 'Hiányzik'}</span>
             </div>
           ))}

@@ -1868,7 +1868,7 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
           egyetlen helyen, hány százalékot kap diákonként — csak a számlákból
           lehetett visszafejteni. Módosítani innen NEM lehet: a kulcsot az
           iroda állítja (agency_decide). */}
-      {isAgent && <AGN_JutalekInfo agency={myAgency} />}
+      {isAgent && <AGN_JutalekInfo agency={myAgency} myAgencyId={user.agencyId} user={user} />}
       <AgencyBilling
         user={user}
         agencies={agencies}
@@ -2115,13 +2115,19 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
       {/* Portal Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-8">
         <div>
+          {/* A NÉV ÉS AZ ÜGYNÖKSÉG NEVE ADAT, a körülötte lévő szöveg felirat.
+              Összefűzve („Ügynöki Portál: B", „Üdvözöljük, Teszt Ügynök B!…")
+              a nyelvváltó szótára nem talált rá, és angol módban magyar
+              maradt — külügyi iroda, 2026-09-30. */}
           <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight">
-            {isAgent ? `Ügynöki Portál: ${myAgency?.name || 'Betöltés...'}` : 'Ügynök és partner portál'}
+            {isAgent
+              ? <><span>Ügynöki portál</span><span>: </span><span data-echo-noi18n>{(myAgency && myAgency.name) || '…'}</span></>
+              : <span>Ügynök és partner portál</span>}
           </h2>
           <p className="text-slate-500 mt-1 max-w-[75ch]">
-            {isAgent 
-              ? `Üdvözöljük, ${user.name}! Kövesse nyomon ügynöksége teljesítményét és diákjait.` 
-              : 'Üdvözöljük a Global Study Ügynökség központi vezérlőpultján.'}
+            {isAgent
+              ? <><span>Üdvözöljük,</span> <span data-echo-noi18n>{user.name}</span><span>! Kövesse nyomon ügynöksége teljesítményét és diákjait.</span></>
+              : <span>Üdvözöljük a Global Study Ügynökség központi vezérlőpultján.</span>}
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -2133,29 +2139,33 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
       </div>
 
       {/* Internal Navigation Tabs */}
-      <div className="flex items-center gap-1 p-1 bg-white border border-slate-100 rounded-2xl w-fit shadow-sm overflow-x-auto max-w-full">
+      {/* MOBILON A FÜLSÁV EGYMÁSRA CSÚSZOTT (mérve 2026-09-30, 400 px): a
+          `w-fit` miatt a doboz a tartalomnál keskenyebb lett, a `flex` pedig
+          összenyomta a gombokat. A gombok mostantól nem zsugorodnak, a sáv
+          pedig oldalra görgethető. */}
+      <div className="flex items-center gap-1 p-1 bg-white border border-slate-100 rounded-2xl w-full sm:w-fit max-w-full shadow-sm overflow-x-auto tabla-gorgeto">
         <button 
           onClick={() => setActiveTab('overview')}
-          className={`px-6 py-3 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'overview' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
+          className={`flex-none px-4 sm:px-6 py-3 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'overview' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
         >
           Áttekintés
         </button>
         <button 
           onClick={() => setActiveTab('students')}
-          className={`px-6 py-3 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'students' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
+          className={`flex-none px-4 sm:px-6 py-3 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'students' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
         >
           Diákok
         </button>
         <button 
           onClick={() => setActiveTab('commission')}
-          className={`px-6 py-3 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'commission' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
+          className={`flex-none px-4 sm:px-6 py-3 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'commission' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
         >
           Jutalék és számlázás
         </button>
         {/* 5. tetel — szerzodes, meghatalmazas az ugynoksegehez kotve. */}
         <button 
           onClick={() => setActiveTab('documents')}
-          className={`px-6 py-3 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'documents' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
+          className={`flex-none px-4 sm:px-6 py-3 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'documents' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
         >
           Dokumentumok
         </button>
@@ -2164,7 +2174,7 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
         {['SUPERADMIN', 'ADMIN'].indexOf(user.role) >= 0 && (
           <button 
             onClick={() => setActiveTab('registrations')}
-            className={`px-6 py-3 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'registrations' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
+            className={`flex-none px-4 sm:px-6 py-3 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'registrations' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
           >
             Ügynökségi regisztrációk
             {pendingAgencyCount > 0 && (
@@ -2178,13 +2188,13 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
           <>
             <button 
               onClick={() => setActiveTab('agencies')}
-              className={`px-6 py-3 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'agencies' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
+              className={`flex-none px-4 sm:px-6 py-3 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'agencies' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
             >
               Ügynökségek
             </button>
             <button 
               onClick={() => setActiveTab('hierarchy')}
-              className={`px-6 py-3 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'hierarchy' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
+              className={`flex-none px-4 sm:px-6 py-3 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'hierarchy' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
             >
               Hiearchia & Al-ügynökök
             </button>
@@ -2194,7 +2204,7 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
             (108). Az olvasatlanok száma a jelvényen. */}
         <button
           onClick={() => setActiveTab('messages')}
-          className={`px-6 py-3 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'messages' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
+          className={`flex-none px-4 sm:px-6 py-3 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'messages' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
         >
           Üzenetek
           {agnOlvasatlan > 0 && (
@@ -2205,7 +2215,7 @@ const AgentPortal: React.FC<AgentPortalProps> = ({ user }) => {
         </button>
         <button 
           onClick={() => setActiveTab('resources')}
-          className={`px-6 py-3 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'resources' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
+          className={`flex-none px-4 sm:px-6 py-3 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'resources' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-500 hover:text-slate-800'}`}
         >
           Anyagtár
         </button>
@@ -3120,6 +3130,24 @@ const AdmissionsCore = ({ user }) => {
     return () => { el = true; };
   }, []);
 
+  /* MELYIK ÜGYNÖKSÉG HOZTA A JELENTKEZŐT (108). Az ügyintéző eddig sehol nem
+     látta — pedig a jutalékelszámolás és a kapcsolattartás is ezen múlik
+     (külügyi iroda, 2026-09-30). A nevekhez egy kis térkép kell. */
+  const [ugynoksegNev, setUgynoksegNev] = useState({});
+  useEffect(() => {
+    let el = false;
+    (async () => {
+      try {
+        if (!window.sb) return;
+        const { data } = await window.sb.from('agencies').select('id,name');
+        if (el || !Array.isArray(data)) return;
+        const m = {}; data.forEach(a => { m[a.id] = a.name; });
+        setUgynoksegNev(m);
+      } catch (e) { /* ügynökség nélkül is működik a lista */ }
+    })();
+    return () => { el = true; };
+  }, []);
+
   useEffect(() => {
     // Demo mintaadat kizárólag az admin nézethez, külön 'demo' kulcsban (sosem kerül diák székébe).
     try { if (!localStorage.getItem('nje_processes_demo') && JourneyShared.seedProcesses) localStorage.setItem('nje_processes_demo', JSON.stringify(JourneyShared.seedProcesses())); } catch (e) {}
@@ -3579,6 +3607,12 @@ const AdmissionsCore = ({ user }) => {
                 {ADM_orszag(p) && <span className="px-2 py-0.5 bg-sky-50 text-sky-700 rounded text-[10px] font-bold">{ADM_orszag(p)}</span>}
                 {p.data && p.data.term && <span className="px-2 py-0.5 bg-violet-50 text-violet-700 rounded text-[10px] font-bold">{typeof PROG_termLabel === 'function' ? PROG_termLabel(p.data.term, true) : p.data.term}</span>}
                 {progs.map(pr => <span key={pr.id} className="px-2 py-0.5 bg-primary/10 text-primary rounded text-[10px] font-bold">{pr.code} {pr.name}</span>)}
+                {/* KI HOZTA A JELENTKEZŐT (108). */}
+                {p.agencyId && (
+                  <span className="px-2 py-0.5 bg-violet-50 text-violet-700 rounded text-[10px] font-bold inline-flex items-center gap-1" data-ugynokseg={p.agencyId}>
+                    <ICONS.Briefcase size={10} /><span>Ügynökség:</span> <span data-echo-noi18n>{ugynoksegNev[p.agencyId] || p.agencyId}</span>
+                  </span>
+                )}
               </div>
             </div>
             <span data-fejlec-allapot="1" className={'text-xs font-bold px-3 py-1.5 rounded-full ' + ((faD.kod === 'accepted' || faD.kod === 'admitted') ? 'bg-emerald-50 text-emerald-600' : (faD.kod === 'rejected' || faD.kod === 'cancelled') ? 'bg-red-50 text-red-600' : faD.kod === 'student' ? 'bg-amber-50 text-amber-700' : 'bg-primary/10 text-primary')}>{faD.cimke}</span>
@@ -4038,7 +4072,7 @@ const AdmissionsCore = ({ user }) => {
                 return (
                   <tr key={p.id || idx} className={'group hover:bg-slate-50 [&>td.sticky]:group-hover:bg-slate-50 transition-colors align-top' + (cancelled ? ' opacity-70' : '')}>
                     <td className="px-6 py-4 whitespace-nowrap"><span className="font-mono text-[11px] font-bold text-slate-500 tabular-nums" title={p.id}>{x.azon}</span></td>
-                    <td className="px-6 py-4"><div className="flex items-center gap-3"><Face p={p} size={36} /><div className="min-w-0"><p className="font-semibold text-slate-800 truncate">{x.nev}</p><p className="text-xs text-slate-400 truncate">{x.email}</p>{msgTerkep[p.id] && msgTerkep[p.id].unread > 0 && <span className="mt-1 mr-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-primary/10 text-primary text-[10px] font-bold" data-msg-sor={p.id}><Lucide.MessageSquare size={11} /> {`${msgTerkep[p.id].unread} új üzenet`}</span>}{x.elozmeny.length > 0 && <span className="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-50 text-red-600 text-[10px] font-bold" data-elozmeny="1" title={x.elozmeny.map(h => h.azon + (h.leiras ? ' · ' + h.leiras : '')).join('\n')}><ICONS.AlertTriangle size={11} /> Korábban elutasítva</span>}</div></div></td>
+                    <td className="px-6 py-4"><div className="flex items-center gap-3"><Face p={p} size={36} /><div className="min-w-0"><p className="font-semibold text-slate-800 truncate">{x.nev}</p><p className="text-xs text-slate-400 truncate">{x.email}</p>{p.agencyId && <p className="text-[11px] font-bold text-violet-600 truncate" data-ugynokseg-sor={p.agencyId}><span>Ügynökségtől:</span> <span data-echo-noi18n>{ugynoksegNev[p.agencyId] || p.agencyId}</span></p>}{msgTerkep[p.id] && msgTerkep[p.id].unread > 0 && <span className="mt-1 mr-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-primary/10 text-primary text-[10px] font-bold" data-msg-sor={p.id}><Lucide.MessageSquare size={11} /> {`${msgTerkep[p.id].unread} új üzenet`}</span>}{x.elozmeny.length > 0 && <span className="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-50 text-red-600 text-[10px] font-bold" data-elozmeny="1" title={x.elozmeny.map(h => h.azon + (h.leiras ? ' · ' + h.leiras : '')).join('\n')}><ICONS.AlertTriangle size={11} /> Korábban elutasítva</span>}</div></div></td>
                     <td className="px-6 py-4 text-[12px] font-semibold text-slate-600 whitespace-nowrap">{x.orszag || <span className="text-slate-300">—</span>}</td>
                     <td className="px-6 py-4"><div className="flex flex-wrap gap-1">{x.progs.length ? x.progs.map((pr, i) => { const felvett = !!(x.dontes && x.dontes.outcome === 'admitted' && x.dontes.programId === pr.id); return <span key={i} title={pr.name} className={'px-2 py-0.5 rounded text-[10px] font-bold ' + (felvett ? 'bg-emerald-500 text-white' : 'bg-primary/10 text-primary')}>{(x.progs.length > 1 && Array.isArray(p.data && p.data.program_ids) ? (i + 1) + '. ' : '') + pr.code}</span>; }) : <span className="text-[10px] text-slate-400">—</span>}</div>{x.felev && <div className="text-[10px] font-bold text-violet-600 mt-1 whitespace-nowrap">{typeof PROG_termLabel === 'function' ? PROG_termLabel(x.felev, true) : x.felev}</div>}</td>
                     <td className="px-6 py-4"><div className="w-32"><div className="flex items-center justify-between text-[10px] font-bold mb-1"><span className={felirat}>{cancelled ? 'Megszakítva' : x.stLabel}</span><span className="text-slate-400">{x.lepesSzoveg}</span></div><div className="h-1.5 bg-slate-100 rounded-full overflow-hidden"><div className={csik + ' h-full rounded-full'} style={{ width: x.pct + '%' }}></div></div></div></td>
@@ -7889,7 +7923,11 @@ const spRow = (r) => migrateStepOrder({ id: r.id, createdAt: r.created_at, step:
   // program_id-t, nevet és hallgatói lépésszámlálót hordoz. Eddig ezek itt
   // elvesztek, ezért a listában „Új jelentkező”-ként, szak nélkül látszott.
   programId: r.program_id || (r.data && r.data.program_id) || null, stage: r.stage || 'office',
-  applicantName: r.applicant_name || '', studentStep: r.student_step || 0, submittedAt: r.submitted_at || null, refNo: r.ref_no || null });
+  applicantName: r.applicant_name || '', studentStep: r.student_step || 0, submittedAt: r.submitted_at || null, refNo: r.ref_no || null,
+  // 108: melyik ügynökség hozta a jelentkezőt. Enélkül az ügyintéző sehol nem
+  // látta, kinek a diákja — pedig épp ez volt az ügynökségi modul lényege
+  // (külügyi iroda, 2026-09-30).
+  agencyId: r.agency_id || null });
 
 /* Lists read from admission_process_list (migration 09), a view identical to
    the table except that embedded file bytes are stripped out of data.docs.
@@ -13628,6 +13666,19 @@ Object.assign(HU_EN, {
   /* A külügyi iroda 2026-09-30-i észrevételei — felületi feliratok, amelyek
      angol módban magyarul maradtak. */
   'jelentkezés':'application','kötelező dokumentum feltöltve':'required documents uploaded',
+  // Ügynökségi visszajelzés (2026-09-30)
+  'Ügynöki portál':'Agent portal','Üdvözöljük,':'Welcome,',
+  'Várható jutalék diákonként':'Expected commission per student',
+  'A felvett diákjaid. Az összeg TÁJÉKOZTATÓ, a képzés tandíja és a fenti kulcs alapján — a kötelező érvényű összeg a kiküldött számlán van.':'Your admitted students. The amount is INDICATIVE, based on the programme tuition and the rate above \u2014 the binding amount is on the invoice issued by the office.',
+  'Még nincs felvett diákod. A jutalék a felvételi döntés és a beiratkozás után számolható el.':'You have no admitted students yet. Commission can be settled after the admission decision and enrolment.',
+  'Diák':'Student','Tandíj / félév':'Tuition / semester','Kulcs':'Rate','Várható jutalék':'Expected commission',
+  'Megtekintés':'View','Előnézet':'Preview',
+  'Erre az e-mail-címre már van jelentkezés, amelyet egy másik ügynökség indított. Egyeztess a felvételi irodával.':'There is already an application for this email address, started by another agency. Please check with the admissions office.',
+  'Az e-mail-cím nem tartalmazhat ékezetes betűt — ellenőrizd az elgépelést.':'The email address cannot contain accented letters \u2014 please check for a typo.',
+  '! Kövesse nyomon ügynöksége teljesítményét és diákjait.':'! Track your agency\u2019s performance and students.',
+  'Üdvözöljük a Global Study Ügynökség központi vezérlőpultján.':'Welcome to the Global Study Agency control panel.',
+  'Ügynökség:':'Agency:','Ügynökségtől:':'Brought by:','Következő:':'Next:',
+  'dokumentum jóváhagyva':'documents approved',
   'A feltöltés nem sikerült. Próbáld újra.':'The upload failed. Please try again.',
   'Nincs kapcsolat a tárolóval — jelentkezz be újra.':'No connection to the file store \u2014 please sign in again.',
   'Nincs jogosultságod ide feltölteni. Jelentkezz ki és be újra; ha így sem megy, szólj az ügyintézőnek.':'You are not allowed to upload here. Sign out and back in; if it still fails, contact the admissions office.',
@@ -15709,9 +15760,9 @@ Object.entries({
 }).forEach(([k, v]) => { if (!(k in HU_EN)) HU_EN[k] = v; });
 HU_EN_PHRASES.push(
   [/^(\d+)\/(\d+) lépés kész$/, '$1/$2 steps complete'],
-  [/^(\d+)\/(\d+) dokumentum feltöltve$/, '$1/$2 documents uploaded'],
-  [/^(\d+)\/(\d+) dokumentum jóváhagyva$/, '$1/$2 documents approved'],
-  [/^(\d+)\/(\d+) kötelező dokumentum feltöltve · (\d+) jóváhagyva$/, '$1/$2 required documents uploaded · $3 approved'],
+  [/^\s*(\d+)\/(\d+) dokumentum feltöltve\s*$/, '$1/$2 documents uploaded'],
+  [/^\s*(\d+)\/(\d+) dokumentum jóváhagyva\s*$/, '$1/$2 documents approved'],
+  [/^\s*(\d+)\/(\d+) kötelező dokumentum feltöltve · (\d+) jóváhagyva\s*$/, '$1/$2 required documents uploaded · $3 approved'],
   [/^(\d+) képzés egy felvételi eljárásban$/, '$1 programmes in one admission process'],
   [/^Felvéve: /, 'Admitted: '],
 );
