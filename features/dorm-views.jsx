@@ -314,14 +314,17 @@ async function DORMV_uploadPhotos(files, prefix) {
   for (const f of files) {
     const path = [prefix || 'dorm', Date.now().toString(36) + '-' + DORMV_safeName(f.name)].join('/');
     let stored = null;
+    // Egy sáv fájlonként: a tároló-próbálkozások ALATT ugyanaz a jelzés fut.
+    const sav = FEL_kezd(f.name, f.size);
     for (const bucket of DORMV_BUCKETS) {
       try {
-        const { error } = await window.sb.storage.from(bucket).upload(path, f, {
-          upsert: true, contentType: f.type || 'application/octet-stream',
+        await FEL_upload(bucket, path, f, {
+          upsert: true, contentType: f.type || 'application/octet-stream', id: sav,
         });
-        if (!error) { stored = { bucket, path }; break; }
+        stored = { bucket, path }; break;
       } catch (e) { /* következő bucket */ }
     }
+    FEL_vege(sav, stored ? '' : 'nem sikerült');
     if (stored) out.push({ ...stored, name: f.name, size: f.size, type: f.type });
   }
   return out;

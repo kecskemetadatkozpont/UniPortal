@@ -120,7 +120,8 @@ function REC_Lista({ processId, slotId, canEdit }) {
     const cel = processId || ('slot-' + slotId);
     const path = ['rec', cel, Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8) + '-' + DOC_safeName(file.name)].join('/');
     try {
-      const { error: tErr } = await window.sb.storage.from(REC_BUCKET).upload(path, file, { upsert: false, contentType: file.type });
+      const tErr = await FEL_upload(REC_BUCKET, path, file, { upsert: false, contentType: file.type, cim: file.name })
+        .then(() => null).catch(e => e);
       if (tErr) throw tErr;
       const { error } = await MSG_rpc('interview_recording_add', {
         p_path: path, p_file_name: file.name, p_size: file.size, p_mime: file.type,

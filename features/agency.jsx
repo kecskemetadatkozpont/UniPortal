@@ -144,10 +144,12 @@ async function AGENCY_upload(file, ownerId, agencyId) {
     : String(file.name || 'file').replace(/[^a-zA-Z0-9._-]/g, '_').slice(-80);
   const path = [ownerId, 'agency', agencyId,
     Date.now().toString(36) + '-' + safe].join('/');
-  const { error } = await window.sb.storage.from('documents').upload(path, file, {
-    upsert: true, contentType: file.type || 'application/octet-stream',
-  });
-  if (error) throw new Error(AGENCY_msg(error));
+  // A haladásjelzős feltöltő (app.jsx): a sávon látszik, hol tart a fájl.
+  try {
+    await FEL_upload('documents', path, file, {
+      upsert: true, contentType: file.type || 'application/octet-stream', cim: file.name,
+    });
+  } catch (error) { throw new Error(AGENCY_msg(error)); }
   return path;
 }
 

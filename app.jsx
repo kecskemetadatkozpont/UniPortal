@@ -128,6 +128,36 @@ const AppView = {
   CONSENTS: 'consents',
 };
 
+/* ===== Böngésző-navigáció: címsor-horgony + előzmények =====
+   Egy egyoldalas felület alapból elveszíti, hol jártunk: az újratöltés (F5)
+   és a nyelvváltás (ami szintén újratöltés) a kezdőnézetre dobott vissza, a
+   böngésző ⬅ gombja pedig egyenesen az index.html-re lépett ki.
+   Ezért MINDEN nézetváltás a címsorba is beíródik (#/<nezet>, a profil
+   #/profil), új előzmény-bejegyzésként. Így:
+     • F5 / nyelvváltás után ugyanott vagyunk (a horgony megmarad),
+     • a ⬅ az előző FELÜLETRE lép vissza, nem ki az oldalról,
+     • a ➡ visszahoz oda, ahonnan visszaléptünk.
+   Az index.html csak akkor jön, ha az alkalmazáson belül már nincs hova. */
+const NAV_PROFIL = 'profil';
+const NAV_ervenyes = (kulcs) => kulcs === NAV_PROFIL || Object.keys(AppView).some(k => AppView[k] === kulcs);
+const NAV_olvas = () => {
+  try {
+    const m = /^#\/([a-z_]+)$/.exec(String(window.location.hash || ''));
+    return (m && NAV_ervenyes(m[1])) ? m[1] : null;
+  } catch (e) { return null; }
+};
+/* csere = true: a MEGLÉVŐ előzmény-bejegyzést írjuk át (első landolás,
+   újratöltés utáni helyreállítás) — ilyenkor nem szabad új bejegyzést
+   gyártani, mert a ⬅ egy lépésre „ugyanide" vinne vissza. */
+const NAV_ir = (kulcs, csere) => {
+  try {
+    const cel = '#/' + kulcs;
+    if (window.location.hash === cel) return;
+    if (csere) window.history.replaceState({ nezet: kulcs }, '', cel);
+    else window.history.pushState({ nezet: kulcs }, '', cel);
+  } catch (e) { /* history nélkül a felület ugyanúgy működik, csak nem jegyzi meg */ }
+};
+
 const MENU_ITEMS = [
   { id: AppView.FEED, label: 'Hírfolyam', icon: <Lucide.Newspaper size={20} /> },
   { id: AppView.PROGRAMS, label: 'Programok', icon: <Lucide.BookOpen size={20} /> },
@@ -863,13 +893,159 @@ function DOC_safeName(name) {
 async function DOC_upload(file, ownerId, processId, docId) {
   if (!window.sb || !ownerId) throw new Error('storage-unavailable');
   const path = [ownerId, processId || 'draft', docId + '-' + Date.now().toString(36) + '-' + DOC_safeName(file.name)].join('/');
-  const { error } = await sb.storage.from(DOC_BUCKET).upload(path, file, {
+  await FEL_upload(DOC_BUCKET, path, file, {
     upsert: true,
     contentType: file.type || 'application/octet-stream',
+    cim: file.name,
+  });
+  return path;
+}
+
+/* ===== Feltöltés haladásjelzővel =====
+   Minden fájlfeltöltés (jelentkezési dokumentum, üzenet-csatolmány, ügynökségi
+   anyag, kollégiumi kép, webshop-fájl, interjúfelvétel, profilkép) ezen megy
+   át, és a jobb alsó sarokban látszik a haladása. Egy helyen van megírva, így
+   minden felület ugyanazt a visszajelzést adja.
+
+   A supabase-js a Storage-ba fetch-csel tölt, ami nem jelenti a feltöltött
+   bájtokat. Ezért ugyanarra a REST-végpontra XHR-rel töltünk — így van valódi
+   százalék. Ha ez bármiért nem megy (nincs munkamenet-token, a böngésző vagy a
+   hálózat elutasítja), VISSZAESÜNK a supabase-js hívásra: a feltöltés akkor is
+   végbemegy, csak a sáv lesz határozatlan. */
+const FEL_ALLAPOT = { lista: [], figyelok: new Set(), kovetkezo: 1 };
+const FEL_ertesit = () => { FEL_ALLAPOT.figyelok.forEach(f => { try { f(); } catch (e) {} }); };
+const FEL_kezd = (nev, meret) => {
+  const id = FEL_ALLAPOT.kovetkezo++;
+  FEL_ALLAPOT.lista = FEL_ALLAPOT.lista.concat([{ id, nev: nev || 'fájl', meret: meret || 0, szazalek: 0, hiba: '' }]);
+  FEL_ertesit();
+  return id;
+};
+const FEL_halad = (id, szazalek) => {
+  FEL_ALLAPOT.lista = FEL_ALLAPOT.lista.map(x => x.id === id ? { ...x, szazalek } : x);
+  FEL_ertesit();
+};
+const FEL_vege = (id, hiba) => {
+  if (hiba) {
+    FEL_ALLAPOT.lista = FEL_ALLAPOT.lista.map(x => x.id === id ? { ...x, hiba: String(hiba) } : x);
+    FEL_ertesit();
+    setTimeout(() => { FEL_ALLAPOT.lista = FEL_ALLAPOT.lista.filter(x => x.id !== id); FEL_ertesit(); }, 6000);
+    return;
+  }
+  FEL_ALLAPOT.lista = FEL_ALLAPOT.lista.map(x => x.id === id ? { ...x, szazalek: 100 } : x);
+  FEL_ertesit();
+  setTimeout(() => { FEL_ALLAPOT.lista = FEL_ALLAPOT.lista.filter(x => x.id !== id); FEL_ertesit(); }, 1200);
+};
+
+async function FEL_token() {
+  try { const { data } = await sb.auth.getSession(); return (data && data.session && data.session.access_token) || null; }
+  catch (e) { return null; }
+}
+
+// A supabase-js útja: ugyanaz a feltöltés, csak határozatlan sávval.
+async function FEL_supabase(bucket, path, file, o, id) {
+  if (id) FEL_halad(id, null);
+  const { error } = await sb.storage.from(bucket).upload(path, file, {
+    upsert: !!o.upsert,
+    contentType: o.contentType || file.type || 'application/octet-stream',
   });
   if (error) throw error;
   return path;
 }
+
+/* A feltöltés egyetlen belépési pontja. `cim` a sávon megjelenő név
+   (alapból a fájl neve); `jelzo: false` elnyomja a jelzést; `id` egy MÁR
+   megnyitott sávot használ (a hívó zárja) — ez kell oda, ahol egy fájlért
+   több próbálkozás fut, vagy több fájl megy egy művelet alatt. */
+async function FEL_upload(bucket, path, file, opts) {
+  const o = opts || {};
+  const sajat = !o.id && o.jelzo !== false;
+  const id = o.jelzo === false ? 0 : (o.id || FEL_kezd(o.cim || (file && file.name), file && file.size));
+  try {
+    const token = await FEL_token();
+    const base = window.SUPABASE_URL;
+    if (!token || !base || typeof XMLHttpRequest === 'undefined') return await FEL_supabase(bucket, path, file, o, id);
+    let halott = false;
+    try {
+      await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        const ut = String(base).replace(/\/+$/, '') + '/storage/v1/object/' + bucket + '/'
+          + String(path).split('/').map(encodeURIComponent).join('/');
+        xhr.open('POST', ut, true);
+        xhr.setRequestHeader('authorization', 'Bearer ' + token);
+        if (window.SUPABASE_ANON_KEY) xhr.setRequestHeader('apikey', window.SUPABASE_ANON_KEY);
+        xhr.setRequestHeader('x-upsert', o.upsert ? 'true' : 'false');
+        xhr.setRequestHeader('cache-control', 'max-age=3600');
+        xhr.setRequestHeader('content-type', o.contentType || (file && file.type) || 'application/octet-stream');
+        if (id) xhr.upload.onprogress = (ev) => {
+          FEL_halad(id, ev && ev.lengthComputable && ev.total ? Math.min(99, Math.round(ev.loaded / ev.total * 100)) : null);
+        };
+        // Hálózati / CORS-hiba: nem tudjuk, a kérés eljutott-e — ezt jelöljük
+        // „halott" útnak, és a supabase-js hívásával próbáljuk újra.
+        xhr.onerror = () => { halott = true; reject(new Error('xhr-network')); };
+        xhr.ontimeout = () => { halott = true; reject(new Error('xhr-timeout')); };
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) { resolve(); return; }
+          // 5xx / 0: lehet átmeneti, essünk vissza. 4xx: valódi elutasítás (jogosultság, méret).
+          if (!xhr.status || xhr.status >= 500) { halott = true; reject(new Error('xhr-' + xhr.status)); return; }
+          let msg = 'HTTP ' + xhr.status;
+          try { const j = JSON.parse(xhr.responseText); msg = j.message || j.error || msg; } catch (e) {}
+          const err = new Error(msg); err.status = xhr.status; reject(err);
+        };
+        xhr.send(file);
+      });
+    } catch (e) {
+      if (!halott) throw e;
+      return await FEL_supabase(bucket, path, file, o, id);
+    }
+    return path;
+  } catch (e) {
+    if (sajat) FEL_vege(id, (e && e.message) || 'hiba');
+    throw e;
+  } finally {
+    // Sikeres ág: a hibás esetben a fenti FEL_vege már beállította a hibát.
+    if (sajat && !FEL_ALLAPOT.lista.some(x => x.id === id && x.hiba)) FEL_vege(id);
+  }
+}
+
+/* A sáv. Egyszer van beépítve a keretbe, és a FEL_ALLAPOT-ra figyel. */
+const FeltoltesJelzo = () => {
+  const [, ujra] = useState(0);
+  useEffect(() => {
+    const f = () => ujra(x => x + 1);
+    FEL_ALLAPOT.figyelok.add(f);
+    return () => { FEL_ALLAPOT.figyelok.delete(f); };
+  }, []);
+  const lista = FEL_ALLAPOT.lista;
+  if (!lista.length) return null;
+  return (
+    <div className="fixed bottom-4 right-4 z-[70] w-72 space-y-2" data-feltoltes-jelzo="1">
+      {lista.map(x => (
+        <div key={x.id} className={`rounded-xl border shadow-lg p-3 ${x.hiba ? 'bg-rose-50 border-rose-200' : 'bg-white border-slate-200'}`} data-feltoltes-elem="1">
+          <div className="flex items-center gap-2">
+            {x.hiba
+              ? <ICONS.AlertCircle size={15} className="text-rose-500 flex-none" />
+              : x.szazalek === 100
+                ? <ICONS.CheckCircle2 size={15} className="text-emerald-500 flex-none" />
+                : <ICONS.Upload size={15} className="text-primary flex-none" />}
+            <span className="text-[11px] font-bold text-slate-700 truncate flex-1" title={x.nev}>{x.nev}</span>
+            {!x.hiba && <span className="text-[11px] font-black text-slate-500 tabular-nums flex-none" data-feltoltes-szazalek="1">
+              {x.szazalek === null ? '…' : x.szazalek + '%'}
+            </span>}
+          </div>
+          {x.hiba
+            ? <p className="text-[10px] font-semibold text-rose-600 mt-1">{NY_t('A feltöltés nem sikerült')}: {x.hiba}</p>
+            : <div className="mt-2 h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                <div className={`h-full bg-primary rounded-full ${x.szazalek === null ? 'w-1/3 animate-pulse' : 'transition-all duration-200'}`}
+                     style={x.szazalek === null ? undefined : { width: x.szazalek + '%' }} />
+              </div>}
+          {!x.hiba && <p className="text-[10px] font-semibold text-slate-400 mt-1">
+            {x.szazalek === 100 ? NY_t('Feltöltve') : NY_t('Feltöltés folyamatban')}{x.meret ? ' · ' + DOC_fmtSize(x.meret) : ''}
+          </p>}
+        </div>
+      ))}
+    </div>
+  );
+};
 
 // Signed URLs expire, so cache per path for a little under the TTL.
 const DOC_URL_CACHE = new Map();
@@ -2310,8 +2486,9 @@ return AgentPortal;
    A Jelentkezés és Felvételi nézet két listájának (élő folyamatok + multi-
    program jelentkezések) közös szűrősávja. A keresés ékezet- és kisbetű-
    független: „kovacs” megtalálja „Kovács”-ot. */
+const nullifUres = (v) => { const t = String(v == null ? '' : v).trim(); return t ? t : null; };
 const ADM_norm = (s) => String(s == null ? '' : s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
-const ADM_SZURO_URES = { q: '', program: '', allapot: '', dok: '', orszag: '', felev: '' };
+const ADM_SZURO_URES = { q: '', program: '', allapot: '', dok: '', orszag: '', felev: '', ugynokseg: '' };
 // „2026.06.27” és ISO dátum egyaránt → ezredmásodperc (ismeretlennél üres, az a végére rendeződik).
 const ADM_ts = (s) => { const d = Date.parse(String(s || '').replace(/^(\d{4})\.(\d{2})\.(\d{2})\.?/, '$1-$2-$3')); return isNaN(d) ? '' : d; };
 const ADM_datum = (s) => {
@@ -3323,9 +3500,11 @@ const AdmissionsCore = ({ user }) => {
       // Hány kötelező dokumentumot ír elő a képzés? 0 esetén a „Minden feltöltve"
       // félrevezető lenne — az oszlop ilyenkor semleges állapotot mutat.
       const dokOsszes = fa ? fa.dok.osszes : kell.length;
-      return { p, fa, nev, email, azon, orszag, felev, elozmeny, dontes: dontesAdat, progs, missing, dokOsszes, pct, stLabel, lepesSzoveg, allapot, allapotRend, cancelled, hallgatonal,
+      // 108: melyik ügynökség hozta. Üres, ha a jelentkező önállóan jött.
+      const ugynokseg = p.agencyId ? (ugynoksegNev[p.agencyId] || p.agencyId) : '';
+      return { p, fa, nev, email, azon, orszag, felev, elozmeny, dontes: dontesAdat, progs, missing, dokOsszes, pct, stLabel, lepesSzoveg, allapot, allapotRend, cancelled, hallgatonal, ugynokseg,
         frissitve: p.updatedAt || p.createdAt || '',
-        kereso: ADM_norm([nev, email, p.id, azon, FIZ_kozlemeny(p.refNo), FIZ_kozlemeny(p.refNo).replace(/-/g, ''), orszag, felev, (felev && typeof PROG_termLabel === 'function') ? PROG_termLabel(felev) : '', stLabel, ...progs.map(x => x.name + ' ' + x.code)].join(' ')) };
+        kereso: ADM_norm([nev, email, p.id, azon, FIZ_kozlemeny(p.refNo), FIZ_kozlemeny(p.refNo).replace(/-/g, ''), orszag, felev, (felev && typeof PROG_termLabel === 'function') ? PROG_termLabel(felev) : '', stLabel, ugynokseg, ...progs.map(x => x.name + ' ' + x.code)].join(' ')) };
     };
     const qN = ADM_norm(szuro.q);
     // Bankkivonatról bemásolt közlemény („NJE-FV-00037-84 Kovács…”) is megtalálja a jelentkezést.
@@ -3337,9 +3516,12 @@ const AdmissionsCore = ({ user }) => {
       (!szuro.allapot || x.allapot === szuro.allapot) &&
       (!szuro.dok || (szuro.dok === 'hianyos' ? x.missing.length > 0 : x.missing.length === 0)) &&
       (!szuro.orszag || ADM_norm(x.orszag) === szuro.orszag) &&
-      (!szuro.felev || x.felev === szuro.felev)
+      (!szuro.felev || x.felev === szuro.felev) &&
+      /* Ügynökség: konkrét ügynökség, vagy a '-' = önállóan jelentkezők. */
+      (!szuro.ugynokseg || (szuro.ugynokseg === '-' ? !x.p.agencyId : x.p.agencyId === szuro.ugynokseg))
     ), rendA, {
       azon: x => (x.p.refNo != null ? x.p.refNo : ''), orszag: x => ADM_norm(x.orszag),
+      ugynokseg: x => ADM_norm(x.ugynokseg),
       nev: x => ADM_norm(x.nev), szak: x => ADM_norm(x.progs[0] && x.progs[0].name), folyamat: x => x.pct,
       // Időbélyegként: a régi sorok „2026.06.27”, az újak ISO alakban jönnek — szövegként a pont
       // a kötőjel UTÁN rendeződne, és a régi sorok a legfrissebbek elé kerülnének.
@@ -3355,6 +3537,13 @@ const AdmissionsCore = ({ user }) => {
       ajanlas: st => ((st.recommendationLetters || []).filter(l => l.status === 'Verified').length),
       allapot: st => statusOrder(st.status),
     });
+    /* A szűrő csak azokat az ügynökségeket kínálja, amelyeknek TÉNYLEG van
+       jelentkezője — üres választás csak zsákutca. */
+    const ugynoksegOpciok = (() => {
+      const m = new Map();
+      procAll.forEach(x => { if (x.p.agencyId && !m.has(x.p.agencyId)) m.set(x.p.agencyId, x.ugynokseg || x.p.agencyId); });
+      return [...m.entries()].sort((a, b) => String(a[1]).localeCompare(String(b[1]), 'hu'));
+    })();
     const programOpciok = (() => {
       const m = new Map();
       procAll.forEach(x => x.progs.forEach(pr => { if (pr.kulcs && !m.has(pr.kulcs)) m.set(pr.kulcs, pr.name); }));
@@ -3474,6 +3663,48 @@ const AdmissionsCore = ({ user }) => {
         return false;
       } finally { setLevelBusy(false); }
     };
+    /* ÜGYNÖKSÉGHEZ RENDELÉS (kérés: 2026-09-30). Eddig csak az ügynök tudott
+       jelentkezést indítani a saját nevében; ha a diák önállóan regisztrált,
+       vagy rossz ügynökséghez került, az irodának nem volt mivel javítania.
+       A kapcsolatot a jelentkezés SORA hordozza (agency_id, 108). */
+    const [ugyBusy, setUgyBusy] = useState('');
+    const [ugyUzenet, setUgyUzenet] = useState(null);
+    const ugynoksegMent = async (proc, agencyId) => {
+      setUgyBusy(proc.id); setUgyUzenet(null);
+      const uj = nullifUres(agencyId);
+      try {
+        if (!String(proc.id || '').startsWith('PROC-demo')) {
+          if (!window.sb) throw new Error('Nincs kapcsolat az adatbázissal.');
+          const { data: sorok, error } = await sb.from('admission_processes')
+            .update({ agency_id: uj, updated_at: new Date().toISOString() })
+            .eq('id', proc.id).select('id');
+          if (error) throw error;
+          if (!sorok || !sorok.length) throw new Error('nincs jogosultságod ehhez a jelentkezéshez, vagy az már nem létezik.');
+          /* A jutalékelszámolás a students."agentId"-ből dolgozik (29). Ha ott
+             MÁS ügynökség áll, NEM írjuk felül: lehet, hogy arra már számla
+             ment ki. Ilyenkor a felület szól, hogy ezt az irodának kell
+             rendeznie. */
+          if (uj && proc._owner) {
+            try {
+              const { data: st } = await sb.from('students').select('id,"agentId"')
+                .ilike('email', proc._owner).limit(1);
+              const sor = st && st[0];
+              if (sor && !sor.agentId) await sb.from('students').update({ agentId: uj }).eq('id', sor.id);
+              else if (sor && sor.agentId && sor.agentId !== uj) {
+                setUgyUzenet({ id: proc.id, tone: 'warn', text: 'A jelentkezés átkerült, de a jutalék-nyilvántartásban másik ügynökség szerepel ennél a diáknál — azt a pénzügy tudja rendezni.' });
+              }
+            } catch (e) { /* a students sor nem kötelező */ }
+          }
+        }
+        const kesz = { ...proc, agencyId: uj };
+        setJourneyProcs(ps => ps.map(x => x.id === proc.id ? kesz : x));
+        setDetailFull(kesz);
+        setDetailProc(c => (c && c.id === proc.id) ? kesz : c);
+      } catch (e) {
+        setUgyUzenet({ id: proc.id, tone: 'error', text: 'A mentés nem sikerült: ' + ((e && e.message) || e) });
+      } finally { setUgyBusy(''); }
+    };
+
     /* VÍZUM — az IRODA nyilvántartása (data.visa_iroda). Ugyanaz az út, mint a
        levélnél: KÖZVETLEN update, hogy lássuk, átment-e (RLS mellett a csendes
        mentés 0 sort érintene, hibaüzenet nélkül). A hallgató saját bejelentése
@@ -3695,6 +3926,31 @@ const AdmissionsCore = ({ user }) => {
               {/* Interjú: az ügyintéző itt is módosíthatja az időpontot (interview_move / interview_assign). */}
               <IV_AdminProcessInterview processId={p.id} canEdit={canEditStatus} onChanged={() => frissitFolyamat(p.id)}
                 fallback={(iv.booked || iv.proposed) ? <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6"><div className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">Interjú</div><div className="text-sm font-bold text-slate-700">{ADM_ivIdo(iv)}</div></div> : null} />
+              {/* ÜGYNÖKSÉGHEZ RENDELÉS (2026-09-30). Az iroda itt tudja
+                  megadni vagy javítani, melyik ügynökség hozta a diákot. */}
+              <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6" data-ugynokseg-doboz="1">
+                <div className="flex items-center gap-2 mb-3">
+                  <ICONS.Briefcase size={16} className="text-primary" />
+                  <span className="text-xs font-bold text-slate-400 uppercase tracking-wide">Ügynökség</span>
+                </div>
+                <p className="text-[12px] font-semibold text-slate-500 mb-3">
+                  Melyik ügynökség hozta ezt a jelentkezőt. Üresen hagyva önállóan jelentkezőnek számít.
+                </p>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <select className="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold text-slate-700"
+                    value={p.agencyId || ''} disabled={!canEditStatus || ugyBusy === p.id}
+                    data-ugynokseg-valaszto="1"
+                    onChange={e => ugynoksegMent(p, e.target.value)}>
+                    <option value="">Önálló jelentkező (nincs ügynökség)</option>
+                    {Object.keys(ugynoksegNev).sort((a, b) => String(ugynoksegNev[a]).localeCompare(String(ugynoksegNev[b]), 'hu'))
+                      .map(id => <option key={id} value={id}>{ugynoksegNev[id]}</option>)}
+                  </select>
+                  {ugyBusy === p.id && <span className="text-[12px] font-bold text-slate-400 self-center">Mentés…</span>}
+                </div>
+                {ugyUzenet && ugyUzenet.id === p.id && (
+                  <p className={'mt-2 text-[12px] font-bold ' + (ugyUzenet.tone === 'error' ? 'text-red-600' : 'text-amber-700')}>{ugyUzenet.text}</p>
+                )}
+              </div>
               {/* VÍZUM — a felvétel után. Csak akkor van értelme, ha felvettük a
                   jelentkezőt: addig nincs mire vízumot kérni. */}
               {faD.kod === 'admitted' || faD.kod === 'accepted' ? (
@@ -4019,6 +4275,17 @@ const AdmissionsCore = ({ user }) => {
             <option value="">Minden ország</option>
             {orszagOpciok.map(([k, n]) => <option key={k} value={k}>{n}</option>)}
           </select>
+          {/* ÜGYNÖKSÉG-SZŰRŐ (2026-09-30). Az oszlop mellé ez adja az értelmet:
+              egy ügynökség diákjai egy kattintással kilistázhatók. */}
+          {ugynoksegOpciok.length > 0 && (
+            <select aria-label="Ügynökség" value={szuro.ugynokseg} data-szuro-ugynokseg="1"
+              onChange={e => { const v = e.target.value; setSzuro(x => ({ ...x, ugynokseg: v })); }}
+              className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-[13px] font-bold text-slate-600">
+              <option value="">Minden ügynökség</option>
+              <option value="-">Önálló jelentkezők</option>
+              {ugynoksegOpciok.map(([k, n]) => <option key={k} value={k}>{n}</option>)}
+            </select>
+          )}
           {felevOpciok.length > 0 && (
             <select aria-label="Félév" value={szuro.felev} onChange={e => { const v = e.target.value; setSzuro(x => ({ ...x, felev: v })); }} className={selCls}>
               <option value="">Minden félév</option>
@@ -4055,6 +4322,9 @@ const AdmissionsCore = ({ user }) => {
                 <ADM_Fej cim="Folyamat" oszlop="folyamat" rend={rendA} setRend={setRendA} />
                 <ADM_Fej cim="Hiányzó dokumentumok" oszlop="hiany" rend={rendA} setRend={setRendA} />
                 <ADM_Fej cim="Állapot" oszlop="allapot" rend={rendA} setRend={setRendA} />
+                {/* KI HOZTA A JELENTKEZŐT (108). Saját oszlop: az iroda innen
+                    látja és rendezi, melyik ügynökség diákja (2026-09-30). */}
+                <ADM_Fej cim="Ügynökség" oszlop="ugynokseg" rend={rendA} setRend={setRendA} />
                 <ADM_Fej cim="Frissítve" oszlop="frissitve" rend={rendA} setRend={setRendA} />
                 {/* B2: a fejléc korábban „Művelet" volt — a cellában viszont
                     egy „Részletek" gomb áll, tehát a fejléc is ezt mondja. */}
@@ -4072,7 +4342,7 @@ const AdmissionsCore = ({ user }) => {
                 return (
                   <tr key={p.id || idx} className={'group hover:bg-slate-50 [&>td.sticky]:group-hover:bg-slate-50 transition-colors align-top' + (cancelled ? ' opacity-70' : '')}>
                     <td className="px-6 py-4 whitespace-nowrap"><span className="font-mono text-[11px] font-bold text-slate-500 tabular-nums" title={p.id}>{x.azon}</span></td>
-                    <td className="px-6 py-4"><div className="flex items-center gap-3"><Face p={p} size={36} /><div className="min-w-0"><p className="font-semibold text-slate-800 truncate">{x.nev}</p><p className="text-xs text-slate-400 truncate">{x.email}</p>{p.agencyId && <p className="text-[11px] font-bold text-violet-600 truncate" data-ugynokseg-sor={p.agencyId}><span>Ügynökségtől:</span> <span data-echo-noi18n>{ugynoksegNev[p.agencyId] || p.agencyId}</span></p>}{msgTerkep[p.id] && msgTerkep[p.id].unread > 0 && <span className="mt-1 mr-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-primary/10 text-primary text-[10px] font-bold" data-msg-sor={p.id}><Lucide.MessageSquare size={11} /> {`${msgTerkep[p.id].unread} új üzenet`}</span>}{x.elozmeny.length > 0 && <span className="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-50 text-red-600 text-[10px] font-bold" data-elozmeny="1" title={x.elozmeny.map(h => h.azon + (h.leiras ? ' · ' + h.leiras : '')).join('\n')}><ICONS.AlertTriangle size={11} /> Korábban elutasítva</span>}</div></div></td>
+                    <td className="px-6 py-4"><div className="flex items-center gap-3"><Face p={p} size={36} /><div className="min-w-0"><p className="font-semibold text-slate-800 truncate">{x.nev}</p><p className="text-xs text-slate-400 truncate">{x.email}</p>{msgTerkep[p.id] && msgTerkep[p.id].unread > 0 && <span className="mt-1 mr-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-primary/10 text-primary text-[10px] font-bold" data-msg-sor={p.id}><Lucide.MessageSquare size={11} /> {`${msgTerkep[p.id].unread} új üzenet`}</span>}{x.elozmeny.length > 0 && <span className="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-50 text-red-600 text-[10px] font-bold" data-elozmeny="1" title={x.elozmeny.map(h => h.azon + (h.leiras ? ' · ' + h.leiras : '')).join('\n')}><ICONS.AlertTriangle size={11} /> Korábban elutasítva</span>}</div></div></td>
                     <td className="px-6 py-4 text-[12px] font-semibold text-slate-600 whitespace-nowrap">{x.orszag || <span className="text-slate-300">—</span>}</td>
                     <td className="px-6 py-4"><div className="flex flex-wrap gap-1">{x.progs.length ? x.progs.map((pr, i) => { const felvett = !!(x.dontes && x.dontes.outcome === 'admitted' && x.dontes.programId === pr.id); return <span key={i} title={pr.name} className={'px-2 py-0.5 rounded text-[10px] font-bold ' + (felvett ? 'bg-emerald-500 text-white' : 'bg-primary/10 text-primary')}>{(x.progs.length > 1 && Array.isArray(p.data && p.data.program_ids) ? (i + 1) + '. ' : '') + pr.code}</span>; }) : <span className="text-[10px] text-slate-400">—</span>}</div>{x.felev && <div className="text-[10px] font-bold text-violet-600 mt-1 whitespace-nowrap">{typeof PROG_termLabel === 'function' ? PROG_termLabel(x.felev, true) : x.felev}</div>}</td>
                     <td className="px-6 py-4"><div className="w-32"><div className="flex items-center justify-between text-[10px] font-bold mb-1"><span className={felirat}>{cancelled ? 'Megszakítva' : x.stLabel}</span><span className="text-slate-400">{x.lepesSzoveg}</span></div><div className="h-1.5 bg-slate-100 rounded-full overflow-hidden"><div className={csik + ' h-full rounded-full'} style={{ width: x.pct + '%' }}></div></div></div></td>
@@ -4087,15 +4357,22 @@ const AdmissionsCore = ({ user }) => {
                         ? <span className="text-[10px] font-bold text-slate-400 inline-flex items-center gap-1" data-dok-nincs-eloirva="1" title="Ehhez a jelentkezéshez nincs kötelező dokumentum megadva a képzésnél."><ICONS.Minus size={12} /> Nincs előírt dokumentum</span>
                         : <span className="text-[10px] font-bold text-emerald-600 inline-flex items-center gap-1"><ICONS.CheckCircle size={12} /> Minden feltöltve</span>}</td>
                     <td className="px-6 py-4"><span className={`text-[10px] font-bold px-2 py-1 rounded-full whitespace-nowrap inline-flex items-center gap-1 ${(cancelled || x.allapot === 'rejected') ? 'bg-red-50 text-red-600' : (x.allapot === 'accepted' || x.allapot === 'admitted') ? 'bg-emerald-50 text-emerald-600' : x.allapot === 'withdrawn' ? 'bg-slate-100 text-slate-500' : x.hallgatonal ? 'bg-amber-50 text-amber-700' : 'bg-primary/10 text-primary'}`}>{cancelled ? <><ICONS.XCircle size={11} /> Megszakítva</> : x.stLabel}</span></td>
+                    <td className="px-6 py-4">
+                      {x.p.agencyId
+                        ? <span className="px-2 py-1 rounded-lg bg-violet-50 text-violet-700 text-[10px] font-bold inline-flex items-center gap-1 whitespace-nowrap" data-ugynokseg-oszlop={x.p.agencyId}>
+                            <ICONS.Briefcase size={10} /><span data-echo-noi18n>{x.ugynokseg}</span>
+                          </span>
+                        : <span className="text-[11px] font-semibold text-slate-300" data-ugynokseg-oszlop="">Önálló</span>}
+                    </td>
                     <td className="px-6 py-4 text-[12px] font-semibold text-slate-500 whitespace-nowrap tabular-nums">{ADM_datum(x.frissitve)}</td>
                     <td className="px-6 py-4 text-right sticky right-0 z-10 bg-white shadow-[-8px_0_12px_-8px_rgba(15,23,42,0.18)]"><button onClick={() => { setDetailProc(p); setMsgDraft({ subject: '', body: '' }); setMsgSent(false); }} className="bg-slate-900 text-white px-3 py-1.5 rounded-lg text-[11px] font-bold hover:bg-slate-800 inline-flex items-center gap-1.5" data-reszletek={p.id}><ICONS.Eye size={13} /> Részletek</button></td>
                   </tr>
                 );
               })}
               {!procsLoading && journeyProcs.length > 0 && procLista.length === 0 && (
-                <tr><td colSpan={9} className="px-6 py-8 text-center text-slate-400 text-sm">Nincs a szűrésnek megfelelő folyamat. <button type="button" onClick={torolSzurok} className="ml-1 font-bold text-primary hover:underline">Szűrők törlése</button></td></tr>
+                <tr><td colSpan={10} className="px-6 py-8 text-center text-slate-400 text-sm">Nincs a szűrésnek megfelelő folyamat. <button type="button" onClick={torolSzurok} className="ml-1 font-bold text-primary hover:underline">Szűrők törlése</button></td></tr>
               )}
-              {journeyProcs.length === 0 && <tr><td colSpan={9} className="px-6 py-8 text-center text-slate-400 text-sm">Nincs aktív felvételi folyamat.</td></tr>}
+              {journeyProcs.length === 0 && <tr><td colSpan={10} className="px-6 py-8 text-center text-slate-400 text-sm">Nincs aktív felvételi folyamat.</td></tr>}
             </tbody>
           </table>
         </ADM_VizszintesGorgeto>
@@ -12598,7 +12875,8 @@ const AccountPage = ({ user, onUpdate, onClose }) => {
       if (window.sb && user.id) {
         const ext = (f.name.split('.').pop() || 'png').toLowerCase();
         const path = user.id + '/avatar_' + Date.now() + '.' + ext;
-        const { error: upErr } = await sb.storage.from('avatars').upload(path, f, { upsert: true, contentType: f.type });
+        const upErr = await FEL_upload('avatars', path, f, { upsert: true, contentType: f.type, cim: f.name })
+          .then(() => null).catch(e => e);
         if (!upErr) {
           const { data: pub } = sb.storage.from('avatars').getPublicUrl(path);
           const url = pub.publicUrl;
@@ -12761,7 +13039,13 @@ const initialsAvatar = (nev) => {
 const App = (() => {
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [activeView, setActiveView] = useState<AppView>(AppView.AGENT_PORTAL);
+  /* A kezdőnézet a címsor horgonyából jön, ha van: így az újratöltés (F5) és a
+     nyelvváltás (ami szintén újratöltés) OTT hagy, ahol voltunk. Ha nincs
+     horgony, a szerepkör szerinti kezdőnézetre landolunk (lásd loadProfile). */
+  const [activeView, setActiveView] = useState<AppView>(() => {
+    const h = NAV_olvas();
+    return (h && h !== NAV_PROFIL) ? h : AppView.AGENT_PORTAL;
+  });
   // Melyik auth-fiókra állítottuk már be a kezdőnézetet. A profil betöltése
   // minden token-frissítéskor lefut; ez a ref választja el a "más lépett be"
   // esetet a "ugyanaz a fiók frissült" esettől, hogy a nézet ne ugorjon vissza.
@@ -12781,12 +13065,35 @@ const App: React.FC = () => {
   const [loginError, setLoginError] = useState('');
   const [authBusy, setAuthBusy] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [showAccount, setShowAccount] = useState(false);
+  const [showAccount, setShowAccount] = useState(() => NAV_olvas() === NAV_PROFIL);
   // A keret reszponzív állapota: az oldalsáv kinyitva / összecsukva, illetve
   // mobilon a beúszó fiók. (A hook a Sidebar fölött, feltétel nélkül hívódik —
   // a lenti korai `return`-ök előtt, hogy a hook-sorrend stabil maradjon.)
   const sidebar = useSidebarLayout();
   const updateCurrentUser = (patch) => setCurrentUser(u => u ? { ...u, ...patch } : u);
+
+  /* A nézet és a címsor összehangolása. Az ELSŐ beállítás csere (nem keletkezik
+     új előzmény-bejegyzés), a további váltások push-ok — ezekre lép vissza a ⬅.
+     A popstate után a horgony már a céljára áll, ilyenkor a NAV_ir nem ír. */
+  const navElsoRef = useRef(true);
+  useEffect(() => {
+    if (!currentUser) return;
+    NAV_ir(showAccount ? NAV_PROFIL : activeView, navElsoRef.current);
+    navElsoRef.current = false;
+  }, [currentUser, activeView, showAccount]);
+
+  // A böngésző ⬅ / ➡ gombja: csak az állapotot állítjuk a horgony szerint.
+  useEffect(() => {
+    const kez = () => {
+      const kulcs = NAV_olvas();
+      if (!kulcs) return;
+      if (kulcs === NAV_PROFIL) { setShowAccount(true); return; }
+      setShowAccount(false);
+      setActiveView(kulcs);
+    };
+    window.addEventListener('popstate', kez);
+    return () => window.removeEventListener('popstate', kez);
+  }, []);
 
   // Default landing view per role.
   const viewForRole = (role) => {
@@ -12926,14 +13233,20 @@ const App: React.FC = () => {
     // valóban számít: MÁS FELHASZNÁLÓ-e, mint akire már landoltunk. Ugyanaz
     // a fiók = a profil adatai frissülnek, de a nézet a helyén marad.
     if (landedForRef.current !== authUser.id) {
-      // Land the superadmin on the approvals queue when something is waiting;
-      // everyone else (and an empty queue) gets the Campus Feed.
-      let view = viewForRole(role);
-      if (status === 'approved' && role === 'SUPERADMIN' && (await REG_pendingCount()) > 0) {
-        view = AppView.REGISTRATIONS;
+      // Ha a címsorban van nézet (újratöltés, nyelvváltás, megosztott link),
+      // az ERŐSEBB a szerepkör szerinti kezdőnézetnél — ott maradunk.
+      if (NAV_olvas()) {
+        landedForRef.current = authUser.id;
+      } else {
+        // Land the superadmin on the approvals queue when something is waiting;
+        // everyone else (and an empty queue) gets the Campus Feed.
+        let view = viewForRole(role);
+        if (status === 'approved' && role === 'SUPERADMIN' && (await REG_pendingCount()) > 0) {
+          view = AppView.REGISTRATIONS;
+        }
+        setActiveView(view);
+        landedForRef.current = authUser.id;
       }
-      setActiveView(view);
-      landedForRef.current = authUser.id;
     }
   };
 
@@ -12951,7 +13264,7 @@ const App: React.FC = () => {
       }
       const { data } = sb.auth.onAuthStateChange((_event, session) => {
         if (session && session.user) loadProfile(session.user);
-        else { landedForRef.current = null; setCurrentUser(null); }
+        else { landedForRef.current = null; navElsoRef.current = true; setCurrentUser(null); }
       });
       sub = data && data.subscription;
     })();
@@ -13419,6 +13732,8 @@ const App: React.FC = () => {
         {['STUDENT', 'AGENT'].includes(currentUser.role) && activeView !== AppView.ASSISTANT && !showAccount && <AssistantWidget user={currentUser} />}
         {/* Jogi kapu: ha egy kötelező dokumentum jelenlegi verziója nincs elfogadva, blokkoló ablak kéri. */}
         <LEG_Gate user={currentUser} onLogout={handleLogout} />
+        {/* Feltöltés-haladás: minden felület feltöltése itt látszik. */}
+        <FeltoltesJelzo />
       </div>
     </div>
   );
@@ -13748,6 +14063,11 @@ Object.assign(HU_EN, {
   '! Kövesse nyomon ügynöksége teljesítményét és diákjait.':'! Track your agency\u2019s performance and students.',
   'Üdvözöljük a Global Study Ügynökség központi vezérlőpultján.':'Welcome to the Global Study Agency control panel.',
   'Ügynökség:':'Agency:','Ügynökségtől:':'Brought by:','Következő:':'Next:',
+  'A feltöltés nem sikerült':'Upload failed','Feltöltés folyamatban':'Uploading',
+  'Ügynökség':'Agency','Önálló':'Direct','Önálló jelentkezők':'Direct applicants',
+  'Minden ügynökség':'All agencies','Önálló jelentkező (nincs ügynökség)':'Direct applicant (no agency)',
+  'Melyik ügynökség hozta ezt a jelentkezőt. Üresen hagyva önállóan jelentkezőnek számít.':'Which agency brought this applicant. Left empty, the applicant counts as a direct applicant.',
+  'A jelentkezés átkerült, de a jutalék-nyilvántartásban másik ügynökség szerepel ennél a diáknál — azt a pénzügy tudja rendezni.':'The application has been moved, but the commission record lists a different agency for this student \u2014 finance can resolve that.',
   'dokumentum jóváhagyva':'documents approved',
   'A feltöltés nem sikerült. Próbáld újra.':'The upload failed. Please try again.',
   'Nincs kapcsolat a tárolóval — jelentkezz be újra.':'No connection to the file store \u2014 please sign in again.',

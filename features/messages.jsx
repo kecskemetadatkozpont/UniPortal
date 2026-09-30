@@ -130,7 +130,8 @@ async function MSG_feltolt(processId, file) {
   if (file.size > MSG_MAX_BYTES) throw new Error('A fájl túl nagy — legfeljebb 20 MB lehet.');
   const veletlen = Math.random().toString(36).slice(2, 10);
   const path = ['chat', processId, Date.now().toString(36) + '-' + veletlen + '-' + DOC_safeName(file.name)].join('/');
-  const { error } = await window.sb.storage.from(DOC_BUCKET).upload(path, file, { upsert: false, contentType: file.type || 'application/octet-stream' });
+  const error = await FEL_upload(DOC_BUCKET, path, file, { upsert: false, contentType: file.type || 'application/octet-stream', cim: file.name })
+    .then(() => null).catch(e => e);
   if (error) throw error;
   return { path, name: file.name, size: file.size, type: file.type || '' };
 }

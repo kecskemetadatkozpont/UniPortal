@@ -1091,7 +1091,8 @@ function SHOP_TermekSzerkeszto({ termek, kategoriak, onClose, onMentve }) {
     setFeltolt('Feltöltés…');
     try {
       const ut = 'termek/' + Date.now() + '-' + file.name.replace(/[^A-Za-z0-9._-]+/g, '_');
-      const { error } = await window.sb.storage.from('shop-files').upload(ut, file, { upsert: false });
+      const error = await FEL_upload('shop-files', ut, file, { upsert: false, cim: file.name })
+        .then(() => null).catch(e => e);
       if (error) throw error;
       set('fajl_utvonal', ut); setFeltolt('Feltöltve.');
     } catch (err) { setFeltolt('A feltöltés nem sikerült: ' + ((err && err.message) || '')); }

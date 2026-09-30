@@ -96,10 +96,9 @@ async function AGN_marketingUpload(file, ownerId) {
   const safe = (typeof DOC_safeName === 'function') ? DOC_safeName(file.name)
     : String(file.name || 'file').replace(/[^a-zA-Z0-9._-]/g, '_').slice(-80);
   const path = 'marketing/' + Date.now().toString(36) + '-' + safe;
-  const { error } = await window.sb.storage.from('documents').upload(path, file, {
-    upsert: true, contentType: file.type || 'application/octet-stream',
+  await FEL_upload('documents', path, file, {
+    upsert: true, contentType: file.type || 'application/octet-stream', cim: file.name,
   });
-  if (error) throw error;
   return path;
 }
 
