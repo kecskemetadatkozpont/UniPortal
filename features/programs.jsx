@@ -232,6 +232,22 @@ function PROG_termLabel(code, rovid) {
    85 nem futott le): olyankor mindenki mindent lát, mint eddig. */
 const PROG_AUDIENCE = { mind: 'Mindenkinek', kulfoldi: 'Csak külföldi jelentkezőknek', magyar: 'Csak magyar jelentkezőknek' };
 let PROG_AUDIENCE_COL = false;
+/* NEM MINDEN DOKUMENTUM KÖTELEZŐ (külügyi iroda, 2026-09-30). A képzésnél
+   felsorolt dokumentumok mind akadályt jelentettek: alapképzésre jelentkezőtől
+   is kutatási tervet kért a rendszer. A `optional_docs` azokat a kulcsokat
+   sorolja, amelyek KÉRHETŐK, de nem kötelezők. Amíg a 109-es migráció nem
+   futott le, az oszlop nincs — ilyenkor a mezőt nem küldjük el, és minden
+   dokumentum kötelező marad (a mai viselkedés). */
+let PROG_OPT_DOC_COL = false;
+const PROG_optDocs = (p) => (p && Array.isArray(p.optional_docs)) ? p.optional_docs : [];
+/* Egy dokumentum akkor OPCIONÁLIS, ha MINDEN olyan képzésnél az, amelyik
+   kéri. Ha akár egy képzés kötelezőnek jelöli, akkor kötelező — több képzésre
+   szóló jelentkezésnél a szigorúbb szabály érvényes. */
+function PROG_opcionalisDok(valasztott, id) {
+  const kerik = (valasztott || []).filter(p => (p.required_docs || []).includes(id));
+  if (!kerik.length) return true;
+  return kerik.every(p => PROG_optDocs(p).includes(id));
+}
 const PROG_audienceOf = (p) => (p && PROG_AUDIENCE[p.audience]) ? p.audience : 'mind';
 const PROG_MAGYAR = ['hungary', 'magyarország', 'magyarorszag', 'hu', 'hun'];
 const PROG_magyarAllampolgar = (orszag) => PROG_MAGYAR.includes(String(orszag || '').trim().toLowerCase());
@@ -280,7 +296,14 @@ function PROG_mergeFlow(progs) {
     (p.required_docs || []).forEach(x => { if (!dok.includes(x)) dok.push(x); });
   });
   lepesek.delete('choice');
-  return { steps: PROG_lepesSor([...lepesek]), required_docs: dok };
+  const steps = PROG_lepesSor([...lepesek]);
+  /* A MOTIVÁCIÓS LEVELET NE KÉRJÜK KÉTSZER (külügyi iroda, 2026-09-30). Ha a
+     folyamatban ott a „Motivációs levél" LÉPÉS (ahol a jelentkező beírja), a
+     dokumentumok közül kivesszük ugyanazt: a jelentkező eddig feltöltötte a
+     legelső körben, majd a nyelvvizsga után a rendszer újra kérte. */
+  const dokVegul = steps.includes('motivation') ? dok.filter(x => x !== 'motivation') : dok;
+  const opcionalis = dokVegul.filter(id => PROG_opcionalisDok(progs, id));
+  return { steps, required_docs: dokVegul, optional_docs: opcionalis };
 }
 
 /* ============================================================
@@ -307,15 +330,23 @@ function PROG_folyamVaz(program, valasztott) {
   const folyam = isDeg
     ? PROG_mergeFlow(valasztott && valasztott.length ? valasztott : [program])
     // A rövid programoknál is a defs sorrendje és a díj nélküli sor érvényes.
-    : { steps: PROG_lepesSor(program.steps || ['personal', 'review']), required_docs: program.required_docs || [] };
-  return { isDeg, steps: isDeg ? ['choice', ...folyam.steps] : folyam.steps, required_docs: folyam.required_docs };
+    : PROG_mergeFlow([program]);
+  return { isDeg, steps: isDeg ? ['choice', ...folyam.steps] : folyam.steps,
+           required_docs: folyam.required_docs, optional_docs: folyam.optional_docs || [] };
 }
+// A KÖTELEZŐ dokumentumok: amiket a képzés kér, az opcionálisak nélkül.
+const PROG_kotelezoDokok = (program) =>
+  (program.required_docs || []).filter(id => !((program.optional_docs || []).includes(id)));
 
 // Egy hallgatói lépés a MENTETT adat alapján teljesült-e (nem a megtekintés alapján).
 function PROG_lepesKesz(stepKey, program, data, beadva) {
   if (stepKey === 'review') return !!beadva;
-  if (stepKey === 'language') { const l = data.language || {}; return !!(l.cert && l.level); }
-  if (stepKey === 'documents') return (program.required_docs || []).every(d => PROG_dokFeltoltve((data.docs || {})[d]));
+  /* A NYELVVIZSGA NEM AKADÁLY (külügyi iroda, 2026-09-30). Eddig a lépés csak
+     kitöltött bizonyítvánnyal és szinttel számított késznek, és addig nem
+     engedett tovább. A nyelvtudást a felvételi iroda az interjún és a
+     dokumentumokból is meg tudja ítélni; aki tud, megadja. */
+  if (stepKey === 'language') return true;
+  if (stepKey === 'documents') return PROG_kotelezoDokok(program).every(d => PROG_dokFeltoltve((data.docs || {})[d]));
   return !!PROG_canAdvance(stepKey, program, data);
 }
 
@@ -333,14 +364,18 @@ function PROG_dokOsszegzes(items, extra) {
 /* A feltöltendő dokumentumok: a megjelölt képzések kötelező dokumentumainak
    uniója (egy dokumentum egyszer). Ha csak az egyik képzés kéri, az is
    benne van — a `kerik` mondja meg, melyik képzés kéri (több képzésnél). */
-function PROG_dokKovetelmeny(data, valasztott, required) {
+function PROG_dokKovetelmeny(data, valasztott, required, opcionalis) {
   const docs = (data && data.docs) || {};
   const kell = required || [];
+  const opc = opcionalis || [];
   const tobb = (valasztott || []).length > 1;
   const items = kell.map(id => {
     const e = docs[id];
     const kerik = tobb ? valasztott.filter(p => (p.required_docs || []).includes(id)).map(p => ({ id: p.id, code: p.code || p.degree || p.name, name: p.name })) : [];
-    return { id, label: PROG_docLabel(id), kerik, feltoltve: PROG_dokFeltoltve(e), hitelesitve: !!(e && PROG_dokFeltoltve(e) && e.verified), fajl: (e && e.fileName) || '' };
+    /* Az OPCIONÁLIS dokumentum kérhető, de nem akadály: a PROG_dokOsszegzes a
+       kötelezők közül számol, tehát a hiánya nem tartja vissza a folyamatot. */
+    return { id, label: PROG_docLabel(id), kerik, optional: opc.includes(id),
+             feltoltve: PROG_dokFeltoltve(e), hitelesitve: !!(e && PROG_dokFeltoltve(e) && e.verified), fajl: (e && e.fileName) || '' };
   });
   const extra = Object.keys(docs).filter(id => !kell.includes(id) && PROG_dokFeltoltve(docs[id]))
     .map(id => ({ id, label: PROG_docLabel(id), kerik: [], extra: true, feltoltve: true, hitelesitve: !!docs[id].verified, fajl: docs[id].fileName || '' }));
@@ -476,7 +511,7 @@ function PROG_folyamatAllapot(proc, katalogus) {
     const vaz = PROG_folyamVaz(alap, valasztott);
     const virt = { ...alap, steps: vaz.steps, required_docs: vaz.required_docs, _beadva: beadva, _valasztott: valasztott, _katalogus: Array.isArray(katalogus) ? katalogus : Object.values(katalogus || {}) };
     vaz.steps.forEach(key => lepesek.push({ key, fazis: 'hallgato', label: (PROG_STEP_DEFS[key] || {}).label || key, kesz: PROG_lepesKesz(key, virt, data, beadva) }));
-    dok = PROG_dokKovetelmeny(data, valasztott, vaz.required_docs);
+    dok = PROG_dokKovetelmeny(data, valasztott, vaz.required_docs, vaz.optional_docs);
     lepesek.push({ key: 'check', fazis: 'iroda', label: 'Dokumentum-ellenőrzés', kesz: beadva && dok.hitelesitve === dok.osszes, megj: dok.osszes ? `${dok.hitelesitve}/${dok.osszes} dokumentum jóváhagyva` : '' });
     const iv = data.interview || {};
     if (!vaz.steps.includes('interview') && (iv.slotId || iv.start || iv.status)) {
@@ -665,6 +700,8 @@ async function PROG_loadPrograms() {
   PROG_INTAKE_COL = DL_PROBE[PROG_TABLE] === 'ls' || list.some(x => x && Object.prototype.hasOwnProperty.call(x, 'intakes'));
   // Ugyanígy a 85-ös célközönség-oszlop: amíg nincs, mindenki mindent lát.
   PROG_AUDIENCE_COL = DL_PROBE[PROG_TABLE] === 'ls' || list.some(x => x && Object.prototype.hasOwnProperty.call(x, 'audience'));
+  // 109: opcionális dokumentumok. Amíg az oszlop nincs, minden kért dokumentum kötelező.
+  PROG_OPT_DOC_COL = DL_PROBE[PROG_TABLE] === 'ls' || list.some(x => x && Object.prototype.hasOwnProperty.call(x, 'optional_docs'));
   PROG_KAT_CACHE = merged;
   return merged;
 }
@@ -680,16 +717,33 @@ const PROG_STATUS = {
   rejected:  { label: 'Elutasítva',   tone: 'red' },
 };
 
-/* ---------- compact math placement generator ---------- */
+/* ---------- compact math placement generator ----------
+   A FELADATSZÖVEG A FELÜLET NYELVÉN ÍRÓDIK. A feladatok számokból állnak
+   össze, ezért a gépi szótár nem tud rájuk illeszkedni: a szintfelmérő
+   angol felületen is magyarul jelent meg, a címek viszont angolul — a
+   jelentkező kevert szöveget kapott (külügyi iroda, 2026-09-30).
+   A megoldás nem fordítás, hanem az, hogy a generátor eleve a helyes
+   nyelven írja meg a feladatot. */
 const PROG_rnd = (a, b) => Math.floor(Math.random() * (b - a + 1)) + a;
+const PROG_angol = () => { try { return (localStorage.getItem('nje_lang') || 'hu') === 'en'; } catch (e) { return false; } };
 function PROG_genMath() {
   const x = PROG_rnd(2, 9), y = PROG_rnd(1, 8), a = x + y, b = x - y;
   const ea = PROG_rnd(2, 6), eb = PROG_rnd(1, 4), ek = PROG_rnd(2, 3), eVal = Math.pow(ea - ek * eb, 2) + ea * eb;
   const p = PROG_rnd(1, 5), q = PROG_rnd(1, 6), t = PROG_rnd(2, 5), qVal = t * t + p * t + q;
+  const en = PROG_angol();
   return [
-    { id: 't1', title: 'Egyenletrendszer', prompt: 'Oldd meg x-re és y-ra:  x + y = ' + a + '  és  x \u2212 y = ' + b, fields: [{ key: 'x', label: 'x =' }, { key: 'y', label: 'y =' }], answers: { x, y } },
-    { id: 't2', title: 'Kifejezés kiértékelése', prompt: 'Számítsd ki: (a \u2212 ' + ek + 'b)\u00b2 + a\u00b7b  ha  a = ' + ea + '  és  b = ' + eb, fields: [{ key: 'r', label: 'Érték =' }], answers: { r: eVal } },
-    { id: 't3', title: 'Másodfokú függvény', prompt: 'Adott f(x) = x\u00b2 + ' + p + 'x + ' + q + ',  mennyi f(' + t + ')', fields: [{ key: 'r', label: 'f(' + t + ') =' }], answers: { r: qVal } },
+    { id: 't1', title: 'Egyenletrendszer',
+      prompt: (en ? 'Solve for x and y:  x + y = ' : 'Oldd meg x-re és y-ra:  x + y = ') + a
+              + (en ? '  and  x \u2212 y = ' : '  és  x \u2212 y = ') + b,
+      fields: [{ key: 'x', label: 'x =' }, { key: 'y', label: 'y =' }], answers: { x, y } },
+    { id: 't2', title: 'Kifejezés kiértékelése',
+      prompt: (en ? 'Evaluate: (a \u2212 ' : 'Számítsd ki: (a \u2212 ') + ek + 'b)\u00b2 + a\u00b7b'
+              + (en ? '  if  a = ' : '  ha  a = ') + ea + (en ? '  and  b = ' : '  és  b = ') + eb,
+      fields: [{ key: 'r', label: en ? 'Value =' : 'Érték =' }], answers: { r: eVal } },
+    { id: 't3', title: 'Másodfokú függvény',
+      prompt: (en ? 'Given f(x) = x\u00b2 + ' : 'Adott f(x) = x\u00b2 + ') + p + 'x + ' + q
+              + (en ? ',  what is f(' : ',  mennyi f(') + t + ')',
+      fields: [{ key: 'r', label: 'f(' + t + ') =' }], answers: { r: qVal } },
   ];
 }
 const PROG_gradeMath = (tasks, ans) => {
@@ -1006,7 +1060,7 @@ function PROG_canAdvance(stepKey, program, data) {
   /* VALÓDI FELTÖLTÉS: korábban elég volt, hogy a kulcs létezzen a docs-ban —
      egy félbehagyott feltöltés üres bejegyzése is továbbengedett. Most
      ugyanaz a mérce, mint a lépéssávon és az irodai nézetben. */
-  if (stepKey === 'documents') return (program.required_docs || []).every(d => PROG_dokFeltoltve((data.docs || {})[d]));
+  if (stepKey === 'documents') return PROG_kotelezoDokok(program).every(d => PROG_dokFeltoltve((data.docs || {})[d]));
   /* A szintfelmérő a beadás UTÁN van: ha valaki a megengedett próbálkozásokat
      elhasználta, ne ragadjon be — a felvételi iroda dönt az eredményről. */
   if (stepKey === 'math') return !!(data.math && (data.math.passed || PROG_mathKimeritve(data)));
@@ -1145,7 +1199,11 @@ function PROG_StepBody({ stepKey, program, data, setData, mentData, user, cur, o
     // Több képzésnél a kötelező dokumentumok uniója; a sor mutatja, melyik képzés kéri.
     const valasztottK = program._valasztott || [];
     const tobbKepzes = valasztottK.length > 1;
-    const feltoltveN = (program.required_docs || []).filter(id => PROG_dokFeltoltve(docs[id])).length;
+    /* A SZÁMLÁLÓ A KÖTELEZŐKRŐL SZÓL. Eddig minden kért dokumentumot beleszámolt,
+       ezért az „5/7 feltöltve" akkor is hiányt sugallt, amikor a hiányzó kettő
+       opcionális volt (külügyi iroda, 2026-09-30). */
+    const kotelezoIdk = PROG_kotelezoDokok(program);
+    const feltoltveN = kotelezoIdk.filter(id => PROG_dokFeltoltve(docs[id])).length;
     /* VALÓDI FELTÖLTÉS — korábban csak a fájl NEVÉT jegyeztük fel, maga a
        fájl eldobódott. Ezért nem látott semmit az ügyintéző a dokumentum-
        ellenőrzésnél, és állt meg a folyamat.
@@ -1161,12 +1219,12 @@ function PROG_StepBody({ stepKey, program, data, setData, mentData, user, cur, o
          fájlválasztóban „minden fájl"-ra váltva bármi feltölthető volt, és az
          ügyintéző előnézete üres maradt rajta. */
       if (!DOC_tipusOk(file)) {
-        setDocErr(id + ': ' + DOC_tipusHiba(file));
+        setDocErr({ id, szoveg: DOC_tipusHiba(file) });
         e.target.value = '';
         return;
       }
       if (file.size > DOC_MAX_BYTES) {
-        setDocErr(id + ': A fájl ' + DOC_fmtSize(file.size) + ', a megengedett legfeljebb ' + DOC_fmtSize(DOC_MAX_BYTES) + '.');
+        setDocErr({ id, szoveg: 'A fájl ' + DOC_fmtSize(file.size) + ', a megengedett legfeljebb ' + DOC_fmtSize(DOC_MAX_BYTES) + '.' });
         e.target.value = '';
         return;
       }
@@ -1190,20 +1248,25 @@ function PROG_StepBody({ stepKey, program, data, setData, mentData, user, cur, o
           fileName: file.name, path, size: file.size,
           type: file.type || '', at: todayStr(),
         } } });
-        if (!mentett) setDocErr(id + ': A fájl feltöltődött, de a jelentkezéshez nem tudtuk hozzárendelni. Töltsd újra az oldalt, és ha a fájl nem látszik, próbáld újra a feltöltést.');
+        if (!mentett) setDocErr({ id, szoveg: 'A fájl feltöltődött, de a jelentkezéshez nem tudtuk hozzárendelni. Töltsd újra az oldalt, és ha a fájl nem látszik, próbáld újra a feltöltést.' });
       } catch (err) {
         /* A valódi okot eddig lenyeltük, és mindenre „Próbáld újra"-t írtunk —
            ezért nem derült ki, hogy a szabály utasítja el. Az ismert okokat
            most néven nevezzük; ismeretlen hibánál marad az általános üzenet. */
         const msg = String((err && (err.message || err.error)) || '');
-        setDocErr(id + ': ' + (
+        /* A DOKUMENTUM NEVÉT írjuk ki, nem a nyers kulcsot, és a mondat külön
+           szövegcsomópont — így angol módban is angolul jelenik meg.
+           MÉRVE (külügyi iroda, 2026-09-30): „hs_diploma: A feltöltés nem
+           sikerült. Próbáld újra." — a kulcs a jelentkezőnek semmit nem mond,
+           a mondat pedig magyar maradt az angol felületen. */
+        setDocErr({ id, szoveg:
           msg === 'storage-unavailable'
             ? 'Nincs kapcsolat a tárolóval — jelentkezz be újra.'
           : /row-level security|violates|unauthorized|403/i.test(msg)
             ? 'Nincs jogosultságod ide feltölteni. Jelentkezz ki és be újra; ha így sem megy, szólj az ügyintézőnek.'
           : /exceeded|too large|maximum allowed size|413/i.test(msg)
             ? 'A fájl túl nagy — legfeljebb 20 MB lehet.'
-          : 'A feltöltés nem sikerült. Próbáld újra.'));
+          : 'A feltöltés nem sikerült. Próbáld újra.' });
       } finally {
         setDocBusy('');
         e.target.value = '';
@@ -1211,15 +1274,20 @@ function PROG_StepBody({ stepKey, program, data, setData, mentData, user, cur, o
     };
     return (
       <div className="space-y-5">
-        <PROG_Head icon={Lucide.Upload} title="Dokumentumok feltöltése" sub={tobbKepzes ? 'A megjelölt képzések által kért összes dokumentum. Ami több képzéshez is kell, azt elég egyszer feltölteni.' : 'Ezek a fájlok kötelezőek ehhez a képzéshez.'} />
-        <p className="text-[12px] font-bold text-slate-400" data-dok-osszesito="1">{`${feltoltveN}/${(program.required_docs || []).length} dokumentum feltöltve`}</p>
+        <PROG_Head icon={Lucide.Upload} title="Dokumentumok feltöltése" sub={tobbKepzes ? 'A megjelölt képzések által kért összes dokumentum. Ami több képzéshez is kell, azt elég egyszer feltölteni.' : 'A kötelező dokumentumok nélkül nem lehet továbblépni; az opcionálisak megadása nem feltétel.'} />
+        {/* KÉT CSOMÓPONT: összefűzve a szótár csak a számokra illeszkedett, és
+            a felirat magyar maradt angol módban („2 / 2 required dokumentum
+            feltöltve") — külügyi iroda, 2026-09-30. */}
+        <p className="text-[12px] font-bold text-slate-400" data-dok-osszesito="1">
+          <span>{feltoltveN + '/' + kotelezoIdk.length}</span>{' '}<span>kötelező dokumentum feltöltve</span>
+        </p>
         <p className="text-[12px] font-semibold text-slate-400" data-dok-formatum="1">{'Elfogadott formátum: ' + DOC_ENGEDETT_SZOVEG + ', legfeljebb ' + DOC_fmtSize(DOC_MAX_BYTES) + '.'}</p>
         <div className="space-y-3">
           {(program.required_docs || []).map(id => { const got = docs[id]; return (
             <div key={id} className={'flex items-center justify-between gap-4 p-4 rounded-2xl border ' + (got ? 'border-emerald-100 bg-emerald-50/40' : 'border-slate-100')}>
               <div className="flex items-center gap-3 min-w-0">
                 <div className={'w-9 h-9 rounded-xl flex items-center justify-center flex-none ' + (got ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-400')}>{got ? <Lucide.Check size={17} /> : <Lucide.FileText size={17} />}</div>
-                <div className="min-w-0"><div className="text-sm font-bold text-slate-700 truncate">{PROG_docLabel(id)}</div>{got && <div className="text-[11px] text-emerald-600 font-semibold truncate">{got.fileName}</div>}{tobbKepzes && <div className="mt-1 flex flex-wrap items-center gap-1" data-keri={id}><span className="text-[10px] font-bold text-slate-400">Kéri:</span>{valasztottK.filter(x => (x.required_docs || []).includes(id)).map(x => <span key={x.id} title={x.name} className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px] font-bold">{x.code || x.name}</span>)}</div>}</div>
+                <div className="min-w-0"><div className="text-sm font-bold text-slate-700 flex flex-wrap items-center gap-1.5"><span className="truncate">{PROG_docLabel(id)}</span>{!kotelezoIdk.includes(id) && <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px] font-black uppercase tracking-wider" data-dok-opcionalis={id}>opcionális</span>}</div>{got && <div className="text-[11px] text-emerald-600 font-semibold truncate">{got.fileName}</div>}{tobbKepzes && <div className="mt-1 flex flex-wrap items-center gap-1" data-keri={id}><span className="text-[10px] font-bold text-slate-400">Kéri:</span>{valasztottK.filter(x => (x.required_docs || []).includes(id)).map(x => <span key={x.id} title={x.name} className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px] font-bold">{x.code || x.name}</span>)}</div>}</div>
               </div>
               <label className={U_btnGhost + ' flex-none cursor-pointer text-[13px] py-2 px-4 ' + (docBusy === id ? 'opacity-50 pointer-events-none' : '')}>
                 {docBusy === id ? 'Feltöltés…' : got ? 'Csere' : 'Feltöltés'}
@@ -1231,7 +1299,10 @@ function PROG_StepBody({ stepKey, program, data, setData, mentData, user, cur, o
           {docErr && (
           <div className="flex items-start gap-2 bg-red-50 border border-red-100 rounded-2xl px-4 py-3 text-sm font-bold text-red-600">
             <Lucide.AlertCircle size={16} className="flex-none mt-0.5" />
-            <span className="flex-1">{docErr}</span>
+            <span className="flex-1">
+              {docErr.id ? <><span>{PROG_docLabel(docErr.id)}</span><span>: </span></> : null}
+              <span>{docErr.szoveg || docErr}</span>
+            </span>
             <button onClick={() => setDocErr('')} className="text-red-400 hover:text-red-600"><Lucide.X size={14} /></button>
           </div>
           )}
@@ -1244,10 +1315,16 @@ function PROG_StepBody({ stepKey, program, data, setData, mentData, user, cur, o
     return (
       <div className="space-y-5">
         <PROG_Head icon={Lucide.Languages} title="Angol nyelvtudás" sub="Add meg az angol nyelvvizsgád adatait (B2 vagy magasabb ajánlott)." />
+        {/* A LÉPÉS NEM AKADÁLY (külügyi iroda, 2026-09-30): eddig csak kitöltött
+            bizonyítvánnyal és szinttel lehetett továbblépni. */}
+        <p className="text-[12px] font-semibold text-slate-500" data-nyelv-opcionalis="1">A nyelvvizsga megadása nem kötelező.</p>
         <div className="grid sm:grid-cols-2 gap-4">
           <UField label="Bizonyítvány"><select className={U_input} value={l.cert} onChange={e => set('cert', e.target.value)}><option value="">Válassz…</option>{['IELTS', 'TOEFL', 'Cambridge', 'Duolingo', 'Oktatás nyelve', 'Egyéb'].map(o => <option key={o}>{o}</option>)}</select></UField>
           <UField label="Pontszám / szint"><input className={U_input} value={l.level} onChange={e => set('level', e.target.value)} placeholder="e.g. 6.5 / B2" /></UField>
         </div>
+        {!(l.cert && l.level) && (
+          <p className="text-[12px] font-semibold text-slate-400">Nem adtál meg nyelvvizsgát — ez nem akadály, a jelentkezés enélkül is beadható.</p>
+        )}
       </div>
     );
   }
@@ -1387,9 +1464,19 @@ function PROG_StepBody({ stepKey, program, data, setData, mentData, user, cur, o
               ); })}
             </div>
             {utana.length > 0 && (
+              /* DARABONKÉNT külön szövegcsomópont. Egyetlen összefűzött mondatban
+                 a lépésnevek („Matematika szintfelmérő", „Online interjú") nem
+                 találtak rá a szótárra, ezért angol felületen magyarul maradtak
+                 a mondat közepén (külügyi iroda, 2026-09-30). */
               <p className="text-[12px] font-semibold text-slate-500 leading-relaxed" data-beadas-utan="1">
-                {'A beadás után következik: ' + utana.map(s2 => (PROG_STEP_DEFS[s2] || {}).label || s2).join(', ')
-                  + '. Ezeket a beadott jelentkezésednél tudod elvégezni.'}
+                <span>A beadás után következik:</span>{' '}
+                {utana.map((s2, i) => (
+                  <React.Fragment key={s2}>
+                    {i ? <span>, </span> : null}
+                    <span>{(PROG_STEP_DEFS[s2] || {}).label || s2}</span>
+                  </React.Fragment>
+                ))}
+                <span>. Ezeket a beadott jelentkezésednél tudod elvégezni.</span>
               </p>
             )}
             <button className={U_btnPrimary + ' w-full py-4'} disabled={!ok} onClick={onSubmit}>{ok ? 'Jelentkezés beadása' : 'A beadáshoz minden lépést teljesíts'}</button>
@@ -1651,7 +1738,9 @@ function PROG_MathStep({ data, setData }) {
       </div>
       {result && result.total ? (
         <div className={'p-4 rounded-2xl border flex flex-wrap items-center justify-between gap-3 ' + (result.passed ? 'bg-emerald-50 border-emerald-100' : 'bg-red-50 border-red-100')}>
-          <div className={'font-black ' + (result.passed ? 'text-emerald-700' : 'text-red-600')}>{result.passed ? <span className="flex items-center gap-2"><Lucide.CheckCircle2 size={18} /> Sikeres — {result.correct}/{result.total} helyes</span> : <span className="flex items-center gap-2"><Lucide.XCircle size={18} /> {result.correct}/{result.total} helyes</span>}</div>
+          <div className={'font-black ' + (result.passed ? 'text-emerald-700' : 'text-red-600')}>{result.passed
+            ? <span className="flex items-center gap-2"><Lucide.CheckCircle2 size={18} /><span>Sikeres</span><span>—</span><span>{result.correct + '/' + result.total + ' helyes'}</span></span>
+            : <span className="flex items-center gap-2"><Lucide.XCircle size={18} /><span>{result.correct + '/' + result.total + ' helyes'}</span></span>}</div>
           {!result.passed && !kimerult && <button className={U_btnGhost} onClick={reset} data-matek-uj="1"><Lucide.RefreshCw size={15} /> Új feladatsor</button>}
         </div>
       ) : <button className={U_btnPrimary} onClick={grade} disabled={kimerult} data-matek-bekuld="1">Válaszok beadása</button>}
@@ -1841,7 +1930,7 @@ function PROG_Catalog({ programs, myApps, onOpen, onContinue, onMegszakit, isDeg
 function PROG_Editor({ open, program, onClose, onSaved, scope }) {
   const isDeg = scope === 'degrees';
   const levelOpts = isDeg ? PROG_DEGREE_LEVELS : PROG_PROGRAM_LEVELS;
-  const blank = { id: '', code: '', name: '', level: isDeg ? 'bachelor' : 'course', faculty: '', degree: isDeg ? 'BSc' : 'Short course', duration_semesters: isDeg ? 7 : 2, ects: isDeg ? 210 : 30, tuition: isDeg ? 2500 : 400, currency: 'EUR', language: 'English', deadline: '2026-06-30', capacity: 30, seats_taken: 0, is_open: true, summary: '', image_url: '', required_docs: isDeg ? ['passport', 'hs_diploma', 'english'] : ['passport'], steps: isDeg ? ['personal', 'documents', 'motivation', 'review', 'math', 'interview'] : ['personal', 'review'], tags: [], intakes: ['autumn', 'spring'] };
+  const blank = { id: '', code: '', name: '', level: isDeg ? 'bachelor' : 'course', faculty: '', degree: isDeg ? 'BSc' : 'Short course', duration_semesters: isDeg ? 7 : 2, ects: isDeg ? 210 : 30, tuition: isDeg ? 2500 : 400, currency: 'EUR', language: 'English', deadline: '2026-06-30', capacity: 30, seats_taken: 0, is_open: true, summary: '', image_url: '', required_docs: isDeg ? ['passport', 'hs_diploma', 'english'] : ['passport'], optional_docs: [], steps: isDeg ? ['personal', 'documents', 'motivation', 'review', 'math', 'interview'] : ['personal', 'review'], tags: [], intakes: ['autumn', 'spring'] };
   const [f, setF] = useState(blank);
   const [busy, setBusy] = useState(false);
   // Egyedi dokumentumtípusok: minden megnyitáskor frissen, hogy a más admin
@@ -1874,7 +1963,7 @@ function PROG_Editor({ open, program, onClose, onSaved, scope }) {
     if (!dok.szerk && res.data) setF(p => ({ ...p, required_docs: p.required_docs.includes(res.data.key) ? p.required_docs : [...p.required_docs, res.data.key] }));
     setDok(DOK_URES);
   };
-  useEffect(() => { if (open) setF(program ? { ...blank, ...program, required_docs: program.required_docs || [], steps: program.steps || [], tags: program.tags || [] } : blank); }, [open, program, scope]);
+  useEffect(() => { if (open) setF(program ? { ...blank, ...program, required_docs: program.required_docs || [], optional_docs: program.optional_docs || [], steps: program.steps || [], tags: program.tags || [] } : blank); }, [open, program, scope]);
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
   // Típusváltáskor a kártyacímke is követi — de csak amíg az admin nem írt be sajátot.
   const setLevel = (uj) => setF(p => ({ ...p, level: uj,
@@ -1894,6 +1983,9 @@ function PROG_Editor({ open, program, onClose, onSaved, scope }) {
     if (!PROG_INTAKE_COL) delete row.intakes; else row.intakes = PROG_intakesOf(f);
     // A 85-ös migráció előtt nincs audience oszlop — a mezőt ilyenkor nem küldjük.
     if (!PROG_AUDIENCE_COL) delete row.audience; else row.audience = PROG_audienceOf(f);
+    // 109: csak a ténylegesen kért dokumentumok közül jegyezzük fel az opcionálisakat.
+    if (!PROG_OPT_DOC_COL) delete row.optional_docs;
+    else row.optional_docs = (f.optional_docs || []).filter(k => (f.required_docs || []).includes(k));
     if (program) { await dlUpdate(PROG_TABLE, program.id, row, PROG_LS); }
     else { row.id = uid('prog'); row.created_at = todayStr(); await dlInsert(PROG_TABLE, row, PROG_LS); }
     setBusy(false); onSaved && onSaved(); onClose();
@@ -1991,6 +2083,11 @@ function PROG_Editor({ open, program, onClose, onSaved, scope }) {
         {/* required docs */}
         <div className="rounded-2xl border border-slate-100 p-4">
           <div className="flex items-center gap-2 mb-3"><Lucide.FileCheck size={16} className="text-primary" /><span className="text-sm font-black text-slate-700">Szükséges dokumentumok</span></div>
+          {!PROG_OPT_DOC_COL && (
+            <p className="mb-3 text-[12px] font-semibold text-amber-700" data-dok-nincs-migracio="1">
+              A „kötelező / opcionális" jelölés adatbázis-része még nincs telepítve (109_program_optional_docs.sql) — addig minden bejelölt dokumentum kötelező.
+            </p>
+          )}
           <div className="grid sm:grid-cols-2 gap-2">
             {[
               ...Object.entries(PROG_DOC_DEFS).map(([k, label]) => ({ k, label, egyedi: null })),
@@ -2006,6 +2103,19 @@ function PROG_Editor({ open, program, onClose, onSaved, scope }) {
                   <span className="min-w-0 break-words">{label}</span>
                   {t && <span className={'ml-auto flex-none px-1.5 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider ' + (t.active ? 'bg-sky-50 text-sky-600' : 'bg-slate-100 text-slate-400')}>{t.active ? 'egyedi' : 'rejtett'}</span>}
                 </button>
+                {/* KÖTELEZŐ / OPCIONÁLIS (109). Nem minden kért dokumentum akadály:
+                    egy alapképzésre jelentkezőtől nem kérünk kutatási tervet. */}
+                {on && (
+                  <button type="button" data-dok-kotelezo={k}
+                    title={(f.optional_docs || []).includes(k) ? 'Most nem kötelező — kattints, hogy kötelező legyen' : 'Most kötelező — kattints, hogy opcionális legyen'}
+                    onClick={() => toggleArr('optional_docs', k)}
+                    className={'px-2 flex-none rounded-xl border text-[10px] font-black uppercase tracking-wider ' +
+                      ((f.optional_docs || []).includes(k)
+                        ? 'border-slate-200 bg-slate-50 text-slate-500'
+                        : 'border-emerald-200 bg-emerald-50 text-emerald-700')}>
+                    {(f.optional_docs || []).includes(k) ? 'opcionális' : 'kötelező'}
+                  </button>
+                )}
                 {t && <button type="button" title="Dokumentumtípus szerkesztése" onClick={() => setDok({ ...DOK_URES, open: true, szerk: t.key, hu: t.label_hu, en: t.label_en || '', active: t.active })} className="w-8 flex-none rounded-xl border border-slate-100 text-slate-400 hover:text-primary hover:border-slate-200 flex items-center justify-center"><Lucide.Pencil size={13} /></button>}
               </div>
             ); })}
