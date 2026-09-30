@@ -183,10 +183,19 @@ export function kotegKeszit(forras: Forras, nyersTetelek: Record<string, unknown
   // Közösségi oldal. Az Actorok kétféleképp adják: vagy egy profil-objektum a
   // posztok tömbjével (Instagram Profile Scraper: latestPosts), vagy csak
   // poszt/videó tételek, amelyekben a profil beágyazva ül (TikTok: authorMeta).
-  const profil = tetelek.find(x => mezo(x, 'kovetok', t) !== null) ?? {};
-  const beagyazott = (profil as Record<string, unknown>).latestPosts;
-  const posztForras = Array.isArray(beagyazott)
-    ? beagyazott as Record<string, unknown>[]
+  // A profil-tétel keresése: elsősorban az, amelyiken van követőszám — de ha
+  // az hiányzik (zárt fiók, elbukott mező), attól még a POSZTOK megvannak.
+  // Korábban ilyenkor az egész köteg üresen maradt: némán elvesztettük volna
+  // egy forrás összes posztját. Valódi kimeneten mértük.
+  const profil = tetelek.find(x => mezo(x, 'kovetok', t) !== null)
+    ?? tetelek.find(x => Array.isArray((x as Record<string, unknown>).latestPosts))
+    ?? {};
+  const beagyazott = tetelek.flatMap(x => {
+    const lp = (x as Record<string, unknown>).latestPosts;
+    return Array.isArray(lp) ? lp as Record<string, unknown>[] : [];
+  });
+  const posztForras = beagyazott.length
+    ? beagyazott
     : tetelek.filter(x => mezo(x, 'kulso_id', t) !== null);
 
   const posztok = posztForras.map(it => {
