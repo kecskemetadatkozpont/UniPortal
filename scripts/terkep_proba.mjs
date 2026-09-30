@@ -121,6 +121,29 @@ ell('a mezőtérkép felülírja az aliasokat', k6.pillanatkep?.kovetok === 777,
 const k7 = kotegKeszit({ kulcs: 'ures', platform: 'instagram', intezmeny: 'X' }, []);
 ell('üres kimenet -> ures:true (ebből lesz riasztás)', k7.ures === true, k7);
 
+// ---- 6/b. A VALÓDI sémákból jött eltérések (MCP-vel ellenőrizve 2026-09-30) ----
+console.log('\n== Valódi Actor-sémák: TikTok nyelv és a hirdetés-burkoló ==');
+const ttNyelv = kotegKeszit({ kulcs: 'x', platform: 'tiktok', intezmeny: 'X' },
+  [{ id: '9', createTimeISO: '2026-09-29T08:00:00.000Z', textLanguage: 'hu',
+     diggCount: 10, commentCount: 1, shareCount: 0, authorMeta: { name: 'x', fans: 100 } }]);
+ell('a TikTok textLanguage mezője a nyelv', ttNyelv.posztok?.[0].nyelv === 'hu', ttNyelv.posztok?.[0]);
+ell('a createTimeISO-t használja a nyers epoch helyett',
+  ttNyelv.posztok?.[0].kelt === '2026-09-29T08:00:00.000Z', ttNyelv.posztok?.[0].kelt);
+
+// A hirdetés-Actor oldalra futtatva BURKOLÓT ad: a sorok egy results tömbben.
+const burkolt = [{ inputUrl: 'https://www.facebook.com/ads/library/?q=X', totalCount: 2, results: [
+  { adArchiveID: '111', pageName: 'Óbudai Egyetem', startDateFormatted: '2026-09-01',
+    endDateFormatted: '2026-09-30', targetedOrReachedCountries: ['NG'],
+    snapshot: { body: { text: 'Ad one' }, linkUrl: 'https://x/1' } },
+  { adArchiveID: '222', pageName: 'Óbudai Egyetem', startDateFormatted: '2026-09-05',
+    endDateFormatted: '2026-09-30', targetedOrReachedCountries: ['IN'],
+    snapshot: { body: { text: 'Ad two' }, linkUrl: 'https://x/2' } },
+]}];
+const kAds2 = kotegKeszit({ kulcs: 'ads-obuda', platform: 'ads', intezmeny: 'Óbudai Egyetem' }, burkolt);
+ell('a burkolóból kibontja mindkét hirdetést', kAds2.hirdetesek?.length === 2, kAds2.hirdetesek?.length);
+ell('a kibontott hirdetés kreatívja is megvan',
+  kAds2.hirdetesek?.[0].kreativ === 'Ad one', kAds2.hirdetesek?.[0]);
+
 // ---- 7. TÖBB FORRÁS EGY FUTÁSBÓL ----
 const { csoportosit, kezelo } = await import('file://' + ki);
 console.log('\n== Szétosztás: egy futás, több profil ==');

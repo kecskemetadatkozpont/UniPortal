@@ -1,5 +1,8 @@
 # Apify beállítás — négy feladat, négy webhook
 
+> A bemeneti mezőnevek és a kimeneti alakok **2026-09-30-án az Actorok valódi
+> sémájából** vannak ellenőrizve (Apify MCP), nem a bolt leírásából.
+
 A betöltő egy futásból **több forrást is szét tud osztani**, ezért nem kell
 forrásonként külön feladat: platformonként egy elég. A tételeket a kezelőnevük
 (illetve a hirdetőnevük) alapján kötjük a megfelelő forráshoz; ami egyikhez
@@ -79,21 +82,23 @@ Bemenet — hirdetőnként egy keresés, országkorlát nélkül:
 
 ```json
 {
-  "urls": [
+  "startUrls": [
     { "url": "https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country=ALL&q=Neumann%20J%C3%A1nos%20Egyetem" },
     { "url": "https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country=ALL&q=%C3%93budai%20Egyetem" },
     { "url": "https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country=ALL&q=Duna%C3%BAjv%C3%A1rosi%20Egyetem" },
     { "url": "https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country=ALL&q=Budapesti%20Metropolitan%20Egyetem" },
     { "url": "https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country=ALL&q=Debreceni%20Egyetem" }
   ],
-  "count": 50
+  "resultsLimit": 50
 }
 ```
 
 Webhook: `…&platform=ads` · Ütemezés: hétfő 03:00
 
-> A `count` korlát szándékos: enélkül egy nagy hirdető több száz tétellel is
-> jöhet, és a számla a meglepetés része lenne.
+> A `resultsLimit` korlát szándékos: enélkül egy nagy hirdető több száz tétellel
+> is jöhet, és a számla a meglepetés része lenne. (A mezőneveket 2026-09-30-án
+> az Actor VALÓDI bemenetsémájából vettük — a bolt leírása alapján `urls` és
+> `count` szerepelt itt, ami hibára futott volna.)
 
 ## 4. Facebook posztok — `apify/facebook-posts-scraper` (ráér)
 

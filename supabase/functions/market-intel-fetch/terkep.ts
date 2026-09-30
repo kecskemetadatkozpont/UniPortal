@@ -22,7 +22,7 @@ export const ALIAS: Record<string, string[]> = {
   kelt:      ['timestamp', 'createTimeISO', 'createTime', 'publishedAt', 'time', 'date', 'postedAt'],
   url:       ['url', 'postUrl', 'webVideoUrl', 'link'],
   formatum:  ['type', 'mediaType', 'productType'],
-  nyelv:     ['language', 'lang'],
+  nyelv:     ['textLanguage', 'language', 'lang'],
   tema:      ['category', 'topic'],
   // hirdetés
   elso_latas:   ['startDateFormatted', 'startDate', 'adDeliveryStartTime', 'firstSeen'],
@@ -102,7 +102,29 @@ export interface Forras {
 }
 
 // Az Actor tételeiből a 112-es szerződés szerinti köteg.
-export function kotegKeszit(forras: Forras, tetelek: Record<string, unknown>[]) {
+/* Néhány Actor NEM egy tételt ad tételenként, hanem egy burkolót, amiben a
+   valódi sorok egy `results` tömbben ülnek (a Meta Ad Library gyűjtője oldalra
+   futtatva ilyen). Burkolatlanul minden tétel árva lenne, mert a kulcsmezők
+   egy szinttel beljebb vannak. */
+export function kibont(tetelek: Record<string, unknown>[]): Record<string, unknown>[] {
+  const ki: Record<string, unknown>[] = [];
+  for (const it of tetelek) {
+    const belso = it && (it as Record<string, unknown>).results;
+    if (Array.isArray(belso) && belso.length) {
+      for (const b of belso as Record<string, unknown>[]) {
+        // A burkoló lapszintű mezőit (pl. inputUrl) megtartjuk: azokból
+        // derül ki, melyik forráshoz tartozik a sor.
+        ki.push({ inputUrl: it.inputUrl ?? it.url, ...b });
+      }
+    } else {
+      ki.push(it);
+    }
+  }
+  return ki;
+}
+
+export function kotegKeszit(forras: Forras, nyersTetelek: Record<string, unknown>[]) {
+  const tetelek = kibont(nyersTetelek);
   const t = forras.mezo_terkep ?? {};
   const koteg: Record<string, unknown> = { forras: forras.kulcs, ures: tetelek.length === 0 };
 
@@ -242,7 +264,8 @@ export interface Csoport { forras: Forras; tetelek: Record<string, unknown>[]; }
 /* Szétosztás. Az ÁRVA tételeket (amelyik egyik forráshoz sem köthető) NEM
    dobjuk el némán: visszaadjuk, és a válasz kiírja. Egy elgépelt cím így
    azonnal látszik, nem három hét múlva egy üres oszlopból. */
-export function csoportosit(forrasok: Forras[], tetelek: Record<string, unknown>[]) {
+export function csoportosit(forrasok: Forras[], nyersTetelek: Record<string, unknown>[]) {
+  const tetelek = kibont(nyersTetelek);
   const terkep = new Map<string, Csoport>();
   const kezeloRe = new Map<string, string>();   // kezelőnév -> forras.kulcs
   // Az intézménynév a MÁSODIK esély: a hirdetéskönyvtár tételei nem
